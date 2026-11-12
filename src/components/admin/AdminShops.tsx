@@ -61,7 +61,7 @@ export const AdminShops: React.FC = () => {
   const shopSubscription = selectedShop ? subscriptions.find((sub) => sub.shopId === selectedShop.id) : null;
 
   const customerOrderingUrl = selectedShop && typeof window !== 'undefined'
-    ? `${window.location.origin}/#/s/${selectedShop.slug}`
+    ? `${window.location.origin}/s/${selectedShop.slug}`
     : selectedShop ? `/s/${selectedShop.slug}` : '';
 
   return (

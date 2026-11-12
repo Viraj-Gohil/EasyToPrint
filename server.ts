@@ -451,13 +451,14 @@ function authenticateUserSession(req: Request, _res: Response, next: NextFunctio
     const token = authHeader.slice(7).trim();
     const jwtResult = verifyJwtAccessToken(token, JWT_SECRET);
     if (jwtResult.valid && jwtResult.payload) {
+      const memUser = jwtResult.payload.email ? IN_MEMORY_AUTH_USERS.get(jwtResult.payload.email.toLowerCase()) : undefined;
       verifiedUser = {
         sessionId: jwtResult.payload.jti,
         userId: jwtResult.payload.sub,
         email: jwtResult.payload.email || '',
         role: jwtResult.payload.role as any,
         shopId: jwtResult.payload.shopId,
-        fullName: 'Authenticated User',
+        fullName: jwtResult.payload.fullName || memUser?.fullName || (jwtResult.payload.role === 'ADMIN' ? 'Platform Super Admin' : 'Shop Owner'),
         createdAt: jwtResult.payload.iat * 1000,
         expiresAt: jwtResult.payload.exp * 1000,
         lastActiveAt: Date.now()
@@ -1347,6 +1348,7 @@ app.post('/api/auth/verify-email-otp', createRateLimiter(10), async (req: Reques
       email: session.email,
       role: session.role,
       shopId: session.shopId,
+      fullName: session.fullName,
       secret: JWT_SECRET
     });
 
@@ -1622,6 +1624,7 @@ app.post('/api/auth/login', createRateLimiter(10), async (req: Request, res: Res
     email: session.email,
     role: session.role,
     shopId: session.shopId,
+    fullName: session.fullName,
     secret: JWT_SECRET
   });
 

@@ -92,6 +92,95 @@ export const EMPTY_SHOP: Shop = {
     keySecret: ''
   }
 };
+
+export const DEFAULT_FALLBACK_PLAN: SaasPlan = {
+  id: 'plan_starter',
+  slug: 'starter',
+  name: 'Starter Plan',
+  tagline: 'Essential QR print ordering for single-counter Xerox shops',
+  description: 'Ideal for independent printing counters starting with automated QR ordering.',
+  priceMonthly: 0,
+  priceYearly: 0,
+  currency: 'INR',
+  isFree: true,
+  isActive: true,
+  isPublic: true,
+  status: 'ACTIVE',
+  printerLimit: 2,
+  printLimitMonthly: 500,
+  printLimit: 500,
+  storageLimitMb: 5120,
+  storageLimitGb: 5,
+  staffLimit: 2,
+  maxUploadSizeMb: 35,
+  fileRetentionHours: 48,
+  features: [
+    'Shop QR Counter Stand',
+    'Up to 500 print orders / month',
+    'Up to 2 connected printers',
+    'Direct UPI payment collection'
+  ]
+};
+
+export const DEFAULT_FALLBACK_PLANS: SaasPlan[] = [
+  DEFAULT_FALLBACK_PLAN,
+  {
+    id: 'plan_growth',
+    slug: 'growth',
+    name: 'Growth Plan',
+    tagline: 'Multi-printer automation for busy Xerox & reprography counters',
+    description: 'Full desktop spooler automation and smart multi-printer routing.',
+    priceMonthly: 499,
+    priceYearly: 4990,
+    currency: 'INR',
+    isActive: true,
+    isPublic: true,
+    isPopular: true,
+    status: 'ACTIVE',
+    printerLimit: 5,
+    printLimitMonthly: 5000,
+    printLimit: 5000,
+    storageLimitMb: 20480,
+    storageLimitGb: 20,
+    staffLimit: 5,
+    maxUploadSizeMb: 50,
+    fileRetentionHours: 72,
+    features: [
+      'Everything in Starter',
+      'Up to 5,000 print orders / month',
+      'Up to 5 connected printers',
+      'Automated Windows Print Agent',
+      'Smart B&W and Color routing'
+    ]
+  },
+  {
+    id: 'plan_business',
+    slug: 'business',
+    name: 'Business Plan',
+    tagline: 'High-volume commercial printing & unlimited counter throughput',
+    description: 'Built for high-volume commercial presses and campus document hubs.',
+    priceMonthly: 999,
+    priceYearly: 9990,
+    currency: 'INR',
+    isActive: true,
+    isPublic: true,
+    status: 'ACTIVE',
+    printerLimit: 15,
+    printLimitMonthly: 50000,
+    printLimit: 50000,
+    storageLimitMb: 51200,
+    storageLimitGb: 50,
+    staffLimit: 15,
+    maxUploadSizeMb: 100,
+    fileRetentionHours: 168,
+    features: [
+      'Everything in Growth',
+      'Up to 15 connected printers',
+      'Priority spooler diagnostics',
+      'Dedicated onboarding support'
+    ]
+  }
+];
 import {
   hashPassword,
   verifyPassword,
@@ -344,34 +433,122 @@ function setStoredItem<T>(key: string, value: T) {
   }
 }
 
-export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Navigation State
-  const [currentPath, setCurrentPath] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const hash = window.location.hash.replace('#', '');
-      return hash || window.location.pathname || '/';
+function normalizeRouteInput(raw: string): string {
+  const trimmed = (raw || '/').trim();
+  if (!trimmed || trimmed === '#') return '/';
+  const withoutHashPrefix = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed;
+  if (!withoutHashPrefix) return '/';
+  return withoutHashPrefix.startsWith('/') ? withoutHashPrefix : `/${withoutHashPrefix}`;
+}
+
+function resolveCurrentBrowserLocation(): string {
+  if (typeof window === 'undefined') return '/';
+  const rawHash = window.location.hash ? window.location.hash.slice(1).trim() : '';
+  // If a route hash is present (e.g. #/shop/printers or #s/shop-slug), convert it to a clean History API URL
+  if (
+    rawHash &&
+    (rawHash.startsWith('/') ||
+      rawHash.startsWith('shop') ||
+      rawHash.startsWith('admin') ||
+      rawHash.startsWith('auth') ||
+      rawHash.startsWith('s/') ||
+      rawHash.startsWith('track-print'))
+  ) {
+    const cleanFromHash = normalizeRouteInput(rawHash);
+    try {
+      window.history.replaceState(null, '', cleanFromHash);
+    } catch {
+      // ignore restricted history context
     }
-    return '/';
-  });
+    return cleanFromHash;
+  }
+  const pathname = window.location.pathname || '/';
+  const search = window.location.search || '';
+  return normalizeRouteInput(`${pathname}${search}`);
+}
+
+function consumeIntendedReturnPath(role: Role): string {
+  const defaultDest = role === 'ADMIN' ? '/admin/dashboard' : '/shop/dashboard';
+  if (typeof window === 'undefined') return defaultDest;
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const fromQuery = urlParams.get('redirect') || urlParams.get('returnTo');
+    const fromSession = window.sessionStorage.getItem('easytoprint_return_to');
+    window.sessionStorage.removeItem('easytoprint_return_to');
+    const candidate = normalizeRouteInput(fromQuery || fromSession || '');
+    if (!candidate || candidate === '/') return defaultDest;
+    if (role === 'ADMIN') {
+      if (candidate.startsWith('/admin') && !candidate.startsWith('/admin/login')) {
+        return candidate;
+      }
+      return '/admin/dashboard';
+    }
+    if (role === 'SHOP_OWNER') {
+      if (candidate.startsWith('/shop')) {
+        return candidate;
+      }
+      return '/shop/dashboard';
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return defaultDest;
+}
+
+export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Navigation State (Clean History API with legacy hash compatibility)
+  const [currentPath, setCurrentPath] = useState<string>(() => resolveCurrentBrowserLocation());
   const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
 
   const navigate = (path: string) => {
-    setCurrentPath(path);
+    const normalized = normalizeRouteInput(path);
+    setCurrentPath(normalized);
     if (typeof window !== 'undefined') {
-      window.location.hash = path;
+      try {
+        const currentFull = `${window.location.pathname}${window.location.search}`;
+        if (currentFull !== normalized || window.location.hash) {
+          window.history.pushState(null, '', normalized);
+        }
+      } catch {
+        window.location.hash = normalized;
+      }
       window.scrollTo(0, 0);
     }
   };
 
   useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(resolveCurrentBrowserLocation());
+    };
     const handleHashChange = () => {
-      const hash = window.location.hash.replace('#', '');
-      if (hash) {
-        setCurrentPath(hash);
+      const rawHash = window.location.hash ? window.location.hash.slice(1).trim() : '';
+      if (!rawHash) {
+        setCurrentPath(resolveCurrentBrowserLocation());
+        return;
+      }
+      if (
+        rawHash.startsWith('/') ||
+        rawHash.startsWith('shop') ||
+        rawHash.startsWith('admin') ||
+        rawHash.startsWith('auth') ||
+        rawHash.startsWith('s/') ||
+        rawHash.startsWith('track-print')
+      ) {
+        const clean = normalizeRouteInput(rawHash);
+        try {
+          window.history.replaceState(null, '', clean);
+        } catch {
+          // ignore
+        }
+        setCurrentPath(clean);
       }
     };
+    window.addEventListener('popstate', handlePopState);
     window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handleHashChange);
+    };
   }, []);
 
   // Registered Users list kept strictly IN-MEMORY (zero credential exposure to localStorage)
@@ -386,10 +563,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [dataLoadError, setDataLoadError] = useState<string | null>(null);
   const [isCloudSynced, setIsCloudSynced] = useState<boolean>(false);
 
-  // Restore authenticated session from HttpOnly cookie on mount
+  // Restore authenticated session from HttpOnly cookie or Bearer token on mount
   useEffect(() => {
-    fetch(apiUrl('/api/auth/session'), { credentials: 'same-origin' })
-      .then((res) => (res.ok ? res.json() : null))
+    let storedToken: string | null = null;
+    try {
+      storedToken = typeof window !== 'undefined' ? window.localStorage.getItem('printflow_access_token') : null;
+    } catch {}
+
+    fetch(apiUrl('/api/auth/session'), {
+      credentials: 'same-origin',
+      headers: storedToken ? { Authorization: `Bearer ${storedToken}` } : {}
+    })
+      .then((res) => {
+        if (res.status === 401) {
+          try {
+            window.localStorage.removeItem('printflow_access_token');
+          } catch {}
+          return null;
+        }
+        return res.ok ? res.json() : null;
+      })
       .then((data) => {
         if (data?.success && data?.user) {
           setCurrentUser(data.user);
@@ -621,11 +814,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       showToast('Signed In Successfully', `Welcome back, ${serverUser.fullName}!`, 'success', 3000);
 
-      if (serverUser.role === 'ADMIN') {
-        navigate('/admin/dashboard');
-      } else {
-        navigate('/shop/dashboard');
-      }
+      navigate(consumeIntendedReturnPath(serverUser.role));
 
       return { success: true, user: serverUser };
     } catch (err: any) {
@@ -658,6 +847,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { success: false, message: 'Access denied. Account does not have administrator privileges.' };
       }
 
+      if (data.accessToken) {
+        try {
+          localStorage.setItem('printflow_access_token', data.accessToken);
+        } catch {}
+      }
+
       const adminUser: UserProfile = {
         id: data.user.id,
         email: data.user.email,
@@ -669,7 +864,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setCurrentUser(adminUser);
       showToast('Admin Access Granted', `Logged in as Platform Super Admin`, 'success', 3000);
-      navigate('/admin/dashboard');
+      navigate(consumeIntendedReturnPath('ADMIN'));
       return { success: true };
     } catch (err: any) {
       return { success: false, message: 'Could not connect to authentication service. Please check your connection.' };
@@ -787,10 +982,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const logout = () => {
     setCurrentUser(null);
     setIsMfaStepUpVerified(false);
+    try {
+      window.localStorage.removeItem('printflow_access_token');
+      window.sessionStorage.removeItem('easytoprint_return_to');
+    } catch {}
 
     // Revoke server-side session and clear HttpOnly cookie
     try {
-      fetch(apiUrl('/api/auth/logout'), { method: 'POST' }).catch(() => {});
+      fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'same-origin' }).catch(() => {});
     } catch (e) {}
 
     showToast('Signed Out', 'You have been logged out securely.', 'info', 3000);
@@ -958,8 +1157,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('SHOP_RAZORPAY_UPDATED', 'SETTINGS', shopId, `Shop UPI / Gateway credentials updated (${settings.isTestMode ? 'Test' : 'Live'})`);
   };
 
-  // Plans & SaaS
-  const [plans, setPlans] = useState<SaasPlan[]>([]);
+  // Plans & SaaS (Initialized with DEFAULT_FALLBACK_PLANS so direct URL loads never crash before API sync)
+  const [plans, setPlans] = useState<SaasPlan[]>(DEFAULT_FALLBACK_PLANS);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [platformPolicies, setPlatformPolicies] = useState<PlatformPolicies>(DEFAULT_PLATFORM_POLICIES);
 

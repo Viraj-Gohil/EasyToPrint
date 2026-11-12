@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useApp } from '../../lib/store';
+import { useApp, DEFAULT_FALLBACK_PLAN } from '../../lib/store';
 import {
   Crown,
   CheckCircle2,
@@ -72,7 +72,7 @@ export const ShopSubscription: React.FC = () => {
       .catch((err) => console.warn('Could not fetch public payment config:', err));
   }, []);
 
-  const currentPlan = plans.find((p) => p.id === activeShop.planId) || plans[0];
+  const currentPlan = plans.find((p) => p.id === activeShop.planId) || plans[0] || DEFAULT_FALLBACK_PLAN;
   const shopPrinters = printers.filter((p) => p.shopId === activeShop.id);
   const shopJobs = printJobs.filter((j) => j.shopId === activeShop.id);
 

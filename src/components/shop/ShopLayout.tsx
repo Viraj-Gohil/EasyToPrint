@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useApp } from '../../lib/store';
+import { useApp, DEFAULT_FALLBACK_PLAN } from '../../lib/store';
 import { apiUrl } from '../../lib/apiConfig';
 import {
   LayoutDashboard,
@@ -152,7 +152,7 @@ export const ShopLayout: React.FC<ShopLayoutProps> = ({ children, activeTab }) =
     };
   }, [activeShop?.slug]);
 
-  const currentPlan = plans.find((p) => p.id === activeShop.planId) || plans[0];
+  const currentPlan = plans.find((p) => p.id === activeShop.planId) || plans[0] || DEFAULT_FALLBACK_PLAN;
 
   // Active pending jobs count for live sidebar badge
   const pendingJobsCount = printJobs.filter(
@@ -246,7 +246,7 @@ export const ShopLayout: React.FC<ShopLayoutProps> = ({ children, activeTab }) =
       label: 'SaaS Subscription',
       icon: Crown,
       path: '/shop/subscription',
-      badge: currentPlan.name.replace(' Xerox Hub', '').replace(' Starter', '').replace(' Counter', ''),
+      badge: (currentPlan?.name || 'Starter').replace(' Xerox Hub', '').replace(' Starter', '').replace(' Counter', ''),
       badgeColor: 'bg-blue-50 text-blue-700 border-blue-200'
     }
   ];
@@ -402,7 +402,7 @@ export const ShopLayout: React.FC<ShopLayoutProps> = ({ children, activeTab }) =
                     <p className="text-[11px] text-slate-500 truncate mt-0.5">{currentUser?.email}</p>
                     <div className="mt-1.5 flex items-center gap-1.5">
                       <Chip variant="special" size="sm">
-                        {currentPlan.name}
+                        {currentPlan?.name || 'Starter Plan'}
                       </Chip>
                       <span className="text-[10px] text-slate-400 font-mono">/{activeShop.slug}</span>
                     </div>

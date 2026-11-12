@@ -1050,7 +1050,7 @@ export const ShopSettings: React.FC = () => {
                   />
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Customer portal: <span className="font-mono text-slate-600 font-semibold">{window.location.origin}/#/s/{profileForm.slug}</span> (Permanent shop slug assigned at registration)
+                  Customer portal: <span className="font-mono text-slate-600 font-semibold">{window.location.origin}/s/{profileForm.slug}</span> (Permanent shop slug assigned at registration)
                 </p>
               </div>
 

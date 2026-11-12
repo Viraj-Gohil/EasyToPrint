@@ -167,11 +167,18 @@ export const PUBLIC_SEO_ROUTES: Record<string, RouteSeoMetadata> = {
 
 export const PRIVATE_NOINDEX_PREFIXES = [
   '/auth',
+  '/login',
+  '/register',
+  '/signup',
+  '/forgot-password',
+  '/reset-password',
   '/admin',
   '/shop',
+  '/dashboard',
   '/customer',
   '/track-print',
-  '/s/'
+  '/s/',
+  '/print/'
 ];
 
 export function normalizePathname(rawPath: string): string {

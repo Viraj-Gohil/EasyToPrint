@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useApp } from '../../lib/store';
+import { useApp, DEFAULT_FALLBACK_PLAN } from '../../lib/store';
 import { apiUrl } from '../../lib/apiConfig';
 import QRCode from 'qrcode';
 import {
@@ -84,7 +84,7 @@ export const ShopDashboard: React.FC = () => {
     };
   }, [activeShop?.slug]);
 
-  const currentPlan = plans.find((p) => p.id === activeShop.planId) || plans[0];
+  const currentPlan = plans.find((p) => p.id === activeShop.planId) || plans[0] || DEFAULT_FALLBACK_PLAN;
   const shopJobs = printJobs.filter((j) => j.shopId === activeShop.id);
   const queuedJobs = shopJobs.filter((j) => j.printStatus === 'QUEUED' || j.printStatus === 'ASSIGNED');
   const printingJobs = shopJobs.filter((j) => j.printStatus === 'PRINTING' || j.printStatus === 'DOWNLOADING');
@@ -463,7 +463,7 @@ export const ShopDashboard: React.FC = () => {
             {onlinePrinters.length} / {shopPrinters.length}
           </p>
           <div className="flex items-center justify-between text-[11px] mt-1">
-            <span className="text-slate-400 font-medium">Max {currentPlan.printerLimit} ({currentPlan.name})</span>
+            <span className="text-slate-400 font-medium">Max {currentPlan?.printerLimit ?? 2} ({currentPlan?.name || 'Starter'})</span>
             <button
               type="button"
               onClick={() => navigate('/shop/printers')}

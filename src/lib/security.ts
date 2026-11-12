@@ -731,6 +731,7 @@ export interface JwtPayload {
   role: string;
   shopId?: string;
   email?: string;
+  fullName?: string;
   jti: string; // Unique Token Identifier
   iss: 'printflow-auth';
   aud: 'printflow-api';
@@ -767,18 +768,19 @@ function base64UrlDecode(str: string): string {
 }
 
 /**
- * Generates a signed, short-lived JWT access token
+ * Generates a signed JWT access token
  */
 export function createJwtAccessToken(params: {
   userId: string;
   role: string;
   shopId?: string;
   email?: string;
+  fullName?: string;
   isMfaVerified?: boolean;
   expiresInSec?: number;
   secret: string;
 }): string {
-  const { userId, role, shopId, email, isMfaVerified = false, expiresInSec = 900, secret } = params;
+  const { userId, role, shopId, email, fullName, isMfaVerified = false, expiresInSec = 86400, secret } = params;
   const now = Math.floor(Date.now() / 1000);
 
   const header: JwtHeader = { alg: 'HS256', typ: 'JWT' };
@@ -787,6 +789,7 @@ export function createJwtAccessToken(params: {
     role,
     shopId,
     email,
+    fullName,
     isMfaVerified,
     jti: `tok_${crypto.randomBytes(12).toString('hex')}`,
     iss: 'printflow-auth',
@@ -1301,8 +1304,8 @@ export function createSecureSession(user: {
   const isProd = process.env.NODE_ENV === 'production';
   const cookieOptions: CookieOptions = {
     httpOnly: true, // Prevents JavaScript/XSS access entirely
-    secure: isProd || true, // Always secure for HTTPS / Cloud Run / custom domain
-    sameSite: (process.env.COOKIE_SAMESITE as any) || 'strict',
+    secure: isProd,
+    sameSite: (process.env.COOKIE_SAMESITE as any) || 'lax',
     path: '/',
     maxAge: ttlMs
   };
