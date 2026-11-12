@@ -18,7 +18,8 @@ import {
   MapPin,
   Clock,
   Printer,
-  Cpu
+  Cpu,
+  Hash
 } from 'lucide-react';
 import { Shop } from '../../types';
 import { Button } from '../ui/Button';
@@ -90,7 +91,7 @@ export const AdminShops: React.FC = () => {
             placeholder="Search shops by name, owner, city, slug..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3.5 h-10 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+            className="w-full pl-9 pr-3.5 h-10 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all"
           />
         </div>
 
@@ -102,7 +103,7 @@ export const AdminShops: React.FC = () => {
                 onClick={() => setStatusFilter(st)}
                 className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer capitalize ${
                   statusFilter === st
-                    ? 'bg-white text-purple-700 shadow-2xs font-bold'
+                    ? 'bg-white text-[#008F25] shadow-2xs font-bold'
                     : 'hover:text-slate-900'
                 }`}
               >
@@ -127,17 +128,18 @@ export const AdminShops: React.FC = () => {
       </div>
 
       {/* 3. SHOPS TABLE */}
-      <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Shop Identity</TableHead>
-              <TableHead>Owner Contact</TableHead>
-              <TableHead>City / Location</TableHead>
-              <TableHead>SaaS Plan</TableHead>
-              <TableHead>Gateway Config</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+            <TableRow className="bg-[#F7F7F7] border-b border-slate-200">
+              <TableHead className="font-bold text-[#080808]">Shop Name</TableHead>
+              <TableHead className="font-bold text-[#080808]">Owner</TableHead>
+              <TableHead className="font-bold text-[#080808]">6-Digit Shop Code</TableHead>
+              <TableHead className="font-bold text-[#080808]">Location</TableHead>
+              <TableHead className="font-bold text-[#080808]">Subscription Plan</TableHead>
+              <TableHead className="font-bold text-[#080808]">Status</TableHead>
+              <TableHead className="font-bold text-[#080808]">Created Date</TableHead>
+              <TableHead className="text-right font-bold text-[#080808]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -159,13 +161,13 @@ export const AdminShops: React.FC = () => {
               </TableRow>
             ) : (
               filteredShops.map((shop) => (
-                <TableRow key={shop.id}>
+                <TableRow key={shop.id} className="hover:bg-slate-50/60 transition-colors">
                   <TableCell>
-                    <span className="font-semibold text-slate-900 block">{shop.name}</span>
+                    <span className="font-bold text-slate-900 block text-xs">{shop.name}</span>
                     <button
                       type="button"
                       onClick={() => navigate(`/s/${shop.slug}`)}
-                      className="text-[11px] text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1 font-mono cursor-pointer mt-0.5"
+                      className="text-[11px] text-[#00B52D] hover:underline flex items-center gap-1 font-mono cursor-pointer mt-0.5"
                     >
                       <span>/s/{shop.slug}</span>
                       <ExternalLink className="w-2.5 h-2.5" />
@@ -173,23 +175,29 @@ export const AdminShops: React.FC = () => {
                   </TableCell>
 
                   <TableCell>
-                    <span className="font-medium text-slate-900 block">{shop.ownerName}</span>
-                    <span className="text-[11px] text-slate-400">{shop.ownerEmail || 'No email provided'}</span>
-                  </TableCell>
-
-                  <TableCell className="text-slate-700 font-medium">
-                    {shop.city}
+                    <span className="font-medium text-slate-900 block text-xs">{shop.ownerName}</span>
+                    <span className="text-[11px] text-slate-400 font-mono">{shop.ownerEmail || 'No email provided'}</span>
                   </TableCell>
 
                   <TableCell>
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/60">
-                      {shop.planName}
-                    </span>
+                    {shop.shopCode ? (
+                      <span className="inline-flex items-center gap-1 font-mono text-xs font-bold text-[#00B52D] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        <Hash className="w-3 h-3" />
+                        {shop.shopCode}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 font-mono text-xs">—</span>
+                    )}
+                  </TableCell>
+
+                  <TableCell className="text-slate-700 text-xs">
+                    <span className="block font-medium">{shop.city || 'Not Specified'}</span>
+                    {shop.address && <span className="text-[10px] text-slate-400 truncate max-w-[140px] block">{shop.address}</span>}
                   </TableCell>
 
                   <TableCell>
-                    <span className="font-mono text-slate-600 text-[11px]">
-                      {shop.razorpaySettings?.keyId ? `${shop.razorpaySettings.keyId.slice(0, 14)}...` : 'Not Configured'}
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#E8F8EC] text-[#008F25] border border-[#A7F3D0]">
+                      {shop.planName || 'Growth Counter'}
                     </span>
                   </TableCell>
 
@@ -201,6 +209,14 @@ export const AdminShops: React.FC = () => {
                     >
                       {shop.status}
                     </Chip>
+                  </TableCell>
+
+                  <TableCell className="text-xs text-slate-600 font-mono">
+                    {shop.createdAt ? new Date(shop.createdAt).toLocaleDateString('en-IN', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric'
+                    }) : 'N/A'}
                   </TableCell>
 
                   <TableCell className="text-right">
@@ -254,7 +270,7 @@ export const AdminShops: React.FC = () => {
           <div className="space-y-6 text-xs text-slate-700">
             {/* Section 1: Shop Information */}
             <div className="space-y-3">
-              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-md border border-purple-100 block">
+              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold text-[#008F25] bg-[#E8F8EC] px-2.5 py-1 rounded-md border border-[#A7F3D0] block">
                 1. Shop Information
               </span>
               <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-2">
@@ -268,7 +284,7 @@ export const AdminShops: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Public Slug:</span>
-                  <span className="font-mono text-blue-600">/s/{selectedShop.slug}</span>
+                  <span className="font-mono text-[#00B52D]">/s/{selectedShop.slug}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-500">Customer Ordering URL:</span>
@@ -276,7 +292,7 @@ export const AdminShops: React.FC = () => {
                     href={customerOrderingUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="font-mono text-blue-600 hover:underline flex items-center gap-1"
+                    className="font-mono text-[#00B52D] hover:underline flex items-center gap-1"
                   >
                     <span>Open View</span>
                     <ExternalLink className="w-3 h-3" />
@@ -303,7 +319,7 @@ export const AdminShops: React.FC = () => {
 
             {/* Section 2: Owner Information */}
             <div className="space-y-3">
-              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-md border border-purple-100 block">
+              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold text-[#008F25] bg-[#E8F8EC] px-2.5 py-1 rounded-md border border-[#A7F3D0] block">
                 2. Owner Information
               </span>
               <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-2">
@@ -324,7 +340,7 @@ export const AdminShops: React.FC = () => {
 
             {/* Section 3: Business Information */}
             <div className="space-y-3">
-              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-md border border-purple-100 block">
+              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold text-[#008F25] bg-[#E8F8EC] px-2.5 py-1 rounded-md border border-[#A7F3D0] block">
                 3. Business Information
               </span>
               <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-2">
@@ -349,13 +365,13 @@ export const AdminShops: React.FC = () => {
 
             {/* Section 4: Subscription Information */}
             <div className="space-y-3">
-              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-md border border-purple-100 block">
+              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold text-[#008F25] bg-[#E8F8EC] px-2.5 py-1 rounded-md border border-[#A7F3D0] block">
                 4. Subscription Information
               </span>
               <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-2">
                 <div className="flex justify-between">
                   <span className="text-slate-500">Current SaaS Plan:</span>
-                  <span className="font-bold text-purple-700">{selectedShop.planName}</span>
+                  <span className="font-bold text-[#008F25]">{selectedShop.planName}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-slate-500">Subscription Status:</span>
@@ -372,7 +388,7 @@ export const AdminShops: React.FC = () => {
 
             {/* Section 5: Operational Summary */}
             <div className="space-y-3">
-              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-md border border-purple-100 block">
+              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold text-[#008F25] bg-[#E8F8EC] px-2.5 py-1 rounded-md border border-[#A7F3D0] block">
                 5. Operational Summary
               </span>
               <div className="grid grid-cols-2 gap-2.5">
@@ -390,7 +406,7 @@ export const AdminShops: React.FC = () => {
                 </div>
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
                   <span className="text-slate-500 text-[11px] block">Connected Printers</span>
-                  <span className="text-base font-bold text-blue-600 font-mono">{shopPrinters.length}</span>
+                  <span className="text-base font-bold text-[#00B52D] font-mono">{shopPrinters.length}</span>
                 </div>
               </div>
             </div>

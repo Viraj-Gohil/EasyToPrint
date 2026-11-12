@@ -380,8 +380,8 @@ export class WindowsPrinterManager {
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
 3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R >> endobj
-4 0 obj << /Length 50 >> stream
-BT /F1 12 Tf 50 780 Td (PrintFlow Diagnostic Test) Tj ET
+4 0 obj << /Length 52 >> stream
+BT /F1 12 Tf 50 780 Td (EasyToPrint Diagnostic Test) Tj ET
 endstream endobj
 xref
 0 5

@@ -174,10 +174,10 @@ export const Navbar: React.FC = () => {
 
   const helpArticles = [
     {
-      title: 'Connecting Windows PrintFlow Agent to your physical printer',
+      title: 'Connecting Windows EasyToPrint Agent to your physical printer',
       category: 'Agent Setup',
       readTime: '3 min read',
-      snippet: 'Download and launch the PrintFlow Windows Agent (.exe). It automatically discovers your local USB and network printers via Windows Print Spooler.'
+      snippet: 'Download and launch the EasyToPrint Windows Agent (.exe). It automatically discovers your local USB and network printers via Windows Print Spooler.'
     },
     {
       title: 'Configuring Counter QR Signage & Customer Rates',
@@ -201,7 +201,7 @@ export const Navbar: React.FC = () => {
       title: 'Printer Offline or Spooler Stall Recovery',
       category: 'Diagnostics',
       readTime: '2 min read',
-      snippet: 'If Windows Spooler stops responding, PrintFlow features an automatic 1-click driver restart and queue unjam recovery tool.'
+      snippet: 'If Windows Spooler stops responding, EasyToPrint features an automatic 1-click driver restart and queue unjam recovery tool.'
     }
   ];
 
@@ -218,7 +218,7 @@ export const Navbar: React.FC = () => {
     switch (category) {
       case 'Agent Setup':
         return [
-          'Step 1: Download the PrintFlow Windows Agent (.exe) installer from your Shop Console or setup email.',
+          'Step 1: Download the EasyToPrint Windows Agent (.exe) installer from your Shop Console or setup email.',
           'Step 2: Double-click the installer and complete the quick wizard on your counter Windows PC.',
           'Step 3: Enter your Shop Slug and API credentials securely (stored in Windows DPAPI vault).',
           'Step 4: The Agent automatically connects to the cloud queue and discovers all USB and network printers installed in Windows Print Spooler.',
@@ -253,35 +253,56 @@ export const Navbar: React.FC = () => {
           {/* --------------------------------------------------------------------- */}
           {!isCustomerFlow && (
             <div className="hidden md:flex items-center gap-5 lg:gap-6 text-sm font-medium text-[#111111]">
-              <button
-                type="button"
-                onClick={() => scrollToSection('platform')}
+              <a
+                href="/about"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (currentPath === '/') {
+                    scrollToSection('platform');
+                  } else {
+                    navigate('/about');
+                  }
+                }}
                 className={`transition-colors hover:text-[#00B32D] cursor-pointer whitespace-nowrap ${
-                  activeSection === 'platform' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
+                  activeSection === 'platform' || currentPath === '/about' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
                 }`}
               >
                 About Us
-              </button>
+              </a>
 
-              <button
-                type="button"
-                onClick={() => scrollToSection('features')}
+              <a
+                href="/features"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (currentPath === '/') {
+                    scrollToSection('features');
+                  } else {
+                    navigate('/features');
+                  }
+                }}
                 className={`transition-colors hover:text-[#00B32D] cursor-pointer whitespace-nowrap ${
-                  activeSection === 'features' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
+                  activeSection === 'features' || currentPath === '/features' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
                 }`}
               >
                 Features
-              </button>
+              </a>
 
-              <button
-                type="button"
-                onClick={() => scrollToSection('how-it-works')}
+              <a
+                href="/qr-print-ordering"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (currentPath === '/') {
+                    scrollToSection('how-it-works');
+                  } else {
+                    navigate('/qr-print-ordering');
+                  }
+                }}
                 className={`transition-colors hover:text-[#00B32D] cursor-pointer whitespace-nowrap ${
-                  activeSection === 'how-it-works' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
+                  activeSection === 'how-it-works' || currentPath === '/qr-print-ordering' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
                 }`}
               >
                 How It Works
-              </button>
+              </a>
             </div>
           )}
 
@@ -289,9 +310,10 @@ export const Navbar: React.FC = () => {
           {/* CENTRE: BRAND LOGO (EXACTLY AS IN REFERENCE IMAGE)                   */}
           {/* --------------------------------------------------------------------- */}
           <div className="flex items-center gap-2.5 shrink-0 mx-auto md:mx-0 text-bold">
-            <button
-              type="button"
-              onClick={() => {
+            <a
+              href="/"
+              onClick={(e) => {
+                e.preventDefault();
                 if (currentPath !== '/') {
                   navigate('/');
                 }
@@ -306,7 +328,7 @@ export const Navbar: React.FC = () => {
               <span className="font-extrabold text-base sm:text-lg text-[#111111] tracking-tight font-['Manrope',sans-serif]">
                 Easy<span className="text-[#00B32D]">To</span>Print
               </span>
-            </button>
+            </a>
 
             {/* Context indicator if inside Customer or Console */}
             {isCustomerFlow && (
@@ -334,15 +356,22 @@ export const Navbar: React.FC = () => {
           {/* --------------------------------------------------------------------- */}
           {!isCustomerFlow && (
             <div className="hidden md:flex items-center gap-4 lg:gap-5 text-sm font-medium text-[#111111]">
-              <button
-                type="button"
-                onClick={() => scrollToSection('pricing')}
+              <a
+                href="/pricing"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (currentPath === '/') {
+                    scrollToSection('pricing');
+                  } else {
+                    navigate('/pricing');
+                  }
+                }}
                 className={`transition-colors hover:text-[#00B32D] cursor-pointer whitespace-nowrap ${
-                  activeSection === 'pricing' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
+                  activeSection === 'pricing' || currentPath === '/pricing' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
                 }`}
               >
                 Pricing
-              </button>
+              </a>
 
               {/* Resources dropdown trigger */}
               <div className="relative" ref={resourcesDropdownRef}>
@@ -371,11 +400,16 @@ export const Navbar: React.FC = () => {
                       transition={{ duration: 0.16, ease: 'easeOut' }}
                       className="absolute right-0 mt-3 w-64 rounded-2xl bg-white border border-[#E1E7E1] shadow-xl p-2 z-50"
                     >
-                      <button
-                        type="button"
-                        onClick={() => {
+                      <a
+                        href="/faq"
+                        onClick={(e) => {
+                          e.preventDefault();
                           setResourcesOpen(false);
-                          scrollToSection('faq');
+                          if (currentPath === '/') {
+                            scrollToSection('faq');
+                          } else {
+                            navigate('/faq');
+                          }
                         }}
                         className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-[#F7F8F7] text-left transition-colors cursor-pointer group"
                       >
@@ -388,7 +422,7 @@ export const Navbar: React.FC = () => {
                           </div>
                           <p className="text-[11px] text-[#646B65]">Frequently asked questions</p>
                         </div>
-                      </button>
+                      </a>
 
                       <button
                         type="button"
@@ -414,35 +448,44 @@ export const Navbar: React.FC = () => {
               </div>
 
               {/* Direct Contact us action as in the reference image */}
-              <button
-                type="button"
-                onClick={() => setContactSupportOpen(true)}
+              <a
+                href="/contact"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setContactSupportOpen(true);
+                }}
                 className="transition-colors hover:text-[#00B32D] cursor-pointer whitespace-nowrap"
               >
                 Contact us
-              </button>
+              </a>
 
               {/* Separation divider */}
               <div className="h-4 w-px bg-[#E1E7E1] mx-0.5" />
 
               {!currentUser ? (
                 <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => navigate('/auth/login')}
+                  <a
+                    href="/auth/login"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate('/auth/login');
+                    }}
                     className="text-xs lg:text-sm font-semibold text-[#111111] hover:text-[#008F25] transition-colors cursor-pointer whitespace-nowrap"
                   >
                     Login
-                  </button>
+                  </a>
 
-                  <button
-                    type="button"
-                    onClick={() => navigate('/auth/register')}
+                  <a
+                    href="/auth/register"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate('/auth/register');
+                    }}
                     className="inline-flex items-center justify-center gap-1.5 px-4 py-1.5 text-xs lg:text-sm font-bold text-white bg-[#00B32D] hover:bg-[#008F25] active:scale-[0.98] rounded-full transition-all shadow-xs cursor-pointer whitespace-nowrap"
                   >
                     <span>Get Started</span>
                     <ArrowRight className="w-3.5 h-3.5 stroke-[2.4]" />
-                  </button>
+                  </a>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">

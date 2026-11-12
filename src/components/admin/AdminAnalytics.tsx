@@ -115,21 +115,31 @@ export const AdminAnalytics: React.FC = () => {
     return counts;
   }, [printJobs]);
 
-  // Peak Hours Heatmap Data
-  const hourlyData = [
-    { hour: '08:00', count: 18, peak: false },
-    { hour: '09:00', count: 42, peak: false },
-    { hour: '10:00', count: 85, peak: true },
-    { hour: '11:00', count: 110, peak: true },
-    { hour: '12:00', count: 96, peak: true },
-    { hour: '13:00', count: 54, peak: false },
-    { hour: '14:00', count: 68, peak: false },
-    { hour: '15:00', count: 88, peak: true },
-    { hour: '16:00', count: 104, peak: true },
-    { hour: '17:00', count: 92, peak: true },
-    { hour: '18:00', count: 62, peak: false },
-    { hour: '19:00', count: 38, peak: false }
-  ];
+  // Peak Hours Hourly Distribution computed dynamically from actual print job timestamps
+  const hourlyData = useMemo(() => {
+    const hours = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
+    const counts: Record<string, number> = {};
+    hours.forEach((h) => {
+      counts[h] = 0;
+    });
+
+    (printJobs || []).forEach((job) => {
+      if (job.createdAt) {
+        const d = new Date(job.createdAt);
+        const h = `${String(d.getHours()).padStart(2, '0')}:00`;
+        if (counts[h] !== undefined) {
+          counts[h]++;
+        }
+      }
+    });
+
+    const maxCount = Math.max(1, ...Object.values(counts));
+    return hours.map((h) => ({
+      hour: h,
+      count: counts[h] || 0,
+      peak: counts[h] === maxCount && counts[h] > 0
+    }));
+  }, [printJobs]);
 
   // Top Shop Leaderboard
   const shopPerformance = useMemo(() => {
@@ -169,7 +179,7 @@ export const AdminAnalytics: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `printflow-platform-analytics-${timeRange}.csv`;
+    a.download = `easytoprint-platform-analytics-${timeRange}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -197,7 +207,7 @@ export const AdminAnalytics: React.FC = () => {
                 onClick={() => setTimeRange(range)}
                 className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer capitalize ${
                   timeRange === range
-                    ? 'bg-white text-purple-700 shadow-2xs font-bold'
+                    ? 'bg-white text-[#008F25] shadow-2xs font-bold'
                     : 'hover:text-slate-900'
                 }`}
               >
@@ -220,7 +230,7 @@ export const AdminAnalytics: React.FC = () => {
             size="sm"
             onClick={handleRefresh}
             title="Refresh metrics"
-            className={isRefreshing ? 'animate-spin text-purple-600' : ''}
+            className={isRefreshing ? 'animate-spin text-[#00B52D]' : ''}
           >
             <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
           </Button>
@@ -241,8 +251,8 @@ export const AdminAnalytics: React.FC = () => {
             ₹{totalVolume.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
           </p>
           <div className="flex items-center gap-1 text-[11px] text-emerald-600 font-medium mt-1">
-            <ArrowUpRight className="w-3 h-3" />
-            <span>+18.4% vs previous cycle</span>
+            <CheckCircle2 className="w-3 h-3" />
+            <span>{(transactions || []).filter((t) => t.status === 'SUCCESS').length} settled transactions</span>
           </div>
         </div>
 
@@ -250,11 +260,11 @@ export const AdminAnalytics: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-medium text-slate-500">Net Platform Revenue</span>
-            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-[#00B52D] flex items-center justify-center border border-emerald-200">
               <Sparkles className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-bold text-purple-900 font-mono tracking-tight">
+          <p className="text-2xl font-bold text-slate-900 font-mono tracking-tight">
             ₹{totalPlatformRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
           </p>
           <span className="text-[11px] text-slate-500 font-medium mt-1 block">
@@ -266,7 +276,7 @@ export const AdminAnalytics: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-medium text-slate-500">Global Print Orders</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-[#E8F8EC] text-[#008F25] flex items-center justify-center border border-[#A7F3D0]">
               <Printer className="w-4 h-4" />
             </div>
           </div>
@@ -303,7 +313,7 @@ export const AdminAnalytics: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-sm sm:text-base font-semibold text-slate-900 flex items-center gap-2">
-                <Clock className="w-4 h-4 text-purple-600" />
+                <Clock className="w-4 h-4 text-[#00B52D]" />
                 <span>Peak Counter Rush Hours</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -330,7 +340,7 @@ export const AdminAnalytics: React.FC = () => {
                     <div
                       style={{ height: `${heightPercent}%` }}
                       className={`w-full transition-all duration-500 rounded-t-lg ${
-                        slot.peak ? 'bg-purple-600 group-hover:bg-purple-700' : 'bg-purple-300 group-hover:bg-purple-400'
+                        slot.peak ? 'bg-[#00B52D] group-hover:bg-[#008F25]' : 'bg-[#00B52D]/40 group-hover:bg-[#00B52D]/60'
                       }`}
                     />
                   </div>
@@ -347,7 +357,7 @@ export const AdminAnalytics: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200/90 shadow-2xs flex flex-col justify-between">
           <div>
             <h2 className="text-sm sm:text-base font-semibold text-slate-900 flex items-center gap-2 mb-1">
-              <PieChart className="w-4 h-4 text-purple-600" />
+              <PieChart className="w-4 h-4 text-[#00B52D]" />
               <span>Print Specifications</span>
             </h2>
             <p className="text-xs text-slate-500 mb-4">
@@ -358,16 +368,16 @@ export const AdminAnalytics: React.FC = () => {
             <div className="space-y-2 mb-5">
               <div className="flex items-center justify-between text-xs font-semibold">
                 <span className="text-slate-700">Black & White ({colorBreakdown.bwPercent}%)</span>
-                <span className="text-purple-700">Color ({colorBreakdown.colorPercent}%)</span>
+                <span className="text-[#008F25]">Color ({colorBreakdown.colorPercent}%)</span>
               </div>
               <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden flex">
                 <div
                   style={{ width: `${colorBreakdown.bwPercent}%` }}
-                  className="bg-slate-700 h-full"
+                  className="bg-[#080808] h-full"
                 />
                 <div
                   style={{ width: `${colorBreakdown.colorPercent}%` }}
-                  className="bg-purple-600 h-full"
+                  className="bg-[#00B52D] h-full"
                 />
               </div>
             </div>
@@ -452,7 +462,7 @@ export const AdminAnalytics: React.FC = () => {
                 </TableCell>
                 <TableCell className="text-slate-600">{shop.city}</TableCell>
                 <TableCell>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/60">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#E8F8EC] text-[#008F25] border border-[#A7F3D0]">
                     {shop.planName}
                   </span>
                 </TableCell>

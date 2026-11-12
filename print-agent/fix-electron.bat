@@ -1,7 +1,7 @@
 @echo off
-title PrintFlow Agent - Electron Repair Tool
+title EasyToPrint Agent - Electron Repair Tool
 echo ======================================================
-echo    PRINTFLOW AGENT - AUTOMATED ELECTRON REPAIR
+echo    EASYTOPRINT AGENT - AUTOMATED ELECTRON REPAIR
 echo ======================================================
 echo.
 
@@ -9,6 +9,7 @@ cd /d "%~dp0"
 
 echo [1/4] Terminating any locked electron processes...
 taskkill /F /IM electron.exe /T >nul 2>&1
+taskkill /F /IM "EasyToPrint Agent.exe" /T >nul 2>&1
 taskkill /F /IM "PrintFlow Agent.exe" /T >nul 2>&1
 
 echo [2/4] Running automated Node.js repair script...

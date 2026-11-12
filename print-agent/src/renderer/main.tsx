@@ -82,7 +82,7 @@ class RootErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundar
               </div>
               <div>
                 <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#FFFFFF' }}>
-                  PrintFlow Agent Interface Recovery
+                  EasyToPrint Agent Interface Recovery
                 </h1>
                 <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94A3B8' }}>
                   An unexpected error occurred in the desktop user interface.
@@ -129,7 +129,7 @@ class RootErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundar
                 type="button"
                 onClick={this.handleReload}
                 style={{
-                  backgroundColor: '#2563EB',
+                  backgroundColor: '#00B52D',
                   color: '#FFFFFF',
                   border: 'none',
                   borderRadius: '8px',

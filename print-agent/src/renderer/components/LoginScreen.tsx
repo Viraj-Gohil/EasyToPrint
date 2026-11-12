@@ -48,7 +48,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       return 'Network unavailable. Please check your internet connection and try again.';
     }
     if (lower.includes('502') || lower.includes('503') || lower.includes('504') || lower.includes('temporarily unavailable')) {
-      return 'PrintFlow server is temporarily unreachable. Please try again shortly.';
+      return 'EasyToPrint server is temporarily unreachable. Please try again shortly.';
     }
     if (lower.includes('invalid') || lower.includes('unauthorized') || lower.includes('401') || lower.includes('403') || lower.includes('credentials') || lower.includes('token')) {
       return 'Invalid Shop ID or Authentication Token. Please check your shop credentials.';
@@ -65,7 +65,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
     // Strip stack traces or file paths if any
     const firstLine = rawError.split('\n')[0].replace(/at\s+.*/gi, '').trim();
-    return firstLine || 'Could not connect to PrintFlow. Please check your credentials and try again.';
+    return firstLine || 'Could not connect to EasyToPrint. Please check your credentials and try again.';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -100,7 +100,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         effectiveServer = `https://${effectiveServer}`;
       }
 
-      let detectedDeviceName = 'PrintFlow Counter';
+      let detectedDeviceName = 'EasyToPrint Counter';
       if (window.electronAgentAPI?.getHostname) {
         try {
           const host = await window.electronAgentAPI.getHostname();
@@ -179,15 +179,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               <div className="inline-block px-3 py-1 rounded-lg bg-[#E8F8EC] border border-[#A7F3D0] text-[#008F25] font-mono text-[13px] font-bold mt-1">
                 Shop ID: {connectedShopId}
               </div>
-              <p className="text-[13px] text-[#646B65] dark:text-slate-400 mt-2">
-                Your PC is now connected to your PrintFlow shop.
+              <p className="text-[13px] text-[#777777] dark:text-slate-400 mt-2">
+                Your PC is now connected to your EasyToPrint shop.
               </p>
             </div>
 
             {/* Seamless transition indicator */}
             <div className="pt-3 flex items-center justify-center gap-2 text-xs font-semibold text-[#008F25]">
-              <Loader2 className="w-4 h-4 animate-spin text-[#00B32D]" />
-              <span>Loading PrintFlow Dashboard...</span>
+              <Loader2 className="w-4 h-4 animate-spin text-[#00B52D]" />
+              <span>Loading EasyToPrint Agent Dashboard...</span>
             </div>
           </div>
         ) : (
@@ -195,17 +195,28 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           <>
             {/* Top Branding Section */}
             <div className="text-center space-y-3">
-              {/* PrintFlow Agent Logo */}
-              <div className="w-14 h-14 rounded-2xl bg-[#E8F8EC] dark:bg-emerald-950/60 border border-[#A7F3D0] dark:border-emerald-800 text-[#00B32D] flex items-center justify-center mx-auto shadow-xs">
-                <Printer className="w-7 h-7 stroke-[2.2]" />
+              {/* EasyToPrint Agent Logo */}
+              <div className="w-14 h-14 rounded-2xl bg-[#E8F8EC] dark:bg-emerald-950/60 border border-[#00B52D]/30 dark:border-emerald-800 flex items-center justify-center mx-auto shadow-xs">
+                <svg viewBox="0 0 64 64" className="w-10 h-10" fill="none" aria-hidden="true">
+                  <path d="M21 15C21 13.8954 21.8954 13 23 13H41C42.1046 13 43 13.8954 43 15V24H21V15Z" fill="#00B52D" />
+                  <rect x="24" y="16" width="16" height="8" rx="1" fill="#FFFFFF" />
+                  <rect x="12" y="24" width="40" height="20" rx="5" fill="#080808" />
+                  <circle cx="45" cy="30" r="2.2" fill="#00B52D" />
+                  <rect x="19" y="38" width="26" height="14" rx="2.5" fill="#FFFFFF" stroke="#00B52D" strokeWidth="2" />
+                  <line x1="24" y1="43" x2="40" y2="43" stroke="#00B52D" strokeWidth="2" strokeLinecap="round" />
+                  <line x1="24" y1="47" x2="35" y2="47" stroke="#00B52D" strokeWidth="2" strokeLinecap="round" />
+                </svg>
               </div>
 
               <div>
-                <h1 className="text-[24px] font-bold text-[#111111] dark:text-white tracking-tight">
+                <span className="text-[11px] font-extrabold uppercase tracking-widest text-[#00B52D] block mb-0.5">
+                  EasyToPrint Agent
+                </span>
+                <h1 className="text-[24px] font-bold text-[#080808] dark:text-white tracking-tight">
                   Connect Your Shop
                 </h1>
-                <p className="text-[13px] text-[#646B65] dark:text-slate-400 mt-1">
-                  Connect your Windows PC with PrintFlow.
+                <p className="text-[13px] text-[#777777] dark:text-slate-400 mt-1">
+                  Connect your Windows PC with EasyToPrint.
                 </p>
               </div>
             </div>

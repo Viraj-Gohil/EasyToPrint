@@ -762,7 +762,7 @@ export const ShopAnalytics: React.FC = () => {
     link.setAttribute('href', encodedUri);
     link.setAttribute(
       'download',
-      `PrintFlow_Analytics_${activeShop.slug || 'shop'}_${dateRange}.csv`
+      `EasyToPrint_Analytics_${activeShop.slug || 'shop'}_${dateRange}.csv`
     );
     document.body.appendChild(link);
     link.click();

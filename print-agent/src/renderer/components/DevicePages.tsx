@@ -190,7 +190,7 @@ export const DevicePreferencesView: React.FC<DevicePreferencesViewProps> = ({
       if (result.success) {
         setGlobalMessage({
           type: 'success',
-          text: 'PrintFlow Cloud handshake successful! Agent connection active.'
+          text: 'EasyToPrint Cloud handshake successful! Agent connection active.'
         });
       } else {
         setGlobalMessage({
@@ -241,7 +241,7 @@ export const DevicePreferencesView: React.FC<DevicePreferencesViewProps> = ({
             Settings
           </h1>
           <p className="text-[14px] text-[#646B65] dark:text-slate-400 mt-0.5">
-            Manage your PrintFlow Agent, device identity, connection security, queue preferences and subscription entitlements.
+            Manage your EasyToPrint Agent, device identity, connection security, queue preferences and subscription entitlements.
           </p>
         </div>
 
@@ -291,7 +291,7 @@ export const DevicePreferencesView: React.FC<DevicePreferencesViewProps> = ({
         {/* Section 1: Station Identity */}
         <SettingsCard
           title="Station Identity"
-          description="Hardware computer identity registered to your PrintFlow shop."
+          description="Hardware computer identity registered to your EasyToPrint shop."
           icon={<Laptop className="w-4 h-4 text-[#00B32D]" />}
         >
           <div className="space-y-4">
@@ -526,7 +526,7 @@ export const DevicePreferencesView: React.FC<DevicePreferencesViewProps> = ({
               checked={autoStartOnBoot}
               onChange={setAutoStartOnBoot}
               label="Launch on Windows Sign-in"
-              description="Automatically launch PrintFlow Agent in the background system tray when your Windows PC starts."
+              description="Automatically launch EasyToPrint Agent in the background system tray when your Windows PC starts."
             />
 
             <ToggleSwitch
@@ -579,7 +579,7 @@ export const DevicePreferencesView: React.FC<DevicePreferencesViewProps> = ({
         return (
           <SettingsCard
             title="Subscription & Feature Entitlements"
-            description="Active SaaS plan limits, hardware quotas, and feature flags enforced by PrintFlow."
+            description="Active SaaS plan limits, hardware quotas, and feature flags enforced by EasyToPrint."
             icon={<Sparkles className="w-4 h-4 text-[#00B32D]" />}
           >
             <div className="space-y-4">

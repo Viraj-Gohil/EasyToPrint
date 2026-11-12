@@ -42,7 +42,7 @@ export class ApiClient {
     try {
       backendUrl = new URL(pairingData.serverUrl);
     } catch {
-      return { success: false, error: 'Enter a valid PrintFlow backend URL.' };
+      return { success: false, error: 'Enter a valid EasyToPrint backend URL.' };
     }
     const isLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(backendUrl.hostname);
     if (
@@ -495,7 +495,7 @@ export class ApiClient {
         `${this.getBaseUrl()}/`
       );
       if (target.origin !== new URL(this.getBaseUrl()).origin) {
-        return { success: false, error: 'Document URL must use the configured PrintFlow backend.' };
+        return { success: false, error: 'Document URL must use the configured EasyToPrint backend.' };
       }
     } catch {
       return { success: false, error: 'Invalid document download URL.' };

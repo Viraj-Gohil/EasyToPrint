@@ -1,6 +1,6 @@
-# PrintFlow Agent (Windows Desktop Print Spooler)
+# EasyToPrint Agent (Windows Desktop Print Spooler)
 
-The official **PrintFlow Agent** is an Electron.js desktop application for Windows that connects local and network shop printers to the PrintFlow Cloud SaaS platform.
+The official **EasyToPrint Agent** is an Electron.js desktop application for Windows that connects local and network shop printers to the EasyToPrint Cloud SaaS platform.
 
 It runs quietly in the system tray, polls for verified paid customer print orders, downloads documents securely via Machine-to-Machine (M2M) bearer authentication, sends supported print settings to the bundled SumatraPDF Windows print engine, and syncs job status back to the shop and customer tracking screens.
 
@@ -103,7 +103,7 @@ The versioned NSIS installer will be generated in `print-agent/release/`.
 
 1. Configure `DATABASE_URL` for the web backend, then navigate to **Settings → Print Agent** in the signed-in dashboard.
 2. Copy the **Device Authentication Bearer Token** (e.g., `agt_tok_sgx_live_99482`).
-3. Open the PrintFlow Agent window on your counter PC.
+3. Open the EasyToPrint Agent window on your counter PC.
 4. Click the gear icon (**Settings**) in the top right.
 5. Enter:
    - **Host URL:** `http://localhost:3000` (or your production cloud URL)
@@ -116,7 +116,7 @@ The versioned NSIS installer will be generated in `print-agent/release/`.
 
 1. Configure `DATABASE_URL` for the web backend. Agent credentials are stored in PostgreSQL; the server creates the `print_agent_devices` table during startup.
 2. In **Settings → Print Agent** in the signed-in web dashboard, select **Generate / Regenerate Token**. The backend stores a hash in PostgreSQL and invalidates the previous token. The plaintext token is only shown for copying at issuance.
-3. In the main web app, open **Shop Dashboard → Settings → Print Agent** and generate/copy the device token there. Paste that existing token together with the exact Shop ID and backend URL into PrintFlow Agent. The desktop app does not issue or rotate tokens.
+3. In the main web app, open **Shop Dashboard → Settings → Print Agent** and generate/copy the device token there. Paste that existing token together with the exact Shop ID and backend URL into EasyToPrint Agent. The desktop app does not issue or rotate tokens.
 4. Select **Pair & Save**. The agent validates the token through `/api/agent/pair`, stores it with Electron `safeStorage`, and does not reveal the dashboard until an authenticated heartbeat succeeds. Invalid, revoked, and cross-shop tokens are rejected.
 5. HTTP is accepted only for a localhost development backend.
 
@@ -128,7 +128,7 @@ With `DATABASE_URL` configured, the existing PostgreSQL `print_agent_jobs` and `
 
 The desktop UI includes Dashboard, Print Queue, Printers, Live Logs, Profile & Device, Settings, and About pages. Queue search/filter/sort and job details use the local job records; a failed job is retryable only when the agent knows printing did not start. An interrupted or uncertain print must be checked at the physical printer before an operator makes a new print attempt.
 
-Configuration and the encrypted device credential are kept under Electron's application `userData` directory. Non-secret configuration uses a versioned JSON file; heartbeat/sync timestamps and print recovery records are separate local files. The Settings page can reset configuration and credentials without removing recovered jobs. The printer enable/disable action controls use by the PrintFlow Agent only; it does not change the printer's Windows-wide availability. Log export writes a sanitized export of recent in-memory events and does not remove the persistent application log.
+Configuration and the encrypted device credential are kept under Electron's application `userData` directory. Non-secret configuration uses a versioned JSON file; heartbeat/sync timestamps and print recovery records are separate local files. The Settings page can reset configuration and credentials without removing recovered jobs. The printer enable/disable action controls use by the EasyToPrint Agent only; it does not change the printer's Windows-wide availability. Log export writes a sanitized export of recent in-memory events and does not remove the persistent application log.
 
 Configuration is loaded after Electron is ready so OS-backed credential decryption is available on startup; the agent refreshes the authenticated heartbeat and queue sync after restart.
 

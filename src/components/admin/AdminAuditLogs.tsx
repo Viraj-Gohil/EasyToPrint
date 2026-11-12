@@ -29,7 +29,7 @@ export const AdminAuditLogs: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {auditLogs.map((log) => (
                 <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
-                  <td className="py-3.5 px-4 font-mono font-bold text-purple-700">
+                  <td className="py-3.5 px-4 font-mono font-bold text-[#008F25]">
                     {log.action}
                   </td>
                   <td className="py-3.5 px-4">

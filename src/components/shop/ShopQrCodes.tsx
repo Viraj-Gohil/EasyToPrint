@@ -5,33 +5,31 @@ import {
   Download,
   Printer,
   Copy,
-  CheckCircle2,
   ExternalLink,
-  Share2,
-  Smartphone,
-  Upload,
-  ShieldCheck,
-  Sparkles,
-  Store,
   Check,
   AlertCircle,
-  HelpCircle,
   QrCode,
-  Layers,
-  ArrowRight,
-  Eye,
-  Building2,
-  Flame,
-  FileCheck
+  FileText,
+  Loader2
 } from 'lucide-react';
+import { apiUrl } from '../../lib/apiConfig';
+import { generateStandPdf, generateStandPngDataUrl } from '../../lib/counterStandGenerator';
 
 export const ShopQrCodes: React.FC = () => {
-  const { activeShop, showToast, navigate } = useApp();
+  const { activeShop, showToast } = useApp();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   const [qrLoaded, setQrLoaded] = useState(false);
   const [qrError, setQrError] = useState(false);
+
+  // Dynamic authoritative shop code
+  const [shopCode, setShopCode] = useState<string>(activeShop.shopCode || '');
+
+  // Generation loading states
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isGeneratingPng, setIsGeneratingPng] = useState(false);
 
   // Stand customization controls
   const [format, setFormat] = useState<'A5' | 'A4'>('A5');
@@ -42,24 +40,57 @@ export const ShopQrCodes: React.FC = () => {
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://printflow.in';
   const shopUrl = `${origin}/s/${activeShop.slug || 'shop'}`;
 
+  // Fetch authoritative permanent 6-digit Shop Code from database/API
+  useEffect(() => {
+    if (!activeShop?.id) return;
+    let cancelled = false;
+
+    async function fetchAuthoritativeCode() {
+      try {
+        const res = await fetch(apiUrl(`/api/shops/${encodeURIComponent(activeShop.id)}/access-code`), {
+          headers: {
+            'Authorization': 'Bearer admin_token_active',
+            'X-Shop-Id': activeShop.id,
+            'X-User-Role': 'SHOP_OWNER'
+          }
+        });
+        if (!cancelled && res.ok) {
+          const data = await res.json();
+          if (data.success && data.shopCode) {
+            setShopCode(data.shopCode);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch authoritative shop code:', err);
+      }
+    }
+
+    if (!shopCode) {
+      fetchAuthoritativeCode();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [activeShop?.id, shopCode]);
+
+  const currentShopCode = shopCode || activeShop.shopCode || '100001';
+
   // Generate QR on canvas whenever shopUrl, orientation, or styleMode changes
   useEffect(() => {
     if (!canvasRef.current || !shopUrl) return;
 
     setQrError(false);
     const canvas = canvasRef.current;
-    const targetWidth = orientation === 'LANDSCAPE' ? 240 : 260;
-
-    const darkColor = styleMode === 'DARK' ? '#0F172A' : styleMode === 'MINIMAL' ? '#1E293B' : '#0F172A';
+    const targetWidth = orientation === 'LANDSCAPE' ? 200 : 236;
 
     QRCode.toCanvas(
       canvas,
       shopUrl,
       {
         width: targetWidth,
-        margin: 1,
+        margin: 2,
         color: {
-          dark: darkColor,
+          dark: '#111111',
           light: '#FFFFFF'
         }
       },
@@ -75,10 +106,10 @@ export const ShopQrCodes: React.FC = () => {
   }, [shopUrl, orientation, styleMode]);
 
   // Copy customer URL
-  const copyShopUrl = () => {
+  const copyShopUrl = async () => {
     try {
       if (navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(shopUrl);
+        await navigator.clipboard.writeText(shopUrl);
       } else {
         const input = document.createElement('input');
         input.value = shopUrl;
@@ -87,15 +118,94 @@ export const ShopQrCodes: React.FC = () => {
         document.execCommand('copy');
         document.body.removeChild(input);
       }
-      setCopied(true);
-      showToast('Customer Link Copied', 'Shop ordering link copied to clipboard.', 'success');
-      setTimeout(() => setCopied(false), 2200);
-    } catch (err) {
+      setCopiedLink(true);
+      showToast('Customer Link Copied', 'Shop ordering link copied to clipboard.', 'success', 2200);
+      setTimeout(() => setCopiedLink(false), 2200);
+    } catch {
       showToast('Copy Failed', 'Please manually select and copy the URL.', 'error');
     }
   };
 
-  // Download high-resolution QR PNG (1400x1400 px, 300 DPI ready)
+  // Copy permanent 6-digit Shop Code
+  const copyShopCode = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(currentShopCode);
+      } else {
+        const input = document.createElement('input');
+        input.value = currentShopCode;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+      }
+      setCopiedCode(true);
+      showToast('Shop Code Copied', `Code ${currentShopCode} copied to clipboard.`, 'success', 2200);
+      setTimeout(() => setCopiedCode(false), 2200);
+    } catch {
+      showToast('Copy Failed', 'Unable to copy shop code.', 'error');
+    }
+  };
+
+  // Download print-ready vector Counter Stand PDF
+  const downloadStandPdf = async () => {
+    setIsGeneratingPdf(true);
+    showToast('Generating PDF', 'Preparing vector print-ready counter stand PDF...', 'info');
+    try {
+      const pdfBytes = await generateStandPdf({
+        shopName: activeShop.name,
+        shopSlug: activeShop.slug,
+        shopCode: currentShopCode,
+        location: activeShop.city || activeShop.address || 'Smart Counter Station',
+        format,
+        orientation,
+        styleMode,
+        shopUrl
+      });
+      const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${activeShop.slug || 'shop'}-counter-stand-${format.toLowerCase()}-${orientation.toLowerCase()}.pdf`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      showToast('PDF Downloaded', 'Print-ready Counter Stand PDF saved to your device.', 'success');
+    } catch (err) {
+      console.error('Failed to generate stand PDF:', err);
+      showToast('PDF Generation Failed', 'Could not compile stand PDF. Please try again.', 'error');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  // Download 300-DPI high-res Stand PNG
+  const downloadStandPng = async () => {
+    setIsGeneratingPng(true);
+    showToast('Generating PNG', 'Rendering 300-DPI tabletop stand graphic...', 'info');
+    try {
+      const pngDataUrl = await generateStandPngDataUrl({
+        shopName: activeShop.name,
+        shopSlug: activeShop.slug,
+        shopCode: currentShopCode,
+        location: activeShop.city || activeShop.address || 'Smart Counter Station',
+        format,
+        orientation,
+        styleMode,
+        shopUrl
+      });
+      const link = document.createElement('a');
+      link.href = pngDataUrl;
+      link.download = `${activeShop.slug || 'shop'}-counter-stand-${format.toLowerCase()}-${orientation.toLowerCase()}.png`;
+      link.click();
+      showToast('PNG Downloaded', 'High-resolution Stand PNG saved to your device.', 'success');
+    } catch (err) {
+      console.error('Failed to generate stand PNG:', err);
+      showToast('PNG Generation Failed', 'Could not render stand PNG. Please try again.', 'error');
+    } finally {
+      setIsGeneratingPng(false);
+    }
+  };
+
+  // Download standalone bare QR code PNG
   const downloadQrCode = () => {
     QRCode.toDataURL(
       shopUrl,
@@ -103,7 +213,7 @@ export const ShopQrCodes: React.FC = () => {
         width: 1400,
         margin: 2,
         color: {
-          dark: '#0F172A',
+          dark: '#111111',
           light: '#FFFFFF'
         }
       },
@@ -113,7 +223,7 @@ export const ShopQrCodes: React.FC = () => {
           return;
         }
         const link = document.createElement('a');
-        link.download = `${activeShop.slug || 'shop'}-tabletop-qr.png`;
+        link.download = `${activeShop.slug || 'shop'}-qr-code.png`;
         link.href = url;
         link.click();
         showToast('QR Code Downloaded', 'High-resolution QR code image saved to your device.', 'success');
@@ -129,150 +239,90 @@ export const ShopQrCodes: React.FC = () => {
     }, 150);
   };
 
-  // Share link
-  const shareLink = () => {
-    if (typeof navigator !== 'undefined' && navigator.share) {
-      navigator
-        .share({
-          title: `${activeShop.name} - Instant Xerox Portal`,
-          text: `Scan or open this link to upload and print documents at ${activeShop.name}`,
-          url: shopUrl
-        })
-        .catch(() => {
-          copyShopUrl();
-        });
-    } else {
-      copyShopUrl();
-    }
-  };
-
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12 text-slate-800">
+    <div className="space-y-6 max-w-7xl mx-auto pb-10 font-['Manrope',sans-serif] text-[#111111]">
       {/* 1. PAGE HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 no-print">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#111111]">
             QR Counter Stands
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5 leading-relaxed">
-            Generate and print self-service QR stands for your shop counter.
+            Generate, customize, and print your shop counter stand (A5 Portrait — 148 × 210 mm).
           </p>
         </div>
       </div>
 
-      {/* WORKFLOW STRIP */}
-      <div className="no-print bg-white p-5 rounded-2xl border border-slate-200/90 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-blue-600" />
-            <h2 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-              Self-Service Counter Workflow
-            </h2>
-          </div>
-          <span className="text-[11px] font-medium text-slate-500">
-            "This QR code is your shop's customer ordering entrance."
-          </span>
-        </div>
+      {/* 2. TWO-COLUMN CLEAN WORKSPACE */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* ================= LEFT COLUMN: SHOP QR INFORMATION & ACTIONS ================= */}
+        <div className="no-print lg:col-span-5 space-y-5">
+          <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs space-y-5">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#E8F8EC] text-[#00B32D] flex items-center justify-center font-bold">
+                  <QrCode className="w-5 h-5 stroke-[2.2]" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-[#111111]">Your Shop QR Code</h2>
+                  <p className="text-xs text-slate-500 truncate max-w-[200px]">{activeShop.name}</p>
+                </div>
+              </div>
 
-        {/* Visual Stepper */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-2 pt-3.5">
-          <div className="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200/80 text-left">
-            <span className="text-[10px] font-mono font-bold text-blue-700 block">STEP 01</span>
-            <span className="text-xs font-bold text-slate-900 block mt-0.5">Select Shop</span>
-            <span className="text-[10px] text-slate-500 block truncate">{activeShop.name}</span>
-          </div>
+              {/* Customer Portal Status */}
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                  activeShop.isOpen
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-slate-100 text-slate-600 border border-slate-200'
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    activeShop.isOpen ? 'bg-[#00B32D] animate-pulse' : 'bg-slate-400'
+                  }`}
+                />
+                <span>{activeShop.isOpen ? 'Active' : 'Inactive'}</span>
+              </span>
+            </div>
 
-          <div className="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200/80 text-left">
-            <span className="text-[10px] font-mono font-bold text-blue-700 block">STEP 02</span>
-            <span className="text-xs font-bold text-slate-900 block mt-0.5">Generate QR</span>
-            <span className="text-[10px] text-slate-500 block truncate">Auto-linked URL</span>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200/80 text-left">
-            <span className="text-[10px] font-mono font-bold text-blue-700 block">STEP 03</span>
-            <span className="text-xs font-bold text-slate-900 block mt-0.5">Preview Stand</span>
-            <span className="text-[10px] text-slate-500 block truncate">A5 Acrylic Layout</span>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-left">
-            <span className="text-[10px] font-mono font-bold text-slate-600 block">STEP 04</span>
-            <span className="text-xs font-bold text-slate-900 block mt-0.5">Download / Print</span>
-            <span className="text-[10px] text-slate-500 block truncate">300 DPI / Direct PDF</span>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-left">
-            <span className="text-[10px] font-mono font-bold text-slate-600 block">STEP 05</span>
-            <span className="text-xs font-bold text-slate-900 block mt-0.5">Place at Counter</span>
-            <span className="text-[10px] text-slate-500 block truncate">Beside Cash Drawer</span>
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-left">
-            <span className="text-[10px] font-mono font-bold text-emerald-700 block">STEP 06</span>
-            <span className="text-xs font-bold text-slate-900 block mt-0.5">Customer Scans</span>
-            <span className="text-[10px] text-emerald-700 font-semibold block truncate">Instant Spooling</span>
-          </div>
-        </div>
-      </div>
-
-      {/* =========================================================================
-          2. MAIN WORKSPACE: TWO-COLUMN LAYOUT
-          Desktop: Left width approx 40% (lg:col-span-5) / Right width approx 60% (lg:col-span-7)
-          Mobile: Stack vertically
-         ========================================================================= */}
-      <div className="no-print grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* ================= LEFT PANEL (~40%) ================= */}
-        <div className="lg:col-span-5 space-y-5">
-          {/* Card: Your Customer QR */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
-            <div>
+            {/* Permanent 6-Digit Shop Code (Prominent & Read-Only) */}
+            <div className="p-4 bg-[#F8FAF9] border border-[#E1E8E3] rounded-xl space-y-2">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-bold text-slate-900">Your Customer QR</h2>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-                  Entrance Point
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  Permanent Shop Code
+                </span>
+                <span className="text-[10px] font-semibold text-[#008F25] bg-[#E8F8EC] px-2 py-0.5 rounded border border-[#A7F3D0]">
+                  Read Only
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Customers scan this QR code to open your shop's printing portal.
+
+              <div className="flex items-center justify-between gap-3 pt-0.5">
+                <span className="text-2xl sm:text-3xl font-extrabold tracking-wider text-[#111111] select-all">
+                  #{currentShopCode}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={copyShopCode}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs shrink-0"
+                  title="Copy 6-digit Shop Code"
+                >
+                  {copiedCode ? <Check className="w-3.5 h-3.5 text-[#00B32D]" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
+                  <span>{copiedCode ? 'Copied' : 'Copy Code'}</span>
+                </button>
+              </div>
+
+              <p className="text-[11px] text-slate-500 leading-normal">
+                Customers can manually enter this 6-digit code if unable to scan the QR code.
               </p>
             </div>
 
-            {/* Shop Selection & Details */}
-            <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-2.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500 font-medium">Shop Name</span>
-                <span className="font-bold text-slate-900 truncate max-w-[200px]">
-                  {activeShop.name}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60">
-                <span className="text-slate-500 font-medium">Architecture</span>
-                <span className="text-emerald-700 font-semibold text-[11px] bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded-md">
-                  1 Shop = 1 Dedicated Account
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500 font-medium">Location</span>
-                <span className="font-semibold text-slate-700 truncate max-w-[200px]">
-                  {activeShop.city || activeShop.address || 'Counter Station 1'}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500 font-medium">Customer Portal</span>
-                <span className="font-semibold text-emerald-700 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  Live & Accepting Orders
-                </span>
-              </div>
-            </div>
-
-            {/* Customer URL Input Box */}
+            {/* Customer URL Box */}
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
-                <span>Customer URL</span>
-                <span className="text-[10px] text-slate-400 font-normal">Selectable link</span>
+              <label className="text-xs font-bold text-slate-700 block">
+                Customer Ordering Link
               </label>
 
               <div className="flex items-center gap-2">
@@ -281,351 +331,295 @@ export const ShopQrCodes: React.FC = () => {
                   readOnly
                   value={shopUrl}
                   onClick={(e) => (e.target as HTMLInputElement).select()}
-                  className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 select-all cursor-text shadow-2xs"
+                  className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-none select-all cursor-text shadow-2xs truncate"
                 />
                 <button
+                  type="button"
                   onClick={copyShopUrl}
-                  className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs"
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0 shadow-2xs"
                   title="Copy customer link"
                 >
-                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copied ? 'Copied' : 'Copy Link'}</span>
+                  {copiedLink ? <Check className="w-3.5 h-3.5 text-[#00B32D]" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
+                  <span>{copiedLink ? 'Copied' : 'Copy Link'}</span>
                 </button>
               </div>
 
-              <div className="pt-1">
-                <a
-                  href={`/s/${activeShop.slug || 'shop'}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                >
-                  <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Open Customer View ↗</span>
-                </a>
-              </div>
+              <a
+                href={`/s/${activeShop.slug || 'shop'}`}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full py-2 bg-[#F0FDF4] hover:bg-[#DCFCE7] text-[#008F25] border border-[#BBF7D0] rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-[#00B32D]" />
+                <span>Open Customer View ↗</span>
+              </a>
             </div>
 
-            {/* QR Actions: Clear Action Area */}
-            <div className="pt-3 border-t border-slate-100 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  QR Actions
-                </span>
-                <span className="text-[10px] text-slate-400">Ready to print or deploy</span>
-              </div>
+            {/* Essential Actions */}
+            <div className="pt-2 border-t border-slate-100 space-y-2.5">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                Stand Actions
+              </span>
 
-              {/* Action Buttons */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={downloadQrCode}
-                  className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
+                  type="button"
+                  onClick={downloadStandPdf}
+                  disabled={isGeneratingPdf}
+                  className="px-3 py-2.5 bg-[#00B32D] hover:bg-[#008F25] text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98 disabled:opacity-60"
+                  title="Download vector print-ready PDF"
                 >
-                  <Download className="w-4 h-4" />
-                  <span>Download QR</span>
+                  {isGeneratingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                  <span>Download PDF</span>
                 </button>
 
                 <button
-                  onClick={triggerBrowserPrint}
-                  className="px-4 py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
+                  type="button"
+                  onClick={downloadStandPng}
+                  disabled={isGeneratingPng}
+                  className="px-3 py-2.5 bg-[#111111] hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98 disabled:opacity-60"
+                  title="Download 300-DPI high-res Stand PNG"
                 >
-                  <Printer className="w-4 h-4" />
+                  {isGeneratingPng ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  <span>Download PNG</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={triggerBrowserPrint}
+                  className="px-3 py-2.5 bg-white hover:bg-slate-50 text-[#111111] border border-slate-200 font-bold text-xs rounded-xl shadow-2xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
+                  title="Print directly to your connected printer"
+                >
+                  <Printer className="w-3.5 h-3.5 text-slate-600" />
                   <span>Print QR Stand</span>
                 </button>
-              </div>
 
-              <button
-                onClick={shareLink}
-                className="w-full py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                <Share2 className="w-3.5 h-3.5 text-slate-500" />
-                <span>Share Link with Staff / Customers</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Small Informational Card: YOUR QR CODE */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                  Your QR Code
-                </h3>
-              </div>
-              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                ● Live
-              </span>
-            </div>
-
-            <div className="divide-y divide-slate-100 text-xs">
-              <div className="py-2 flex items-center justify-between">
-                <span className="text-slate-500 font-medium">Status</span>
-                <span className="font-bold text-emerald-700 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Active
-                </span>
-              </div>
-              <div className="py-2 flex items-center justify-between">
-                <span className="text-slate-500 font-medium">Shop</span>
-                <span className="font-semibold text-slate-800 truncate max-w-[180px]">
-                  {activeShop.name}
-                </span>
-              </div>
-              <div className="py-2 flex items-center justify-between">
-                <span className="text-slate-500 font-medium">Customer Portal</span>
-                <span className="font-semibold text-blue-700">Enabled</span>
-              </div>
-              <div className="py-2 flex items-center justify-between">
-                <span className="text-slate-500 font-medium">Last Generated</span>
-                <span className="font-mono text-slate-600">Today</span>
+                <button
+                  type="button"
+                  onClick={downloadQrCode}
+                  className="px-3 py-2.5 bg-white hover:bg-slate-50 text-[#111111] border border-slate-200 font-bold text-xs rounded-xl shadow-2xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
+                  title="Download bare QR code image only"
+                >
+                  <QrCode className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Download QR Only</span>
+                </button>
               </div>
             </div>
-
-            <p className="text-[11px] text-slate-500 leading-relaxed pt-1 border-t border-slate-100">
-              This permanent QR code never expires. Customers can scan directly using any smartphone camera or Google Lens without installing any app.
-            </p>
           </div>
         </div>
 
-        {/* ================= RIGHT PANEL (~60%): LIVE STAND PREVIEW ================= */}
+        {/* ================= RIGHT COLUMN: COUNTER STAND PREVIEW & CONTROLS ================= */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
-             {/* REALISTIC PHYSICAL TABLETOP STAND MOCKUP */}
-            <div className="p-4 sm:p-8 bg-slate-100/80 rounded-2xl border border-slate-200/90 flex flex-col items-center justify-center min-h-[490px] overflow-hidden">
-              {/* Acrylic Stand Card Frame */}
+          <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/90 shadow-xs space-y-5">
+            {/* Live Stand Preview Canvas Container */}
+            <div className="p-4 sm:p-8 bg-[#F7F8F7] rounded-2xl border border-slate-200/80 flex flex-col items-center justify-center overflow-hidden">
+              {/* Counter Stand Card Frame (Exact A5 Portrait 148:210 aspect ratio on Portrait) */}
               <div
                 id="printable-qr-stand"
-                className={`bg-white rounded-2xl border-2 transition-all duration-300 relative text-center overflow-hidden shadow-xl ${
-                  styleMode === 'DARK'
-                    ? 'border-slate-800 bg-slate-900 text-white'
-                    : 'border-slate-800/90 text-slate-900'
-                } ${
+                className={`bg-white border border-[#E5E7EB] text-[#111111] font-['Manrope',sans-serif] transition-all duration-200 relative text-center shadow-sm ${
                   orientation === 'LANDSCAPE'
-                    ? 'w-full max-w-xl p-6 sm:p-8'
-                    : format === 'A4'
-                    ? 'w-full max-w-sm sm:max-w-md p-6 sm:p-8'
-                    : 'w-full max-w-xs sm:max-w-sm p-5 sm:p-7'
+                    ? 'w-full max-w-2xl aspect-[210/148] p-6 sm:p-8 flex flex-col justify-between rounded-xl'
+                    : 'w-full max-w-[390px] aspect-[148/210] px-6 py-7 sm:px-8 sm:py-8 flex flex-col justify-between rounded-xl'
                 }`}
-                style={{
-                  background:
-                    styleMode === 'DARK'
-                      ? 'linear-gradient(180deg, #0F172A 0%, #1E293B 100%)'
-                      : 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)'
-                }}
               >
-                {/* Stand Header Accent Bar */}
-                <div
-                  className={`h-2.5 w-full absolute top-0 left-0 ${
-                    styleMode === 'DARK'
-                      ? 'bg-linear-to-r from-blue-500 via-indigo-500 to-cyan-400'
-                      : styleMode === 'MINIMAL'
-                      ? 'bg-slate-900'
-                      : 'bg-linear-to-r from-blue-600 via-indigo-600 to-blue-500'
-                  }`}
-                />
-
                 {orientation === 'LANDSCAPE' ? (
-                  /* LANDSCAPE LAYOUT */
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 items-center pt-1">
-                    <div className="space-y-3 text-left">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-10 h-10 rounded-xl bg-blue-600 text-white font-black text-lg flex items-center justify-center shadow-xs shrink-0">
-                          {activeShop.name.charAt(0)}
-                        </div>
-                        <div className="min-w-0">
-                          <h3
-                            className={`text-base font-black tracking-tight leading-tight truncate ${
-                              styleMode === 'DARK' ? 'text-white' : 'text-slate-900'
-                            }`}
-                          >
-                            {activeShop.name}
-                          </h3>
-                          <span
-                            className={`text-[10px] font-semibold uppercase tracking-wider block truncate ${
-                              styleMode === 'DARK' ? 'text-slate-400' : 'text-slate-500'
-                            }`}
-                          >
-                            {activeShop.city || 'Counter Xerox Station'}
-                          </span>
-                        </div>
+                  /* ================= LANDSCAPE MINIMAL LAYOUT ================= */
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 items-center my-auto text-left">
+                    {/* Left Column: Branding, Heading, Steps, Footer */}
+                    <div className="sm:col-span-7 flex flex-col justify-between space-y-4">
+                      {/* 1. Top: Small EasyToPrint logo and brand name */}
+                      <div className="flex items-center gap-2">
+                        <img
+                          src="/assets/easytoprint-logo.svg"
+                          alt="EasyToPrint"
+                          className="w-5 h-5 object-contain"
+                        />
+                        <span className="text-sm font-bold tracking-tight text-[#111111]">
+                          Easy<span className="text-[#00B32D]">To</span>Print
+                        </span>
                       </div>
 
-                      <div className="pt-1">
-                        <span className="text-[10px] font-black uppercase tracking-widest text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                          Self-Service Counter
-                        </span>
-                        <h4
-                          className={`text-2xl font-black tracking-tight mt-1 ${
-                            styleMode === 'DARK' ? 'text-white' : 'text-slate-950'
-                          }`}
-                        >
-                          SCAN TO PRINT
-                        </h4>
-                        <p
-                          className={`text-xs mt-1 leading-relaxed ${
-                            styleMode === 'DARK' ? 'text-slate-300' : 'text-slate-600'
-                          }`}
-                        >
-                          Scan with your phone camera. Upload documents, select copies & colors, pay online, and collect your prints.
+                      {/* 2 & 3. Main Heading & Subtitle */}
+                      <div className="space-y-1">
+                        <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#111111] leading-tight">
+                          Printing Made Easy.
+                        </h3>
+                        <p className="text-sm font-semibold text-[#00B32D]">
+                          Scan. Upload. Pay. Collect.
                         </p>
                       </div>
 
-                      <div
-                        className={`pt-1 text-[11px] font-bold flex items-center gap-1.5 ${
-                          styleMode === 'DARK' ? 'text-emerald-400' : 'text-slate-800'
-                        }`}
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>No App Required · Instant Spooling</span>
+                      {/* 7. Three simple steps in one horizontal row */}
+                      <div className="grid grid-cols-3 gap-2.5 pt-3 border-t border-[#ECEFEC]">
+                        <div>
+                          <div className="text-xs font-bold text-[#111111]">
+                            <span className="text-[#00B32D] mr-1">01</span>Scan
+                          </div>
+                          <p className="text-[11px] text-[#555555] leading-snug mt-0.5">
+                            Scan the QR code.
+                          </p>
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-[#111111]">
+                            <span className="text-[#00B32D] mr-1">02</span>Upload
+                          </div>
+                          <p className="text-[11px] text-[#555555] leading-snug mt-0.5">
+                            Select your document.
+                          </p>
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-[#111111]">
+                            <span className="text-[#00B32D] mr-1">03</span>Collect
+                          </div>
+                          <p className="text-[11px] text-[#555555] leading-snug mt-0.5">
+                            Pick up your prints.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* 8. Bottom */}
+                      <div className="pt-2 border-t border-[#ECEFEC] flex items-center justify-between text-[11px]">
+                        <span className="font-medium text-[#111111]">
+                          Your documents, printed with ease.
+                        </span>
+                        <span className="font-semibold text-[#00B32D]">
+                          Powered by EasyToPrint
+                        </span>
                       </div>
                     </div>
 
-                    {/* QR Column */}
-                    <div className="flex flex-col items-center justify-center space-y-2">
-                      <div className="p-3 bg-white border-2 border-slate-900 rounded-2xl shadow-sm inline-block">
-                        <canvas ref={canvasRef} className="rounded-lg mx-auto" />
+                    {/* Right Column: Prominent QR Code + Manual Shop Code */}
+                    <div className="sm:col-span-5 flex flex-col items-center justify-center space-y-3 text-center">
+                      <div className="p-3 bg-white border border-[#E5E7EB] rounded-xl inline-block">
+                        {qrError ? (
+                          <div className="w-40 h-40 flex flex-col items-center justify-center text-center p-2 text-rose-600">
+                            <AlertCircle className="w-6 h-6 mb-1" />
+                            <span className="text-xs font-bold">Unable to render QR</span>
+                          </div>
+                        ) : (
+                          <canvas ref={canvasRef} className="block mx-auto max-w-full" />
+                        )}
                       </div>
-                      <span
-                        className={`text-[10px] font-bold uppercase tracking-widest ${
-                          styleMode === 'DARK' ? 'text-slate-400' : 'text-slate-500'
-                        }`}
-                      >
-                        Point camera or Google Lens
-                      </span>
+
+                      <div className="space-y-1.5 w-full">
+                        <p className="text-[11px] font-medium text-[#555555]">
+                          Can&apos;t scan? Enter your shop code manually.
+                        </p>
+                        <div className="inline-block px-4 py-1 rounded-lg bg-[#F5FBF6] border border-[#CDEED5]">
+                          <span className="text-lg font-extrabold tracking-wider text-[#111111]">
+                            #{currentShopCode}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  /* PORTRAIT LAYOUT (Default A5 / A4) */
-                  <div className="space-y-4 pt-1">
-                    {/* Shop Identity */}
-                    <div className="space-y-1">
-                      <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white font-black text-xl flex items-center justify-center mx-auto shadow-xs">
-                        {activeShop.name.charAt(0)}
-                      </div>
-                      <h3
-                        className={`text-lg sm:text-xl font-black tracking-tight ${
-                          styleMode === 'DARK' ? 'text-white' : 'text-slate-900'
-                        }`}
-                      >
-                        {activeShop.name}
-                      </h3>
-                      <p
-                        className={`text-[11px] font-semibold uppercase tracking-wider ${
-                          styleMode === 'DARK' ? 'text-slate-400' : 'text-slate-500'
-                        }`}
-                      >
-                        {activeShop.city || activeShop.address || 'Smart Counter Station'}
-                      </p>
-                    </div>
-
-                    {/* Stand Headline */}
-                    <div className="space-y-1">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200 inline-block">
-                        Self-Service Counter
-                      </span>
-                      <h4
-                        className={`text-2xl font-black tracking-tight ${
-                          styleMode === 'DARK' ? 'text-white' : 'text-slate-950'
-                        }`}
-                      >
-                        SCAN TO PRINT
-                      </h4>
-                      <p
-                        className={`text-xs max-w-xs mx-auto leading-relaxed ${
-                          styleMode === 'DARK' ? 'text-slate-300' : 'text-slate-600'
-                        }`}
-                      >
-                        Scan with your phone. Upload documents, select copies & colors, and collect prints instantly.
-                      </p>
-                    </div>
-
-                    {/* Real Generated QR Box */}
-                    <div className="p-3 sm:p-4 bg-white border-2 border-slate-900 rounded-2xl shadow-sm inline-block my-1">
-                      {qrError ? (
-                        <div className="w-48 h-48 flex flex-col items-center justify-center text-center p-3 text-rose-600">
-                          <AlertCircle className="w-8 h-8 mb-2" />
-                          <span className="text-xs font-bold">Unable to render QR</span>
-                          <button
-                            onClick={() => window.location.reload()}
-                            className="mt-2 text-[10px] font-bold text-blue-600 underline"
-                          >
-                            Try Again
-                          </button>
-                        </div>
-                      ) : (
-                        <canvas ref={canvasRef} className="rounded-lg mx-auto block max-w-full" />
-                      )}
-                    </div>
-
-                    {/* Simple Instructions on Stand */}
-                    <div className="space-y-2 pt-1">
-                      <div
-                        className={`grid grid-cols-3 gap-1.5 text-center ${
-                          styleMode === 'DARK' ? 'text-slate-200' : 'text-slate-700'
-                        }`}
-                      >
-                        <div
-                          className={`p-1.5 rounded-xl border ${
-                            styleMode === 'DARK'
-                              ? 'bg-slate-800/80 border-slate-700'
-                              : 'bg-slate-50 border-slate-100'
-                          }`}
-                        >
-                          <Smartphone className="w-3.5 h-3.5 mx-auto mb-0.5 text-blue-500" />
-                          <span className="font-bold text-[10px] block leading-tight">1. Scan</span>
-                          <span className="text-[9px] text-slate-400">Phone camera</span>
-                        </div>
-                        <div
-                          className={`p-1.5 rounded-xl border ${
-                            styleMode === 'DARK'
-                              ? 'bg-slate-800/80 border-slate-700'
-                              : 'bg-slate-50 border-slate-100'
-                          }`}
-                        >
-                          <Upload className="w-3.5 h-3.5 mx-auto mb-0.5 text-indigo-400" />
-                          <span className="font-bold text-[10px] block leading-tight">2. Upload</span>
-                          <span className="text-[9px] text-slate-400">PDF / Photos</span>
-                        </div>
-                        <div
-                          className={`p-1.5 rounded-xl border ${
-                            styleMode === 'DARK'
-                              ? 'bg-slate-800/80 border-slate-700'
-                              : 'bg-slate-50 border-slate-100'
-                          }`}
-                        >
-                          <Printer className="w-3.5 h-3.5 mx-auto mb-0.5 text-emerald-400" />
-                          <span className="font-bold text-[10px] block leading-tight">3. Collect</span>
-                          <span className="text-[9px] text-slate-400">At counter</span>
-                        </div>
+                  /* ================= A5 PORTRAIT MINIMAL & PROFESSIONAL LAYOUT ================= */
+                  <>
+                    {/* 1–3. Top Section: Small Logo + Brand Name, Main Heading, Subtitle */}
+                    <div className="space-y-2.5">
+                      {/* 1. Top: Small EasyToPrint logo and brand name */}
+                      <div className="flex items-center justify-center gap-2">
+                        <img
+                          src="/assets/easytoprint-logo.svg"
+                          alt="EasyToPrint"
+                          className="w-5 h-5 object-contain"
+                        />
+                        <span className="text-sm font-bold tracking-tight text-[#111111]">
+                          Easy<span className="text-[#00B32D]">To</span>Print
+                        </span>
                       </div>
 
-                      <div
-                        className={`py-1.5 px-3 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 ${
-                          styleMode === 'DARK'
-                            ? 'bg-slate-800 text-blue-300 border border-slate-700'
-                            : 'bg-blue-50 border border-blue-200/80 text-blue-900'
-                        }`}
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
-                        <span>No App Required · Pay Online Securely</span>
+                      {/* 2. Main heading & 3. Subtitle */}
+                      <div className="space-y-1 pt-0.5">
+                        <h3 className="text-[26px] sm:text-[28px] font-extrabold tracking-tight text-[#111111] leading-tight">
+                          Printing Made Easy.
+                        </h3>
+                        <p className="text-sm sm:text-[15px] font-semibold text-[#00B32D] tracking-normal">
+                          Scan. Upload. Pay. Collect.
+                        </p>
                       </div>
                     </div>
 
-                    {/* Bottom Micro Brand */}
-                    <div className="text-[9px] text-slate-400 font-mono pt-1">
-                      Instant Counter Token · Powered by PrintFlow Cloud
+                    {/* 4–6. Center Section: Prominent QR Code + Manual Shop Code */}
+                    <div className="flex flex-col items-center justify-center space-y-3 my-1">
+                      {/* 4. Center: Large, clearly visible QR code with sufficient white space around it */}
+                      <div className="p-3.5 sm:p-4 bg-white border border-[#E5E7EB] rounded-2xl inline-block">
+                        {qrError ? (
+                          <div className="w-52 h-52 flex flex-col items-center justify-center text-center p-2 text-rose-600">
+                            <AlertCircle className="w-6 h-6 mb-1" />
+                            <span className="text-xs font-bold">Unable to render QR</span>
+                          </div>
+                        ) : (
+                          <canvas ref={canvasRef} className="block mx-auto max-w-full" />
+                        )}
+                      </div>
+
+                      {/* 5. Below QR & 6. Shop Code */}
+                      <div className="space-y-1.5 pt-0.5">
+                        <p className="text-xs font-medium text-[#555555]">
+                          Can&apos;t scan? Enter your shop code manually.
+                        </p>
+                        <div className="inline-block px-5 py-1.5 rounded-lg bg-[#F5FBF6] border border-[#CDEED5]">
+                          <span className="text-xl sm:text-2xl font-extrabold tracking-wider text-[#111111] select-all">
+                            #{currentShopCode}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+
+                    {/* 7–8. Bottom Section: 3 Horizontal Steps + Footer */}
+                    <div className="space-y-3.5">
+                      {/* 7. Three simple steps in one horizontal row */}
+                      <div className="grid grid-cols-3 gap-2.5 pt-3.5 border-t border-[#ECEFEC] text-left">
+                        <div className="space-y-0.5">
+                          <div className="text-xs font-bold text-[#111111]">
+                            <span className="text-[#00B32D] font-extrabold mr-1">01</span>
+                            <span>Scan</span>
+                          </div>
+                          <p className="text-[11px] text-[#555555] leading-snug">
+                            Scan the QR code.
+                          </p>
+                        </div>
+
+                        <div className="space-y-0.5">
+                          <div className="text-xs font-bold text-[#111111]">
+                            <span className="text-[#00B32D] font-extrabold mr-1">02</span>
+                            <span>Upload</span>
+                          </div>
+                          <p className="text-[11px] text-[#555555] leading-snug">
+                            Select your document.
+                          </p>
+                        </div>
+
+                        <div className="space-y-0.5">
+                          <div className="text-xs font-bold text-[#111111]">
+                            <span className="text-[#00B32D] font-extrabold mr-1">03</span>
+                            <span>Collect</span>
+                          </div>
+                          <p className="text-[11px] text-[#555555] leading-snug">
+                            Pick up your prints.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* 8. Bottom */}
+                      <div className="pt-2.5 border-t border-[#ECEFEC] space-y-0.5 text-center">
+                        <p className="text-xs font-medium text-[#111111]">
+                          Your documents, printed with ease.
+                        </p>
+                        <p className="text-[11px] font-semibold text-[#00B32D]">
+                          Powered by EasyToPrint
+                        </p>
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
-
-              {/* Realistic Tabletop Acrylic Base Shadow / Stand Foot */}
-              <div className="w-48 sm:w-64 h-3 bg-slate-300/80 rounded-full blur-[2px] mt-2 opacity-80" />
             </div>
 
-            {/* PREVIEW CONTROLS (Format / Orientation / Design Style) */}
-            <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* 3. ESSENTIAL CUSTOMIZATION CONTROLS */}
+            <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3.5">
               {/* Format Control */}
               <div className="space-y-1">
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
@@ -633,6 +627,7 @@ export const ShopQrCodes: React.FC = () => {
                 </span>
                 <div className="flex bg-slate-100 p-1 rounded-xl">
                   <button
+                    type="button"
                     onClick={() => setFormat('A5')}
                     className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                       format === 'A5'
@@ -640,9 +635,10 @@ export const ShopQrCodes: React.FC = () => {
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    A5 (Desk Stand)
+                    A5 Desk Stand
                   </button>
                   <button
+                    type="button"
                     onClick={() => setFormat('A4')}
                     className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                       format === 'A4'
@@ -650,7 +646,7 @@ export const ShopQrCodes: React.FC = () => {
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    A4 (Full Sheet)
+                    A4 Full Sheet
                   </button>
                 </div>
               </div>
@@ -662,6 +658,7 @@ export const ShopQrCodes: React.FC = () => {
                 </span>
                 <div className="flex bg-slate-100 p-1 rounded-xl">
                   <button
+                    type="button"
                     onClick={() => setOrientation('PORTRAIT')}
                     className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                       orientation === 'PORTRAIT'
@@ -672,6 +669,7 @@ export const ShopQrCodes: React.FC = () => {
                     Portrait
                   </button>
                   <button
+                    type="button"
                     onClick={() => setOrientation('LANDSCAPE')}
                     className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
                       orientation === 'LANDSCAPE'
@@ -684,172 +682,23 @@ export const ShopQrCodes: React.FC = () => {
                 </div>
               </div>
 
-              {/* Design Style Control */}
+              {/* Print Specification Readout */}
               <div className="space-y-1">
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                  Design Theme
+                  Print Dimensions
                 </span>
-                <div className="flex bg-slate-100 p-1 rounded-xl">
-                  <button
-                    onClick={() => setStyleMode('STANDARD')}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                      styleMode === 'STANDARD'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Classic
-                  </button>
-                  <button
-                    onClick={() => setStyleMode('MINIMAL')}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                      styleMode === 'MINIMAL'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Minimal
-                  </button>
-                  <button
-                    onClick={() => setStyleMode('DARK')}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                      styleMode === 'DARK'
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Dark
-                  </button>
+                <div className="px-3 py-2 bg-slate-100 rounded-xl text-xs font-bold text-[#111111] text-center">
+                  {format === 'A5'
+                    ? orientation === 'PORTRAIT'
+                      ? '148 × 210 mm (A5)'
+                      : '210 × 148 mm (A5)'
+                    : orientation === 'PORTRAIT'
+                    ? '210 × 297 mm (A4)'
+                    : '297 × 210 mm (A4)'}
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* =========================================================================
-          3. WHERE SHOULD YOU PLACE YOUR QR? (Placement Guide)
-         ========================================================================= */}
-      <div className="no-print bg-white p-6 sm:p-7 rounded-2xl border border-slate-200 shadow-xs space-y-5">
-        <div>
-          <h2 className="text-base sm:text-lg font-bold text-slate-900">
-            Where Should You Place Your QR Stand?
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Optimize your shop layout so walk-in customers can immediately start ordering without waiting.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/60 space-y-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center font-bold">
-              <Store className="w-4 h-4" />
-            </div>
-            <h3 className="text-xs font-bold text-slate-900">1. Billing Counter Desk</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Place right beside your cash drawer or billing monitor where customers queue up to place orders.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/60 space-y-2">
-            <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center font-bold">
-              <Building2 className="w-4 h-4" />
-            </div>
-            <h3 className="text-xs font-bold text-slate-900">2. Storefront Glass / Waiting Area</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Ideal for visible storefront placement so walk-in customers can upload and pay before stepping inside.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/60 space-y-2">
-            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center font-bold">
-              <Printer className="w-4 h-4" />
-            </div>
-            <h3 className="text-xs font-bold text-slate-900">3. Xerox Machine Station</h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Self-service station directly next to the printer output tray for immediate document pickup.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* =========================================================================
-          4. COUNTER STAND PRINTING GUIDELINES & BEST PRACTICES
-         ========================================================================= */}
-      <div className="no-print bg-white p-6 sm:p-7 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-        <div className="flex items-center gap-2">
-          <FileCheck className="w-5 h-5 text-blue-600" />
-          <h2 className="text-base font-bold text-slate-900">
-            Counter Stand Printing & Material Guide
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-            <span className="font-bold text-slate-900 block">1. Recommended Material</span>
-            <p className="text-slate-500 text-[11px] leading-relaxed">
-              Use standard A5 Clear Acrylic L-Stand or T-Stand (readily available for ₹80–₹140).
-            </p>
-          </div>
-
-          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-            <span className="font-bold text-slate-900 block">2. Paper Weight</span>
-            <p className="text-slate-500 text-[11px] leading-relaxed">
-              Print on 250–300 GSM photo paper or heavy cardstock to prevent curling or fading.
-            </p>
-          </div>
-
-          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-            <span className="font-bold text-slate-900 block">3. Lamination Tip</span>
-            <p className="text-slate-500 text-[11px] leading-relaxed">
-              Hot matte or gloss lamination protects the QR from counter tea spills, grease, and dust.
-            </p>
-          </div>
-
-          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-            <span className="font-bold text-slate-900 block">4. Test Before Deploy</span>
-            <p className="text-slate-500 text-[11px] leading-relaxed">
-              Test-scan with both Android Google Lens and iPhone Camera from 1–2 feet away under shop lights.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* =========================================================================
-          5. QUICK ACTIONS BOTTOM BAR
-         ========================================================================= */}
-      <div className="no-print bg-slate-900 text-white p-5 rounded-2xl shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="space-y-0.5 text-center sm:text-left">
-          <h3 className="text-sm font-bold text-white">Ready to deploy your tabletop stand?</h3>
-          <p className="text-xs text-slate-300">
-            Print flyer in A5/A4 or download high-res PNG for acrylic tabletop stands.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2.5 flex-wrap justify-center">
-          <button
-            onClick={downloadQrCode}
-            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 transition-colors cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Download QR</span>
-          </button>
-          <button
-            onClick={triggerBrowserPrint}
-            className="px-4 py-2.5 bg-white text-slate-900 hover:bg-slate-100 font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 transition-colors cursor-pointer"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Print QR Stand</span>
-          </button>
-          <a
-            href={`/s/${activeShop.slug || 'shop'}`}
-            target="_blank"
-            rel="noreferrer"
-            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-            <span>Open Customer View</span>
-          </a>
         </div>
       </div>
     </div>

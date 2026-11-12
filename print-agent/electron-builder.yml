@@ -1,24 +1,31 @@
 appId: com.printflow.agent
-productName: PrintFlow Agent
+productName: EasyToPrint Agent
 directories:
   output: release
   buildResources: build
 files:
   - dist/**/*
+  - build/**/*
   - package.json
 win:
+  icon: build/icon.ico
+  executableName: EasyToPrint Agent
   signAndEditExecutable: false
   target:
     - target: nsis
       arch:
         - x64
-  artifactName: ${productName}-Setup-${version}.${ext}
+  artifactName: EasyToPrint-Agent-Setup.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: PrintFlow Agent
+  shortcutName: EasyToPrint Agent
+  uninstallDisplayName: EasyToPrint Agent
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
   runAfterFinish: true
 publish:
   provider: generic

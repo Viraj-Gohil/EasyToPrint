@@ -55,7 +55,7 @@ export const AdminAgents: React.FC = () => {
             placeholder="Search agents by hostname, shop, IP address..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3.5 h-10 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+            className="w-full pl-9 pr-3.5 h-10 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all"
           />
         </div>
 
@@ -67,7 +67,7 @@ export const AdminAgents: React.FC = () => {
                 onClick={() => setStatusFilter(st)}
                 className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer capitalize ${
                   statusFilter === st
-                    ? 'bg-white text-purple-700 shadow-2xs font-bold'
+                    ? 'bg-white text-[#008F25] shadow-2xs font-bold'
                     : 'hover:text-slate-900'
                 }`}
               >
@@ -128,7 +128,7 @@ export const AdminAgents: React.FC = () => {
                 return (
                   <TableRow key={d.id}>
                     <TableCell className="font-mono font-semibold text-slate-900 flex items-center gap-2">
-                      <Cpu className="w-4 h-4 text-purple-600 shrink-0" />
+                      <Cpu className="w-4 h-4 text-[#00B52D] shrink-0" />
                       <span>{d.deviceName}</span>
                     </TableCell>
 
@@ -144,7 +144,7 @@ export const AdminAgents: React.FC = () => {
                       {d.ipAddress || '127.0.0.1'}
                     </TableCell>
 
-                    <TableCell className="text-blue-600 font-semibold">
+                    <TableCell className="text-[#008F25] font-semibold">
                       {d.printerCount ?? d.connectedPrintersCount ?? 1} USB/LAN printers
                     </TableCell>
 

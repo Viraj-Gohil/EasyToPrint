@@ -1,23 +1,105 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-IN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://api.razorpay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.razorpay.com; connect-src 'self' https://api.razorpay.com https://*.razorpay.com; frame-src 'self' https://api.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self';" />
-    <title>EasyToPrint – All-in-One Print Shop Management & Automation Platform</title>
-    <meta name="description" content="Run your Xerox shop on autopilot. Manage print orders, automate printer workflows, accept online payments, and grow your printing business with EasyToPrint." />
-    <meta property="og:title" content="EasyToPrint – All-in-One Print Shop Management & Automation Platform" />
-    <meta property="og:description" content="Run your Xerox shop on autopilot. Manage print orders, automate printer workflows, accept online payments, and grow your printing business with EasyToPrint." />
+    <link rel="icon" type="image/svg+xml" href="/assets/easytoprint-logo.svg" />
+    <link rel="apple-touch-icon" href="/assets/easytoprint-logo-light.png" />
+    <meta name="theme-color" content="#00B52D" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://api.razorpay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.razorpay.com https://easytoprint.devpixel.space; connect-src 'self' https://api.razorpay.com https://*.razorpay.com; frame-src 'self' https://api.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self';" />
+    <title>EasyToPrint – Print Shop Management &amp; Automation Software</title>
+    <meta name="description" content="Simplify your printing business with EasyToPrint. Manage print orders, customer uploads, QR-based ordering, payments and automated printing from one platform." />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://easytoprint.devpixel.space/" />
+
+    <!-- Open Graph Metadata -->
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="EasyToPrint" />
+    <meta property="og:locale" content="en_IN" />
+    <meta property="og:title" content="EasyToPrint – Print Shop Management &amp; Automation Software" />
+    <meta property="og:description" content="Simplify your printing business with EasyToPrint. Manage print orders, customer uploads, QR-based ordering, payments and automated printing from one platform." />
+    <meta property="og:url" content="https://easytoprint.devpixel.space/" />
+    <meta property="og:image" content="https://easytoprint.devpixel.space/assets/easytoprint-logo-light.png" />
+
+    <!-- Twitter Card Metadata -->
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="EasyToPrint – Print Shop Management &amp; Automation Software" />
+    <meta name="twitter:description" content="Simplify your printing business with EasyToPrint. Manage print orders, customer uploads, QR-based ordering, payments and automated printing from one platform." />
+    <meta name="twitter:image" content="https://easytoprint.devpixel.space/assets/easytoprint-logo-light.png" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- Razorpay Standard Checkout SDK -->
-    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <!-- Razorpay Standard Checkout SDK (non-blocking) -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
+
+    <!-- JSON-LD Structured Data -->
+    <script id="easytoprint-jsonld" type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://easytoprint.devpixel.space/#organization",
+            "name": "EasyToPrint",
+            "url": "https://easytoprint.devpixel.space/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://easytoprint.devpixel.space/assets/easytoprint-logo-light.png"
+            },
+            "description": "Print Shop Automation SaaS for Xerox and Printing Businesses in India. Manage QR-based print ordering, customer file uploads, UPI payments, and automated Windows printing."
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://easytoprint.devpixel.space/#website",
+            "url": "https://easytoprint.devpixel.space/",
+            "name": "EasyToPrint",
+            "inLanguage": "en-IN",
+            "publisher": {
+              "@id": "https://easytoprint.devpixel.space/#organization"
+            }
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://easytoprint.devpixel.space/#software",
+            "name": "EasyToPrint",
+            "applicationCategory": "BusinessApplication",
+            "operatingSystem": "Web Browser, Windows 10, Windows 11",
+            "description": "Print shop management and automation software for Xerox businesses, printing shops, and reprography centres in India.",
+            "url": "https://easytoprint.devpixel.space/",
+            "publisher": {
+              "@id": "https://easytoprint.devpixel.space/#organization"
+            }
+          }
+        ]
+      }
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900 font-sans antialiased">
-    <div id="root"></div>
+    <div id="root">
+      <!-- Crawlable Initial HTML Content for Search Engines -->
+      <main>
+        <h1>Simplify Your Printing Business with EasyToPrint</h1>
+        <p>EasyToPrint is a Print Shop Automation SaaS for Xerox and printing businesses in India. Manage print orders, customer uploads, QR-based ordering, UPI payments, and automated Windows printing from one platform.</p>
+        <h2>Everything Your Print Shop Needs in One Platform</h2>
+        <h2>QR-Based Online Print Ordering</h2>
+        <h2>Manage Print Orders from One Dashboard</h2>
+        <h2>Automate Printing with Desktop Print Agent</h2>
+        <h2>Designed for Xerox and Printing Businesses</h2>
+        <h2>Frequently Asked Questions</h2>
+        <nav aria-label="Primary Public Pages">
+          <a href="/">Home</a>
+          <a href="/features">Features</a>
+          <a href="/qr-print-ordering">QR Print Ordering</a>
+          <a href="/print-shop-management">Print Shop Management</a>
+          <a href="/print-agent">EasyToPrint Windows Agent</a>
+          <a href="/pricing">Pricing</a>
+          <a href="/about">About EasyToPrint</a>
+          <a href="/contact">Contact Us</a>
+          <a href="/faq">FAQ</a>
+        </nav>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

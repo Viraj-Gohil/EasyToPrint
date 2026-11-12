@@ -11,6 +11,7 @@ export interface DurableShop {
   email: string;
   status: 'ACTIVE' | 'SUSPENDED' | 'PENDING';
   isOpen: boolean;
+  shopCode?: string;
   businessHours?: string;
   logoUrl?: string;
   primaryColor?: string;
@@ -84,6 +85,7 @@ export class NeonBusinessRepository {
     try {
       const result = await client.query<DurableShop>(
         `SELECT id::text, slug, name, tagline, address, phone, email, status,
+                shop_code AS "shopCode",
                 is_open AS "isOpen", business_hours AS "businessHours",
                 logo_url AS "logoUrl", primary_color AS "primaryColor",
                 min_order_amount::float * 100 AS "minOrderAmount",
@@ -98,12 +100,34 @@ export class NeonBusinessRepository {
     }
   }
 
+  async findActiveShopByCode(shopCode: string): Promise<DurableShop | null> {
+    if (!/^\d{6}$/.test(shopCode)) throw new Error('shop code must be exactly 6 digits.');
+    const client = await this.database.connect();
+    try {
+      const result = await client.query<DurableShop>(
+        `SELECT id::text, slug, name, tagline, address, phone, email, status,
+                shop_code AS "shopCode",
+                is_open AS "isOpen", business_hours AS "businessHours",
+                logo_url AS "logoUrl", primary_color AS "primaryColor",
+                min_order_amount::float * 100 AS "minOrderAmount",
+                auto_accept AS "autoAccept",
+                current_plan_id::text AS "currentPlanId"
+         FROM public.shops WHERE shop_code = $1 AND status = 'ACTIVE' LIMIT 1`,
+        [shopCode]
+      );
+      return result.rowCount ? result.rows[0] : null;
+    } finally {
+      client.release();
+    }
+  }
+
   async findShopById(shopId: string): Promise<DurableShop | null> {
     uuid('shopId', shopId);
     const client = await this.database.connect();
     try {
       const result = await client.query<DurableShop>(
         `SELECT id::text, slug, name, tagline, address, phone, email, status,
+                shop_code AS "shopCode",
                 is_open AS "isOpen", business_hours AS "businessHours",
                 logo_url AS "logoUrl", primary_color AS "primaryColor",
                 min_order_amount::float * 100 AS "minOrderAmount",
@@ -124,6 +148,7 @@ export class NeonBusinessRepository {
     try {
       const result = await client.query<DurableShop>(
         `SELECT id::text, slug, name, tagline, address, phone, email, status,
+                shop_code AS "shopCode",
                 is_open AS "isOpen", business_hours AS "businessHours",
                 logo_url AS "logoUrl", primary_color AS "primaryColor",
                 min_order_amount::float * 100 AS "minOrderAmount",

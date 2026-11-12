@@ -59,21 +59,22 @@ const DEFAULT_SUPPORT_SETTINGS: SupportSettings = {
     LOW: { responseHours: 8, resolveHours: 48 }
   },
   businessHoursOnly: false,
-  supportEmail: 'support@printflow.in',
-  escalationEmail: 'support@printflow.in'
+  supportEmail: 'support@easytoprint.in',
+  escalationEmail: 'support@easytoprint.in'
 };
 
 const SUPPORT_ADMIN_USERS = [
-  { id: 'usr_admin', name: 'Platform Super Admin', email: 'admin@printflow.io', role: 'ADMIN' as const }
+  { id: 'usr_admin', name: 'Platform Super Admin', email: 'admin@easytoprint.io', role: 'ADMIN' as const }
 ];
 
 export const EMPTY_SHOP: Shop = {
   id: 'shop_default',
-  name: 'PrintFlow Counter',
+  name: 'EasyToPrint Counter',
   slug: 'printflow-counter',
+  shopCode: '100001',
   ownerId: 'owner_default',
   ownerName: 'Counter Manager',
-  ownerEmail: 'shop@printflow.io',
+  ownerEmail: 'shop@easytoprint.io',
   ownerPhone: '+91 98765 43210',
   status: 'ACTIVE',
   planId: 'plan_growth',
@@ -571,7 +572,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUser(serverUser);
     setActiveShopId(serverShop.id);
 
-    showToast('Shop Registered Successfully!', `Welcome to PrintFlow, ${data.ownerName}!`, 'success', 4000);
+    showToast('Shop Registered Successfully!', `Welcome to EasyToPrint, ${data.ownerName}!`, 'success', 4000);
     navigate('/shop/dashboard');
     return { success: true };
   };
@@ -1537,10 +1538,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return next;
       });
       addAuditLog('AGENT_TOKEN_REGENERATED', 'SETTINGS', agentId, 'New auth token issued for print agent');
-      showToast('Token Generated Successfully', 'Token copied! Enter this in PrintFlow Desktop Agent.', 'success', 3000);
+      showToast('Token Generated Successfully', 'Token copied! Enter this in EasyToPrint Desktop Agent.', 'success', 3000);
       return { success: true, token: newToken };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to contact PrintFlow server';
+      const message = error instanceof Error ? error.message : 'Unable to contact EasyToPrint server';
       showToast('Token Generation Failed', message, 'error', 4000);
       return { success: false, error: message };
     }
@@ -2541,7 +2542,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           await new Promise((resolve) => window.setTimeout(resolve, 500));
         }
         if (!response?.ok || !result.success) {
-          throw new Error(result.error || `Could not load PrintFlow data from Neon (HTTP ${response?.status || 0}).`);
+          throw new Error(result.error || `Could not load EasyToPrint data from Neon (HTTP ${response?.status || 0}).`);
         }
         if (cancelled) return;
 

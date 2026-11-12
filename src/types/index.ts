@@ -92,6 +92,7 @@ export interface Shop {
   organizationId?: string;
   name: string;
   slug: string;
+  shopCode?: string;
   tagline?: string;
   ownerId?: string;
   ownerName: string;

@@ -75,7 +75,7 @@ export const AdminSystemHealth: React.FC = () => {
           size="sm"
           disabled={isPinging}
           onClick={handleRunDiagnostics}
-          className="bg-purple-600 hover:bg-purple-700 focus-visible:ring-purple-500"
+          className="bg-[#00B52D] hover:bg-[#008F25] focus-visible:ring-[#00B52D]"
         >
           {isPinging ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -131,7 +131,7 @@ export const AdminSystemHealth: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-medium text-slate-500">Print Agents Fleet</span>
-            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-[#E8F8EC] text-[#008F25] flex items-center justify-center border border-[#A7F3D0]">
               <Cpu className="w-4 h-4" />
             </div>
           </div>
@@ -148,7 +148,7 @@ export const AdminSystemHealth: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200/90 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-medium text-slate-500">Queue Spool Backlog</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-[#E8F8EC] text-[#008F25] flex items-center justify-center border border-[#A7F3D0]">
               <Printer className="w-4 h-4" />
             </div>
           </div>
@@ -207,7 +207,7 @@ export const AdminSystemHealth: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/60 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <Server className="w-4 h-4 text-purple-600" />
+              <Server className="w-4 h-4 text-[#00B52D]" />
               <div>
                 <p className="text-xs font-semibold text-slate-900">Express API Gateway</p>
                 <p className="text-[11px] text-slate-500">Port 3000 · Node 22</p>
@@ -218,7 +218,7 @@ export const AdminSystemHealth: React.FC = () => {
 
           <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/60 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <Database className="w-4 h-4 text-purple-600" />
+              <Database className="w-4 h-4 text-[#00B52D]" />
               <div>
                 <p className="text-xs font-semibold text-slate-900">Neon / Supabase Pool</p>
                 <p className="text-[11px] text-slate-500">Connection Pool: 10 max</p>
@@ -229,7 +229,7 @@ export const AdminSystemHealth: React.FC = () => {
 
           <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/60 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <HardDrive className="w-4 h-4 text-purple-600" />
+              <HardDrive className="w-4 h-4 text-[#00B52D]" />
               <div>
                 <p className="text-xs font-semibold text-slate-900">Storage Bucket</p>
                 <p className="text-[11px] text-slate-500">print-documents (Private)</p>
@@ -240,7 +240,7 @@ export const AdminSystemHealth: React.FC = () => {
 
           <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/60 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <FileCode2 className="w-4 h-4 text-purple-600" />
+              <FileCode2 className="w-4 h-4 text-[#00B52D]" />
               <div>
                 <p className="text-xs font-semibold text-slate-900">Webhook Verifier</p>
                 <p className="text-[11px] text-slate-500">HMAC-SHA256 Signatures</p>
@@ -251,7 +251,7 @@ export const AdminSystemHealth: React.FC = () => {
 
           <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/60 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <Radio className="w-4 h-4 text-purple-600" />
+              <Radio className="w-4 h-4 text-[#00B52D]" />
               <div>
                 <p className="text-xs font-semibold text-slate-900">Electron M2M Service</p>
                 <p className="text-[11px] text-slate-500">Polling & Lease Recovery</p>
@@ -262,7 +262,7 @@ export const AdminSystemHealth: React.FC = () => {
 
           <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/60 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <ShieldCheck className="w-4 h-4 text-purple-600" />
+              <ShieldCheck className="w-4 h-4 text-[#00B52D]" />
               <div>
                 <p className="text-xs font-semibold text-slate-900">Audit & Log Redaction</p>
                 <p className="text-[11px] text-slate-500">Credential Sanitization</p>
@@ -320,7 +320,7 @@ function AgentFleetMonitoringSection() {
   if (loading) {
     return (
       <div className="bg-white p-6 rounded-xl border border-slate-200 text-center text-xs text-slate-500">
-        <Loader2 className="w-4 h-4 animate-spin mx-auto mb-2 text-purple-600" />
+        <Loader2 className="w-4 h-4 animate-spin mx-auto mb-2 text-[#00B52D]" />
         Loading Desktop Print Agent Fleet Telemetry...
       </div>
     );
@@ -344,7 +344,7 @@ function AgentFleetMonitoringSection() {
           </div>
           <button
             onClick={fetchOverview}
-            className="text-xs font-semibold text-purple-600 hover:text-purple-800 flex items-center gap-1 cursor-pointer"
+            className="text-xs font-semibold text-[#00B52D] hover:text-[#008F25] flex items-center gap-1 cursor-pointer"
           >
             <RefreshCw className="w-3 h-3" /> Refresh
           </button>
@@ -404,7 +404,7 @@ function AgentFleetMonitoringSection() {
                         <span className="font-bold text-slate-800">{diskFreeMb} GB</span>
                       </td>
                       <td className="py-2.5 px-3">
-                        <span className="font-bold text-purple-700">{agentStorageMb} MB</span>
+                        <span className="font-bold text-[#008F25]">{agentStorageMb} MB</span>
                       </td>
                       <td className="py-2.5 px-3">
                         <span className={`font-semibold ${a.spooler_status === 'RUNNING' ? 'text-emerald-600' : 'text-red-600'}`}>

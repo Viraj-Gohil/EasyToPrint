@@ -29,8 +29,8 @@ export const AdminPlatformSettings: React.FC = () => {
   const { adminRazorpay, platformPolicies, updatePlatformPolicies, navigate, showToast } = useApp();
 
   // Branding & General
-  const [platformName, setPlatformName] = useState('PrintFlow Cloud SaaS');
-  const [supportEmail, setSupportEmail] = useState('support@printflow.in');
+  const [platformName, setPlatformName] = useState('EasyToPrint Cloud SaaS');
+  const [supportEmail, setSupportEmail] = useState('support@easytoprint.in');
   const [supportPhone, setSupportPhone] = useState('+91 98250 12345');
   const [systemTagline, setSystemTagline] = useState('Touchless QR Xerox & Print Automation Engine');
 
@@ -100,7 +100,7 @@ export const AdminPlatformSettings: React.FC = () => {
 
   // Webhook
   const [webhookCopied, setWebhookCopied] = useState(false);
-  const webhookUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/platform-master` : 'https://api.printflow.in/api/webhooks/platform-master';
+  const webhookUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/platform-master` : 'https://api.easytoprint.in/api/webhooks/platform-master';
 
   const handleSavePolicies = (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,7 +140,7 @@ export const AdminPlatformSettings: React.FC = () => {
         {/* 2. PLATFORM IDENTITY & BRANDING */}
         <div className="bg-white p-5 sm:p-6 rounded-xl border border-slate-200/90 shadow-2xs space-y-4">
           <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
-            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-[#E8F8EC] text-[#008F25] flex items-center justify-center shrink-0 border border-[#A7F3D0]">
               <Building2 className="w-4 h-4" />
             </div>
             <div>
@@ -159,7 +159,7 @@ export const AdminPlatformSettings: React.FC = () => {
                 type="text"
                 value={platformName}
                 onChange={(e) => setPlatformName(e.target.value)}
-                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all"
               />
             </div>
 
@@ -172,7 +172,7 @@ export const AdminPlatformSettings: React.FC = () => {
                 type="email"
                 value={supportEmail}
                 onChange={(e) => setSupportEmail(e.target.value)}
-                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all"
               />
             </div>
 
@@ -185,7 +185,7 @@ export const AdminPlatformSettings: React.FC = () => {
                 type="text"
                 value={supportPhone}
                 onChange={(e) => setSupportPhone(e.target.value)}
-                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all"
               />
             </div>
 
@@ -198,7 +198,7 @@ export const AdminPlatformSettings: React.FC = () => {
                 type="text"
                 value={systemTagline}
                 onChange={(e) => setSystemTagline(e.target.value)}
-                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all"
               />
             </div>
           </div>
@@ -207,7 +207,7 @@ export const AdminPlatformSettings: React.FC = () => {
         {/* 3. TENANT POLICIES & STORAGE LIMITS */}
         <div className="bg-white p-5 sm:p-6 rounded-xl border border-slate-200/90 shadow-2xs space-y-4">
           <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
-            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-[#E8F8EC] text-[#008F25] flex items-center justify-center shrink-0 border border-[#A7F3D0]">
               <HardDrive className="w-4 h-4" />
             </div>
             <div>
@@ -228,7 +228,7 @@ export const AdminPlatformSettings: React.FC = () => {
                 max={168}
                 value={defaultRetentionHours}
                 onChange={(e) => setDefaultRetentionHours(Number(e.target.value))}
-                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all"
               />
               <p className="text-[11px] text-slate-500 leading-relaxed">
                 Customer files are securely purged by background cleanup jobs after this duration.
@@ -246,7 +246,7 @@ export const AdminPlatformSettings: React.FC = () => {
                 max={250}
                 value={maxUploadSizeMb}
                 onChange={(e) => setMaxUploadSizeMb(Number(e.target.value))}
-                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+                className="w-full h-10 px-3.5 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all"
               />
               <p className="text-[11px] text-slate-500 leading-relaxed">
                 Hard ceiling for single customer document uploads across all shop portals.
@@ -260,7 +260,7 @@ export const AdminPlatformSettings: React.FC = () => {
                 type="checkbox"
                 checked={autoApproveShops}
                 onChange={(e) => setAutoApproveShops(e.target.checked)}
-                className="w-4 h-4 rounded text-purple-600 border-slate-300 focus:ring-purple-500 mt-0.5 cursor-pointer"
+                className="w-4 h-4 rounded text-[#00B52D] border-slate-300 focus:ring-[#00B52D] mt-0.5 cursor-pointer"
               />
               <div>
                 <span className="font-semibold text-slate-900 block">Auto-approve newly registered shops</span>
@@ -273,7 +273,7 @@ export const AdminPlatformSettings: React.FC = () => {
                 type="checkbox"
                 checked={allowShopCustomGateways}
                 onChange={(e) => setAllowShopCustomGateways(e.target.checked)}
-                className="w-4 h-4 rounded text-purple-600 border-slate-300 focus:ring-purple-500 mt-0.5 cursor-pointer"
+                className="w-4 h-4 rounded text-[#00B52D] border-slate-300 focus:ring-[#00B52D] mt-0.5 cursor-pointer"
               />
               <div>
                 <span className="font-semibold text-slate-900 block">Allow shop owners to configure custom Razorpay gateways</span>
@@ -286,7 +286,7 @@ export const AdminPlatformSettings: React.FC = () => {
         {/* 4. NOTIFICATION & MESSAGING GATEWAYS */}
         <div className="bg-white p-5 sm:p-6 rounded-xl border border-slate-200/90 shadow-2xs space-y-4">
           <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-[#E8F8EC] text-[#008F25] flex items-center justify-center shrink-0 border border-[#A7F3D0]">
               <Bell className="w-4 h-4" />
             </div>
             <div>
@@ -304,7 +304,7 @@ export const AdminPlatformSettings: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setEmailGatewayEnabled(!emailGatewayEnabled)}
-                className="cursor-pointer text-purple-600"
+                className="cursor-pointer text-[#00B52D]"
               >
                 {emailGatewayEnabled ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6 text-slate-400" />}
               </button>
@@ -318,7 +318,7 @@ export const AdminPlatformSettings: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setSmsGatewayEnabled(!smsGatewayEnabled)}
-                className="cursor-pointer text-purple-600"
+                className="cursor-pointer text-[#00B52D]"
               >
                 {smsGatewayEnabled ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6 text-slate-400" />}
               </button>
@@ -332,7 +332,7 @@ export const AdminPlatformSettings: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setWhatsappNotifications(!whatsappNotifications)}
-                className="cursor-pointer text-purple-600"
+                className="cursor-pointer text-[#00B52D]"
               >
                 {whatsappNotifications ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6 text-slate-400" />}
               </button>
@@ -346,7 +346,7 @@ export const AdminPlatformSettings: React.FC = () => {
             variant="solid"
             size="md"
             disabled={isSavingPolicies}
-            className="bg-purple-600 hover:bg-purple-700 focus-visible:ring-purple-500"
+            className="bg-[#00B52D] hover:bg-[#008F25] focus-visible:ring-[#00B52D]"
           >
             {isSavingPolicies ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             <span>Save Platform Policies</span>
@@ -375,7 +375,7 @@ export const AdminPlatformSettings: React.FC = () => {
             <button
               type="button"
               onClick={() => setMaintenanceMode(!maintenanceMode)}
-              className="cursor-pointer text-purple-600"
+              className="cursor-pointer text-[#00B52D]"
             >
               {maintenanceMode ? <ToggleRight className="w-8 h-8" /> : <ToggleLeft className="w-8 h-8 text-slate-400" />}
             </button>
@@ -390,7 +390,7 @@ export const AdminPlatformSettings: React.FC = () => {
               rows={2}
               value={maintenanceNotice}
               onChange={(e) => setMaintenanceNotice(e.target.value)}
-              className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+              className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all"
             />
           </div>
 
@@ -401,7 +401,7 @@ export const AdminPlatformSettings: React.FC = () => {
               size="sm"
               disabled={isSavingMaintenance}
               onClick={handleSaveMaintenance}
-              className={!maintenanceMode ? 'bg-purple-600 hover:bg-purple-700' : ''}
+              className={!maintenanceMode ? 'bg-[#00B52D] hover:bg-[#008F25]' : ''}
             >
               {isSavingMaintenance ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
               <span>{maintenanceMode ? 'Apply Maintenance Mode' : 'Disable Maintenance Mode'}</span>

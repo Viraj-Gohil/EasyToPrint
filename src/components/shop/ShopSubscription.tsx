@@ -626,7 +626,7 @@ export const ShopSubscription: React.FC = () => {
                     <RazorpayCheckoutButton
                       amountInPaise={targetPlan.priceMonthly * 100}
                       currency="INR"
-                      name="PrintFlow Cloud Platform"
+                      name="EasyToPrint Cloud Platform"
                       description={`Subscription to ${targetPlan.name} Plan`}
                       buttonText={`Pay ₹${targetPlan.priceMonthly}/mo via Razorpay`}
                       variant="primary"

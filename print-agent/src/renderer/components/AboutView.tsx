@@ -29,8 +29,9 @@ export interface AboutViewProps {
 // Browser-safe process version accessor that prevents ReferenceError in web preview
 const getSafeProcessVersion = (key: string, fallback: string): string => {
   try {
-    if (typeof process !== 'undefined' && process && process.versions && (process.versions as any)[key]) {
-      return (process.versions as any)[key];
+    const proc = (globalThis as any).process;
+    if (proc && proc.versions && proc.versions[key]) {
+      return proc.versions[key];
     }
   } catch {
     // ignore
@@ -78,11 +79,11 @@ export const AboutView: React.FC<AboutViewProps> = ({
       await new Promise((resolve) => setTimeout(resolve, 1400));
       setUpdateStatus('latest');
       setLastCheckTime('Just now');
-      setToastMessage(`You are running the latest version (v${packageMetadata.version || '1.4.2'}) of PrintFlow Agent.`);
+      setToastMessage(`You are running the latest version (v${packageMetadata.version || '1.4.2'}) of EasyToPrint Agent.`);
       setTimeout(() => setToastMessage(null), 3500);
     } catch {
       setUpdateStatus('error');
-      setToastMessage('Failed to connect to PrintFlow update server.');
+      setToastMessage('Failed to connect to EasyToPrint update server.');
       setTimeout(() => setToastMessage(null), 3500);
     }
   };
@@ -99,7 +100,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
     const deviceId = config?.agentId || 'AP-8849-WIN';
 
     const diagText = [
-      `=== PrintFlow Agent System Diagnostics ===`,
+      `=== EasyToPrint Agent System Diagnostics ===`,
       `Application Version: v${packageMetadata.version || '1.4.2'}`,
       `Electron Version: v${electronVer}`,
       `Node.js Version: v${nodeVer}`,
@@ -167,10 +168,10 @@ export const AboutView: React.FC<AboutViewProps> = ({
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-[#E1E7E1] dark:border-slate-800">
         <div>
-          <h1 className="text-[24px] font-bold text-[#111111] dark:text-white tracking-tight">
-            About PrintFlow Agent
+          <h1 className="text-[24px] font-bold text-[#080808] dark:text-white tracking-tight">
+            About EasyToPrint Agent
           </h1>
-          <p className="text-[14px] text-[#646B65] dark:text-slate-400 mt-0.5">
+          <p className="text-[14px] text-[#777777] dark:text-slate-400 mt-0.5">
             Application build details, environment specifications, and support portal.
           </p>
         </div>
@@ -200,22 +201,27 @@ export const AboutView: React.FC<AboutViewProps> = ({
       <div className="pf-card p-5 border border-[#E1E7E1] dark:border-slate-800 bg-white dark:bg-[#131D33] rounded-2xl shadow-card space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-[#E8F8EC] dark:bg-emerald-950/60 border border-[#A7F3D0] dark:border-emerald-800 text-[#00B32D] flex items-center justify-center shrink-0 shadow-xs">
-              <Printer className="w-7 h-7 stroke-[2]" />
+            <div className="w-14 h-14 rounded-2xl bg-[#00B52D] text-white flex items-center justify-center shrink-0 shadow-md shadow-[#00B52D]/20">
+              <svg viewBox="0 0 28 28" fill="none" className="w-8 h-8" aria-hidden="true">
+                <path d="M8 9V4.5C8 3.94772 8.44772 3.5 9 3.5H19C19.5523 3.5 20 3.94772 20 4.5V9" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                <rect x="3.5" y="9" width="21" height="11" rx="3" stroke="currentColor" strokeWidth="2.2" />
+                <path d="M8 16.5H20V23.5C20 24.0523 19.5523 24.5 19 24.5H9C8.44772 24.5 8 24.0523 8 23.5V16.5Z" fill="white" stroke="currentColor" strokeWidth="2" />
+                <circle cx="19.5" cy="12.5" r="1.25" fill="white" />
+              </svg>
             </div>
             <div className="space-y-1">
               <div className="flex items-center gap-2.5 flex-wrap">
-                <h2 className="text-lg font-bold text-[#111111] dark:text-white">PrintFlow Desktop Agent</h2>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-[#F7F8F7] dark:bg-slate-800 text-[#111111] dark:text-slate-200 border border-[#E1E7E1] dark:border-slate-700">
+                <h2 className="text-lg font-bold text-[#080808] dark:text-white">EasyToPrint Agent</h2>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-[#F7F8F7] dark:bg-slate-800 text-[#080808] dark:text-slate-200 border border-[#E1E7E1] dark:border-slate-700">
                   v{appVersion}
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#E8F8EC] text-[#008F25] dark:bg-emerald-950/60 dark:text-emerald-300 border border-[#A7F3D0] dark:border-emerald-800 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#00B32D] animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#00B52D] animate-pulse" />
                   Active &amp; Spooling
                 </span>
               </div>
-              <p className="text-xs text-[#646B65] dark:text-slate-400 leading-relaxed max-w-2xl">
-                Native Windows Spooler Service bridging authorized PrintFlow web shops directly to physical shop printers with TLS encryption, crash-resilient queue safety, and DPAPI safeStorage vault.
+              <p className="text-xs text-[#777777] dark:text-slate-400 leading-relaxed max-w-2xl">
+                Native Windows Spooler Service bridging authorized EasyToPrint web shops directly to physical shop printers with TLS encryption, crash-resilient queue safety, and DPAPI safeStorage vault.
               </p>
             </div>
           </div>
@@ -459,7 +465,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
               <Store className="w-4 h-4 text-[#00B32D]" />
               <span className="text-[10px] font-bold text-[#646B65] group-hover:text-[#008F25]">Contact ↗</span>
             </div>
-            <span className="text-xs font-bold text-[#111111] dark:text-white block mt-2">Contact PrintFlow Support</span>
+            <span className="text-xs font-bold text-[#111111] dark:text-white block mt-2">Contact EasyToPrint Support</span>
             <p className="text-[11px] text-[#646B65] dark:text-slate-400 mt-0.5">Reach out directly for customer service and shop printer setup assistance.</p>
           </button>
         </div>
@@ -468,7 +474,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
       {/* 5. Legal & Application Footer */}
       <div className="pf-card p-4 border border-[#E1E7E1] dark:border-slate-800 bg-white dark:bg-[#131D33] rounded-2xl text-xs flex flex-col sm:flex-row items-center justify-between gap-3 text-[#646B65] dark:text-slate-400">
         <div>
-          <span className="font-semibold text-[#111111] dark:text-slate-200">© 2026 PrintFlow SaaS Inc.</span> All rights reserved. Enterprise Desktop Print Agent.
+          <span className="font-semibold text-[#111111] dark:text-slate-200">© 2026 EasyToPrint SaaS Inc.</span> All rights reserved. Enterprise Desktop Print Agent.
         </div>
 
         <div className="flex items-center gap-4 text-xs font-medium">
@@ -497,7 +503,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
             <div className="flex items-center justify-between pb-3 border-b border-[#E1E7E1] dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <FileText className="w-5 h-5 text-[#00B32D]" />
-                <h3 className="text-base font-bold text-[#111111] dark:text-white">PrintFlow Agent Release Notes</h3>
+                <h3 className="text-base font-bold text-[#111111] dark:text-white">EasyToPrint Agent Release Notes</h3>
               </div>
               <button
                 type="button"
@@ -515,7 +521,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#E8F8EC] text-[#008F25]">Latest</span>
                 </div>
                 <ul className="list-disc list-inside space-y-1 text-[#646B65] dark:text-slate-300">
-                  <li>QwikPrint minimal green visual redesign across all agent views.</li>
+                  <li>EasyToPrint minimal green visual branding across all agent views.</li>
                   <li>Printer Driver Setup Assistant and automated capability detection.</li>
                   <li>Optimized background Win32 spooler queue safety and lock recovery.</li>
                   <li>Enhanced system diagnostics and safe system info export.</li>

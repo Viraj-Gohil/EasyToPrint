@@ -1,9 +1,10 @@
 {
   "name": "printflow-agent",
+  "productName": "EasyToPrint Agent",
   "version": "1.4.2",
   "type": "module",
-  "description": "PrintFlow Cloud Windows Desktop Print Agent - Automated Spooler & Printer Integration",
-  "author": "PrintFlow Cloud Technologies",
+  "description": "EasyToPrint Agent - Windows Desktop Print Spooler & Printer Automation",
+  "author": "EasyToPrint Cloud Technologies",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "vite",

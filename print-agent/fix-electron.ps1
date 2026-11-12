@@ -1,6 +1,6 @@
-# PrintFlow Agent - Windows PowerShell Electron Repair Tool
+# EasyToPrint Agent - Windows PowerShell Electron Repair Tool
 Write-Host "======================================================" -ForegroundColor Cyan
-Write-Host "   PRINTFLOW AGENT - POWERSHELL ELECTRON REPAIR       " -ForegroundColor Cyan
+Write-Host "   EASYTOPRINT AGENT - POWERSHELL ELECTRON REPAIR     " -ForegroundColor Cyan
 Write-Host "======================================================" -ForegroundColor Cyan
 
 $CurrentDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -9,6 +9,7 @@ Set-Location $CurrentDir
 # 1. Kill locked processes
 Write-Host "`n[1/5] Terminating locked electron.exe instances..." -ForegroundColor Yellow
 Stop-Process -Name "electron" -Force -ErrorAction SilentlyContinue
+Stop-Process -Name "EasyToPrint Agent" -Force -ErrorAction SilentlyContinue
 Stop-Process -Name "PrintFlow Agent" -Force -ErrorAction SilentlyContinue
 
 # 2. Check path.txt and dist\electron.exe
@@ -58,7 +59,7 @@ if (Test-Path $ExeFile) {
     Write-Host " SUCCESS: Electron runtime is successfully fixed!" -ForegroundColor Green
     Write-Host " Binary: $ExeFile" -ForegroundColor Green
     Write-Host "======================================================" -ForegroundColor Green
-    Write-Host "`nYou can now launch PrintFlow Agent with:" -ForegroundColor White
+    Write-Host "`nYou can now launch EasyToPrint Agent with:" -ForegroundColor White
     Write-Host "  npm start`n" -ForegroundColor Yellow
 } else {
     Write-Host "`n[ERROR] Electron installation could not be completed." -ForegroundColor Red

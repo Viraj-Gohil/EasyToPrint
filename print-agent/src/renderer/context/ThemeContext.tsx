@@ -12,7 +12,8 @@ export interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
-const STORAGE_KEY = 'printflow_agent_theme';
+const STORAGE_KEY = 'easytoprint_agent_theme';
+const LEGACY_STORAGE_KEY = 'printflow_agent_theme';
 
 function getSystemMatchesDark(): boolean {
   if (typeof window === 'undefined' || !window.matchMedia) return false;
@@ -42,7 +43,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [theme, setThemeState] = useState<ThemePreference>(() => {
     if (typeof window === 'undefined') return 'system';
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
+      const stored = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
       if (stored === 'light' || stored === 'dark' || stored === 'system') {
         return stored;
       }

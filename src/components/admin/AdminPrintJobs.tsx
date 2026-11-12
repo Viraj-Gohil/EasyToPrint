@@ -57,7 +57,7 @@ export const AdminPrintJobs: React.FC = () => {
             placeholder="Search across all shops by Order ID, shop, customer..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3.5 h-10 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+            className="w-full pl-9 pr-3.5 h-10 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all"
           />
         </div>
 
@@ -65,7 +65,7 @@ export const AdminPrintJobs: React.FC = () => {
           <select
             value={selectedShop}
             onChange={(e) => setSelectedShop(e.target.value)}
-            className="h-10 bg-white border border-slate-200 rounded-xl px-3 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-600/20"
+            className="h-10 bg-white border border-slate-200 rounded-xl px-3 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20"
           >
             <option value="ALL">All Shops ({shops.length})</option>
             {shops.map((s) => (
@@ -80,7 +80,7 @@ export const AdminPrintJobs: React.FC = () => {
                 onClick={() => setStatusFilter(st)}
                 className={`px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer capitalize ${
                   statusFilter === st
-                    ? 'bg-white text-purple-700 shadow-2xs font-bold'
+                    ? 'bg-white text-[#008F25] shadow-2xs font-bold'
                     : 'hover:text-slate-900'
                 }`}
               >
@@ -141,7 +141,7 @@ export const AdminPrintJobs: React.FC = () => {
                 const firstFile = job.files[0];
                 return (
                   <TableRow key={job.id}>
-                    <TableCell className="font-mono font-semibold text-purple-700">
+                    <TableCell className="font-mono font-semibold text-[#008F25]">
                       {job.id}
                     </TableCell>
 

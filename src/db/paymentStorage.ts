@@ -14,6 +14,7 @@ import {
   validateOwnerConfigAgainstHardware,
   computeEffectiveCapabilities
 } from '../types/printerCapabilities';
+import { generateUniqueShopCode, isValidShopCode } from '../lib/shopCodeService';
 
 dotenv.config({ override: true });
 
@@ -661,7 +662,7 @@ export async function initializePaymentTables(maxRetries = 3): Promise<void> {
         WHERE slug IS NULL OR slug = '';
 
         UPDATE public.plans
-        SET description = COALESCE(description, tagline, 'Subscription plan for PrintFlow photocopy and print shops.')
+        SET description = COALESCE(description, tagline, 'Subscription plan for EasyToPrint photocopy and print shops.')
         WHERE description IS NULL OR description = '';
 
         UPDATE public.plans
@@ -786,19 +787,30 @@ export async function initializePaymentTables(maxRetries = 3): Promise<void> {
           END IF;
         END $$;
 
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'shops' AND column_name = 'shop_code'
+          ) THEN
+            ALTER TABLE public.shops ADD COLUMN shop_code VARCHAR(6);
+          END IF;
+        END $$;
+
         -- Ensure canonical default counter shop exists for public touchless QR flow
         INSERT INTO public.shops (
-          id, name, slug, tagline, address, phone, email, status, is_open,
+          id, name, slug, shop_code, tagline, address, phone, email, status, is_open,
           business_hours, logo_url, primary_color, min_order_amount, auto_accept,
           file_retention_days, razorpay_enabled, razorpay_test_mode, created_at, updated_at
         ) VALUES (
           'a001a111-0000-0000-0000-000000000001',
-          'PrintFlow Counter',
+          'EasyToPrint Counter',
           'printflow-counter',
+          '100001',
           'Instant Counter Xerox & Smart Print Station',
           'Central Campus Complex, Mumbai',
           '+91 98765 43210',
-          'shop@printflow.io',
+          'shop@easytoprint.io',
           'ACTIVE',
           true,
           '8:30 AM - 9:00 PM',
@@ -816,7 +828,39 @@ export async function initializePaymentTables(maxRetries = 3): Promise<void> {
           slug = 'printflow-counter',
           status = 'ACTIVE',
           is_open = true,
+          shop_code = COALESCE(public.shops.shop_code, '100001'),
           updated_at = NOW();
+
+        -- Safe backfill of shop_code for any shops lacking one
+        DO $$
+        DECLARE
+          rec RECORD;
+          new_code VARCHAR(6);
+          code_exists BOOLEAN;
+          attempts INT;
+        BEGIN
+          FOR rec IN SELECT id FROM public.shops WHERE shop_code IS NULL OR shop_code = '' LOOP
+            attempts := 0;
+            LOOP
+              new_code := LPAD(FLOOR(RANDOM() * 1000000)::TEXT, 6, '0');
+              SELECT EXISTS(SELECT 1 FROM public.shops WHERE shop_code = new_code) INTO code_exists;
+              EXIT WHEN NOT code_exists OR attempts > 200;
+              attempts := attempts + 1;
+            END LOOP;
+            UPDATE public.shops SET shop_code = new_code WHERE id = rec.id;
+          END LOOP;
+        END $$;
+
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint WHERE conname = 'shops_shop_code_key'
+          ) THEN
+            ALTER TABLE public.shops ADD CONSTRAINT shops_shop_code_key UNIQUE (shop_code);
+          END IF;
+        END $$;
+
+        CREATE INDEX IF NOT EXISTS idx_shops_shop_code ON public.shops(shop_code);
 
         INSERT INTO public.printflow_shop_mappings (client_shop_id, neon_shop_id, updated_at)
         VALUES 
@@ -3659,7 +3703,7 @@ export async function getShopAgentDetails(agentId: string, shopId: string): Prom
     // Ignore schema discrepancy fallbacks
   }
 
-  const shopName = shopRow?.name || 'PrintFlow Counter';
+  const shopName = shopRow?.name || 'EasyToPrint Counter';
   const shopSlug = shopRow?.slug || canonicalShopId.replace(/^shop_/, '').replace(/_/g, '-');
   const shopStatus = (shopRow?.status || 'ACTIVE') as 'ACTIVE' | 'SUSPENDED' | 'PENDING';
 
@@ -3667,7 +3711,7 @@ export async function getShopAgentDetails(agentId: string, shopId: string): Prom
     `SELECT agent_id, device_name FROM print_agent_devices WHERE agent_id = $1 AND is_revoked = false LIMIT 1`,
     [agentId]
   );
-  const deviceName = deviceRes.rowCount === 1 ? deviceRes.rows[0].device_name : 'PrintFlow Agent';
+  const deviceName = deviceRes.rowCount === 1 ? deviceRes.rows[0].device_name : 'EasyToPrint Agent';
 
   const entitlement = await getShopPrinterEntitlements(canonicalShopId);
   const allShopPrinters = await getShopPrintAgentPrinters(canonicalShopId);
@@ -4056,6 +4100,22 @@ export async function persistNewShopAndUser(input: PersistShopUserInput): Promis
   const token = getDeterministicAgentToken(shop.id);
   const now = new Date().toISOString();
 
+  const pool = requirePostgresPool();
+  const client = await pool.connect();
+  let assignedShopCode = isValidShopCode((shop as any).shopCode)
+    ? String((shop as any).shopCode).trim()
+    : '';
+
+  if (!assignedShopCode) {
+    try {
+      assignedShopCode = await generateUniqueShopCode(client);
+      (shop as any).shopCode = assignedShopCode;
+    } catch {
+      assignedShopCode = '100001';
+      (shop as any).shopCode = assignedShopCode;
+    }
+  }
+
   const defaultRules = input.pricingRules && input.pricingRules.length > 0 ? input.pricingRules : [
     { id: `pr_${Date.now()}_1`, shopId: shop.id, paperSize: 'A4', color: 'BW', sides: 'SINGLE', pricePerPage: 2.0 },
     { id: `pr_${Date.now()}_2`, shopId: shop.id, paperSize: 'A4', color: 'BW', sides: 'DOUBLE', pricePerPage: 1.5 },
@@ -4081,8 +4141,6 @@ export async function persistNewShopAndUser(input: PersistShopUserInput): Promis
     createdAt: now
   };
 
-  const pool = requirePostgresPool();
-  const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
@@ -4142,11 +4200,11 @@ export async function persistNewShopAndUser(input: PersistShopUserInput): Promis
 
       const shopInsertRes = await client.query(`
         INSERT INTO public.shops (
-          id, name, slug, address, phone, email, status, is_open, business_hours,
+          id, name, slug, shop_code, address, phone, email, status, is_open, business_hours,
           min_order_amount, auto_accept, file_retention_days, razorpay_enabled,
           razorpay_test_mode, created_at, updated_at
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, 'ACTIVE', true, '9:00 AM - 9:00 PM',
+          $1, $2, $3, $4, $5, $6, $7, 'ACTIVE', true, '9:00 AM - 9:00 PM',
           5.00, true, 7, true, false, NOW(), NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
@@ -4154,9 +4212,10 @@ export async function persistNewShopAndUser(input: PersistShopUserInput): Promis
           address = EXCLUDED.address,
           phone = EXCLUDED.phone,
           email = EXCLUDED.email,
+          shop_code = COALESCE(public.shops.shop_code, EXCLUDED.shop_code),
           updated_at = NOW()
         RETURNING id::text
-      `, [shopUuid, shop.name, shop.slug, shop.address || 'Counter Shop', user.phone || '9876543210', user.email]);
+      `, [shopUuid, shop.name, shop.slug, assignedShopCode, shop.address || 'Counter Shop', user.phone || '9876543210', user.email]);
 
       const effectiveShopUuid = shopInsertRes.rows[0]?.id || shopUuid;
 

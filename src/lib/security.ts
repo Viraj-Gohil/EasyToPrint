@@ -369,7 +369,7 @@ export function validateUploadFile(params: {
       isValid: false,
       code: 'UNSUPPORTED_FORMAT',
       userFacingTitle: 'Unsupported File Format',
-      userFacingMessage: 'This file format is not supported by PrintFlow.',
+      userFacingMessage: 'This file format is not supported by EasyToPrint.',
       detectedType: ext.replace('.', '').toUpperCase() || 'Unknown',
       supportedFormats: SUPPORTED_FILE_FORMATS,
       error: `File extension '${ext}' is not permitted. Only PDF, JPEG, PNG, and WEBP are accepted.`
@@ -383,10 +383,10 @@ export function validateUploadFile(params: {
       isValid: false,
       code: 'UNSUPPORTED_FORMAT',
       userFacingTitle: 'Unsupported File Format',
-      userFacingMessage: 'This file format is not supported by PrintFlow.',
+      userFacingMessage: 'This file format is not supported by EasyToPrint.',
       detectedType: sigResult.detectedType || ext.replace('.', '').toUpperCase(),
       supportedFormats: SUPPORTED_FILE_FORMATS,
-      error: `This file format (${sigResult.detectedType || ext}) is not supported by PrintFlow.`
+      error: `This file format (${sigResult.detectedType || ext}) is not supported by EasyToPrint.`
     };
   }
 
@@ -1108,7 +1108,7 @@ function computeTotpCode(secretBuffer: Buffer, timeStep: number): string {
 /**
  * Generates TOTP secret and QR code URI for authenticator enrollment
  */
-export function generateMfaEnrollment(userEmail: string, issuer = 'PrintFlow'): {
+export function generateMfaEnrollment(userEmail: string, issuer = 'EasyToPrint'): {
   secretBase32: string;
   otpauthUrl: string;
 } {

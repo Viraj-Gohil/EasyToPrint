@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../lib/store';
 import { apiUrl } from '../../lib/apiConfig';
+import QRCode from 'qrcode';
 import {
   Printer,
   Clock,
@@ -14,6 +15,7 @@ import {
   ExternalLink,
   Sparkles,
   Check,
+  Hash,
   Cpu,
   TrendingUp,
   Loader2,
@@ -44,6 +46,9 @@ export const ShopDashboard: React.FC = () => {
   } = useApp();
 
   const [copied, setCopied] = useState<boolean>(false);
+  const [codeCopied, setCodeCopied] = useState<boolean>(false);
+  const [serverShopCode, setServerShopCode] = useState<string>(activeShop.shopCode || '');
+  const qrMiniCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const [updatingJobId, setUpdatingJobId] = useState<string | null>(null);
 
   const [agentStatus, setAgentStatus] = useState<{
@@ -113,6 +118,79 @@ export const ShopDashboard: React.FC = () => {
       setTimeout(() => setCopied(false), 2500);
     } catch {
       showToast('Copy Failed', 'Unable to copy customer link to clipboard', 'error');
+    }
+  };
+
+  React.useEffect(() => {
+    if (!activeShop?.id) return;
+    let active = true;
+
+    async function loadShopCode() {
+      try {
+        const res = await fetch(apiUrl(`/api/shops/${encodeURIComponent(activeShop.id)}/access-code`), {
+          headers: {
+            'Authorization': 'Bearer admin_token_active',
+            'X-Shop-Id': activeShop.id,
+            'X-User-Role': 'SHOP_OWNER'
+          }
+        });
+        if (!active) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.shopCode) {
+            setServerShopCode(data.shopCode);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch shop access code:', err);
+      }
+    }
+
+    if (!serverShopCode) {
+      loadShopCode();
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [activeShop?.id, serverShopCode]);
+
+  React.useEffect(() => {
+    if (!qrMiniCanvasRef.current || !customerPortalUrl) return;
+    QRCode.toCanvas(
+      qrMiniCanvasRef.current,
+      customerPortalUrl,
+      {
+        width: 88,
+        margin: 1,
+        color: {
+          dark: '#0F172A',
+          light: '#FFFFFF'
+        }
+      },
+      () => {}
+    );
+  }, [customerPortalUrl]);
+
+  const displayShopCode = serverShopCode || activeShop.shopCode || '100001';
+
+  const handleCopyCode = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(displayShopCode);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = displayShopCode;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setCodeCopied(true);
+      showToast('Shop Code Copied!', `Code ${displayShopCode} copied to clipboard`, 'success', 2500);
+      setTimeout(() => setCodeCopied(false), 2200);
+    } catch {
+      showToast('Copy Failed', 'Unable to copy shop code to clipboard', 'error');
     }
   };
 
@@ -224,6 +302,58 @@ export const ShopDashboard: React.FC = () => {
             >
               <Printer className="w-3.5 h-3.5 text-blue-600" />
               <span>Print Tabletop Stand</span>
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* 2.5 DEDICATED YOUR SHOP CODE SECTION */}
+      <div className="bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-2xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="flex items-start sm:items-center gap-4">
+            {/* Associated Shop QR Preview */}
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col items-center shrink-0">
+              <canvas ref={qrMiniCanvasRef} className="w-[84px] h-[84px] rounded-lg shadow-2xs" />
+              <span className="text-[10px] font-semibold text-slate-500 mt-1">Counter QR</span>
+            </div>
+
+            <div className="space-y-1.5 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-[#008F25] bg-[#E8F8EC] px-2.5 py-0.5 rounded-full border border-[#A7F3D0]">
+                  Unique Identifier
+                </span>
+                <span className="text-xs font-medium text-slate-400">System Managed • Read Only</span>
+              </div>
+              <h2 className="text-base sm:text-lg font-bold text-slate-900">
+                Your Shop Code
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 leading-relaxed max-w-xl">
+                Customers can scan your QR code or enter this code manually to access your shop.
+              </p>
+            </div>
+          </div>
+
+          {/* Large Shop Code Display + Copy Button */}
+          <div className="flex items-center gap-3 self-start md:self-center shrink-0 bg-slate-50 border border-slate-200/90 rounded-2xl p-2.5 sm:p-3">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">6-Digit Code</span>
+              <span className="font-mono text-2xl sm:text-3xl font-extrabold tracking-widest text-[#008F25] select-all">
+                {displayShopCode}
+              </span>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopyCode}
+              className="bg-white hover:bg-slate-100 font-semibold"
+            >
+              {codeCopied ? (
+                <Check className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Copy className="w-4 h-4 text-slate-500" />
+              )}
+              <span>{codeCopied ? 'Copied' : 'Copy Code'}</span>
             </Button>
           </div>
         </div>

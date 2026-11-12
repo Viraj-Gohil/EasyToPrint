@@ -30,14 +30,22 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="agent-topbar px-6 py-3 flex items-center justify-between border-b border-[#E1E7E1] dark:border-slate-800 bg-white dark:bg-[#131D33] transition-colors">
       {/* Brand & Terminal Meta */}
       <div className="flex items-center gap-3 min-w-0">
-        <div className="w-9 h-9 rounded-lg bg-[#00B32D] text-white flex items-center justify-center shadow-xs shrink-0">
-          <Printer className="w-5 h-5 stroke-[2]" />
+        <div className="w-9 h-9 rounded-lg bg-[#E8F8EC] dark:bg-emerald-950/60 border border-[#00B52D]/30 flex items-center justify-center shadow-xs shrink-0 overflow-hidden">
+          <svg viewBox="0 0 64 64" className="w-7 h-7" fill="none" aria-hidden="true">
+            <path d="M21 15C21 13.8954 21.8954 13 23 13H41C42.1046 13 43 13.8954 43 15V24H21V15Z" fill="#00B52D" />
+            <rect x="24" y="16" width="16" height="8" rx="1" fill="#FFFFFF" />
+            <rect x="12" y="24" width="40" height="20" rx="5" fill="#080808" />
+            <circle cx="45" cy="30" r="2.2" fill="#00B52D" />
+            <rect x="19" y="38" width="26" height="14" rx="2.5" fill="#FFFFFF" stroke="#00B52D" strokeWidth="2" />
+            <line x1="24" y1="43" x2="40" y2="43" stroke="#00B52D" strokeWidth="2" strokeLinecap="round" />
+            <line x1="24" y1="47" x2="35" y2="47" stroke="#00B52D" strokeWidth="2" strokeLinecap="round" />
+          </svg>
         </div>
 
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-[14px] font-bold text-[#111111] dark:text-white tracking-tight">
-              PrintFlow <span className="font-medium text-[#00B32D] dark:text-emerald-400">Agent</span>
+            <span className="text-[14px] font-extrabold text-[#080808] dark:text-white tracking-tight">
+              Easy<span className="text-[#00B52D]">To</span>Print <span className="font-semibold text-[#00B52D] dark:text-emerald-400">Agent</span>
             </span>
             <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded-md bg-[#F0F4F1] dark:bg-slate-800 text-[#646B65] dark:text-slate-400 border border-[#E1E7E1] dark:border-slate-700">
               v{packageMetadata.version}

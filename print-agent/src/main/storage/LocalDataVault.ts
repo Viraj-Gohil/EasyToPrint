@@ -1,5 +1,5 @@
 /**
- * LocalDataVault: Local configuration vault for PrintFlow Windows Agent.
+ * LocalDataVault: Local configuration vault for EasyToPrint Windows Agent.
  * Neon PostgreSQL is the sole authoritative database for all print jobs and business state.
  * Purge legacy jobs_queue.json if present on disk to ensure queue reconciles from Neon.
  */
@@ -71,6 +71,33 @@ export class LocalDataVault {
       } catch {
         // Ignore
       }
+    }
+
+    // Backward-compatible migration: if upgrading from "PrintFlow Agent" to "EasyToPrint Agent",
+    // preserve existing config.json, agent_state.json, jobs_queue.json, and printer_configs.json.
+    try {
+      const targetConfig = path.join(basePath, 'config.json');
+      if (app && !fs.existsSync(targetConfig)) {
+        const appDataParent = path.dirname(basePath);
+        const legacyDirs = [
+          path.join(appDataParent, 'PrintFlow Agent'),
+          path.join(appDataParent, 'printflow-agent')
+        ];
+        for (const legacyDir of legacyDirs) {
+          if (legacyDir !== basePath && fs.existsSync(path.join(legacyDir, 'config.json'))) {
+            for (const fileName of ['config.json', 'agent_state.json', 'jobs_queue.json', 'printer_configs.json', 'status_outbox.json']) {
+              const srcFile = path.join(legacyDir, fileName);
+              const dstFile = path.join(basePath, fileName);
+              if (fs.existsSync(srcFile) && !fs.existsSync(dstFile)) {
+                fs.copyFileSync(srcFile, dstFile);
+              }
+            }
+            break;
+          }
+        }
+      }
+    } catch {
+      // Non-fatal fallback
     }
 
     this.configFilePath = path.join(basePath, 'config.json');

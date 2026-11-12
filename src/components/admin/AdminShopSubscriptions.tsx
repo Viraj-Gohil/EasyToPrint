@@ -151,9 +151,9 @@ export const AdminShopSubscriptions: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => navigate('/admin/plans')}
-            className="px-3.5 py-2 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3.5 py-2 text-xs font-semibold text-[#008F25] bg-[#E8F8EC] hover:bg-emerald-100 border border-[#A7F3D0] rounded-xl shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <Crown className="w-3.5 h-3.5 text-purple-600" />
+            <Crown className="w-3.5 h-3.5 text-[#00B52D]" />
             <span>Manage SaaS Plans & Pricing</span>
           </button>
         </div>
@@ -172,7 +172,7 @@ export const AdminShopSubscriptions: React.FC = () => {
 
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
           <span className="text-[11px] font-semibold text-slate-500 block mb-1">Monthly Recurring (MRR)</span>
-          <p className="text-2xl font-extrabold text-purple-900 font-mono">
+          <p className="text-2xl font-extrabold text-[#008F25] font-mono">
             ₹{totalMRR.toLocaleString('en-IN')}
           </p>
           <span className="text-[10px] text-slate-500 mt-1 block">Normalized monthly billing</span>
@@ -207,7 +207,7 @@ export const AdminShopSubscriptions: React.FC = () => {
             placeholder="Search by shop name, owner, plan..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-[#00B52D]"
           />
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
         </div>
@@ -217,7 +217,7 @@ export const AdminShopSubscriptions: React.FC = () => {
           <select
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value)}
-            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
           >
             <option value="ALL">All Statuses</option>
             <option value="ACTIVE">Active</option>
@@ -231,7 +231,7 @@ export const AdminShopSubscriptions: React.FC = () => {
           <select
             value={selectedPlan}
             onChange={(e) => setSelectedPlan(e.target.value)}
-            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
           >
             <option value="ALL">All SaaS Plans</option>
             {(plans || []).map((p) => (
@@ -245,7 +245,7 @@ export const AdminShopSubscriptions: React.FC = () => {
           <select
             value={selectedInterval}
             onChange={(e) => setSelectedInterval(e.target.value)}
-            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
           >
             <option value="ALL">All Intervals</option>
             <option value="MONTHLY">Monthly</option>
@@ -296,7 +296,7 @@ export const AdminShopSubscriptions: React.FC = () => {
                       {/* Shop Info */}
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold text-xs shrink-0 border border-purple-100">
+                          <div className="w-8 h-8 rounded-xl bg-[#E8F8EC] text-[#008F25] flex items-center justify-center font-bold text-xs shrink-0 border border-[#A7F3D0]">
                             <Store className="w-4 h-4" />
                           </div>
                           <div>
@@ -312,7 +312,7 @@ export const AdminShopSubscriptions: React.FC = () => {
                       <td className="py-3.5 px-4">
                         <div>
                           <span className="font-semibold text-slate-900 block">{sub.planName}</span>
-                          <span className="text-[10px] text-purple-700 font-mono font-medium">
+                          <span className="text-[10px] text-[#008F25] font-mono font-medium">
                             {sub.billingPeriod} • {sub.autoRenew ? 'Auto-renews' : 'Manual'}
                           </span>
                         </div>
@@ -349,7 +349,7 @@ export const AdminShopSubscriptions: React.FC = () => {
                             <div
                               style={{ width: `${printPercent}%` }}
                               className={`h-full rounded-full ${
-                                printPercent > 90 ? 'bg-rose-500' : 'bg-purple-600'
+                                printPercent > 90 ? 'bg-rose-500' : 'bg-[#00B52D]'
                               }`}
                             />
                           </div>
@@ -403,7 +403,7 @@ export const AdminShopSubscriptions: React.FC = () => {
                               setEditingSub(sub);
                               setNewPlanId(sub.planId);
                             }}
-                            className="p-1.5 rounded-lg bg-slate-50 text-slate-600 hover:text-purple-700 hover:bg-purple-50 transition-colors cursor-pointer"
+                            className="p-1.5 rounded-lg bg-slate-50 text-slate-600 hover:text-[#008F25] hover:bg-[#E8F8EC] transition-colors cursor-pointer"
                             title="Change Plan"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -411,7 +411,7 @@ export const AdminShopSubscriptions: React.FC = () => {
 
                           <button
                             onClick={() => setViewingInvoice(sub)}
-                            className="p-1.5 rounded-lg bg-slate-50 text-slate-600 hover:text-blue-700 hover:bg-blue-50 transition-colors cursor-pointer"
+                            className="p-1.5 rounded-lg bg-slate-50 text-slate-600 hover:text-[#008F25] hover:bg-[#E8F8EC] transition-colors cursor-pointer"
                             title="View Invoice"
                           >
                             <FileText className="w-3.5 h-3.5" />
@@ -453,7 +453,7 @@ export const AdminShopSubscriptions: React.FC = () => {
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                <Crown className="w-4 h-4 text-purple-600" />
+                <Crown className="w-4 h-4 text-[#00B52D]" />
                 <span>Change Subscription Plan</span>
               </h3>
               <button
@@ -478,7 +478,7 @@ export const AdminShopSubscriptions: React.FC = () => {
                 <select
                   value={newPlanId}
                   onChange={(e) => setNewPlanId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-[#00B52D]"
                 >
                   {(plans || []).map((p) => (
                     <option key={p.id} value={p.id}>
@@ -488,7 +488,7 @@ export const AdminShopSubscriptions: React.FC = () => {
                 </select>
               </div>
 
-              <div className="p-3 bg-purple-50 rounded-xl border border-purple-100 text-[11px] text-purple-800">
+              <div className="p-3 bg-[#E8F8EC] rounded-xl border border-[#A7F3D0] text-[11px] text-[#008F25]">
                 Plan changes are executed immediately and update hardware allowances and rate ceilings.
               </div>
 
@@ -502,7 +502,7 @@ export const AdminShopSubscriptions: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-xs cursor-pointer"
+                  className="px-4 py-2 text-xs font-bold text-white bg-[#00B52D] hover:bg-[#008F25] rounded-xl shadow-xs cursor-pointer"
                 >
                   Confirm Plan Switch
                 </button>
@@ -543,7 +543,7 @@ export const AdminShopSubscriptions: React.FC = () => {
                   type="text"
                   value={cancelReason}
                   onChange={(e) => setCancelReason(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-[#00B52D]"
                   placeholder="e.g. Shop closed, requested downgrade, non-payment..."
                 />
               </div>
@@ -574,7 +574,7 @@ export const AdminShopSubscriptions: React.FC = () => {
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                <FileText className="w-4 h-4 text-purple-600" />
+                <FileText className="w-4 h-4 text-[#00B52D]" />
                 <span>SaaS Subscription Receipt</span>
               </h3>
               <button
@@ -621,7 +621,7 @@ export const AdminShopSubscriptions: React.FC = () => {
 
               <div className="pt-3 border-t border-slate-100 flex justify-between items-center text-sm font-bold">
                 <span className="text-slate-700">Total Billed:</span>
-                <span className="text-purple-700 font-mono">₹{(viewingInvoice.amount || 0).toFixed(2)}</span>
+                <span className="text-[#008F25] font-mono">₹{(viewingInvoice.amount || 0).toFixed(2)}</span>
               </div>
             </div>
 

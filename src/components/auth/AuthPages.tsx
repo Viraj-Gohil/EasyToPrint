@@ -62,9 +62,10 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
   const [emailExistsError, setEmailExistsError] = useState<string | null>(null);
   const [phoneExistsError, setPhoneExistsError] = useState<string | null>(null);
 
-  // Password Reset OTP & Flow State
-  const [forgotIdentifier, setForgotIdentifier] = useState('');
-  const [maskedContact, setMaskedContact] = useState('');
+  // Password Reset Email OTP & Flow State (Email-only recovery)
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotEmailTouched, setForgotEmailTouched] = useState(false);
+  const [maskedEmail, setMaskedEmail] = useState('');
   const [resetOtpCode, setResetOtpCode] = useState('');
   const [resetToken, setResetToken] = useState('');
   const [newResetPassword, setNewResetPassword] = useState('');
@@ -199,6 +200,9 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
   const regPhoneError = registerTouched.phone ? validatePhone(registerPhone, true).error : undefined;
   const regPassError = registerTouched.password ? validatePassword(registerPassword, 'Password').error : undefined;
   const regTermsError = registerTouched.terms && !agreeTerms ? 'You must accept the terms to proceed.' : undefined;
+
+  // Forgot Password Email validation
+  const forgotEmailError = forgotEmailTouched ? validateEmail(forgotEmail).error : undefined;
 
 
 
@@ -439,28 +443,37 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
     }
   };
 
-  // Handle Forgot Password Request (Step 1)
+  // Handle Forgot Password Request (Step 1 - Email Only)
   const handleForgotRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting || !forgotIdentifier.trim()) return;
+    if (isSubmitting) return;
     setErrorMessage(null);
+    setForgotEmailTouched(true);
+
+    const emailCheck = validateEmail(forgotEmail);
+    if (!emailCheck.isValid) {
+      setErrorMessage(emailCheck.error || 'Please enter a valid registered email address.');
+      return;
+    }
+
+    const cleanEmail = forgotEmail.trim().toLowerCase();
     setIsSubmitting(true);
     try {
       const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: forgotIdentifier.trim() })
+        body: JSON.stringify({ email: cleanEmail })
       });
       const data = await res.json();
       setIsSubmitting(false);
       if (data.success) {
-        setMaskedContact(data.maskedContact || forgotIdentifier.trim());
+        setMaskedEmail(data.maskedEmail || data.maskedContact || maskEmail(cleanEmail));
         if (data.devOtp) setDevResetOtpHint(data.devOtp);
         setResetResendCountdown(60);
         setResetCanResend(false);
         setView('verify-reset-otp');
       } else {
-        setErrorMessage(data.error || 'Failed to process request.');
+        setErrorMessage(data.error || 'Failed to process password recovery request.');
       }
     } catch {
       setIsSubmitting(false);
@@ -468,7 +481,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
     }
   };
 
-  // Handle Verify Reset OTP (Step 2)
+  // Handle Verify Reset OTP (Step 2 - Email OTP Only)
   const handleVerifyResetOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting || resetOtpCode.length !== 6) return;
@@ -478,7 +491,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
       const res = await fetch('/api/auth/verify-reset-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: forgotIdentifier.trim(), otp: resetOtpCode })
+        body: JSON.stringify({ email: forgotEmail.trim().toLowerCase(), otp: resetOtpCode })
       });
       const data = await res.json();
       setIsSubmitting(false);
@@ -486,15 +499,15 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
         setResetToken(data.resetToken);
         setView('reset-password');
       } else {
-        setErrorMessage(data.error || 'Invalid or expired verification code.');
+        setErrorMessage(data.error || 'Invalid or expired email verification code.');
       }
     } catch {
       setIsSubmitting(false);
-      setErrorMessage('Network error while verifying OTP.');
+      setErrorMessage('Network error while verifying email OTP.');
     }
   };
 
-  // Handle Resend Reset OTP
+  // Handle Resend Reset OTP (Email Only)
   const handleResendResetOtp = async () => {
     if (!resetCanResend || isSubmitting) return;
     setErrorMessage(null);
@@ -503,7 +516,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
       const res = await fetch('/api/auth/resend-reset-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: forgotIdentifier.trim() })
+        body: JSON.stringify({ email: forgotEmail.trim().toLowerCase() })
       });
       const data = await res.json();
       setIsSubmitting(false);
@@ -512,11 +525,11 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
         setResetResendCountdown(60);
         setResetCanResend(false);
       } else {
-        setErrorMessage(data.error || 'Failed to resend verification code.');
+        setErrorMessage(data.error || 'Failed to resend email verification code.');
       }
     } catch {
       setIsSubmitting(false);
-      setErrorMessage('Network error while resending verification code.');
+      setErrorMessage('Network error while resending email verification code.');
     }
   };
 
@@ -587,7 +600,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
           </div>
           <div>
             <span className="text-[11px] font-mono uppercase tracking-widest font-bold text-[#008F25]">
-              PRINTFLOW SHOP CONSOLE
+              EASYTOPRINT SHOP CONSOLE
             </span>
             <h1 className="text-2xl sm:text-[26px] font-extrabold tracking-tight text-[#111111] mt-1">
               {view === 'login'
@@ -1181,44 +1194,59 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
           )}
 
           {/* ========================================================= */}
-          {/* FORGOT PASSWORD VIEW (STEP 1)                             */}
+          {/* FORGOT PASSWORD VIEW (STEP 1 - EMAIL ONLY)                */}
           {/* ========================================================= */}
           {view === 'forgot' && (
             <form onSubmit={handleForgotRequest} noValidate className="space-y-4">
               <div className="space-y-1.5 text-left">
-                <label htmlFor="forgot-identifier" className="block text-xs font-bold text-[#111111]">
-                  Registered Email or Mobile Number <span className="text-red-500">*</span>
+                <label htmlFor="forgot-email" className="block text-xs font-bold text-[#111111]">
+                  Email Address <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-[#646B65] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
-                    id="forgot-identifier"
-                    type="text"
-                    placeholder="e.g. shop@example.com or 9876543210"
-                    value={forgotIdentifier}
+                    id="forgot-email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="Enter your registered email address"
+                    value={forgotEmail}
                     onChange={(e) => {
-                      setForgotIdentifier(e.target.value);
+                      setForgotEmail(e.target.value);
                       if (errorMessage) setErrorMessage(null);
                     }}
+                    onBlur={() => setForgotEmailTouched(true)}
+                    aria-invalid={!!forgotEmailError}
+                    aria-describedby={forgotEmailError ? 'forgot-email-error' : undefined}
                     disabled={isSubmitting}
-                    className="w-full pl-10 pr-4 h-11 bg-[#F7F8F7] border border-[#E1E7E1] rounded-xl text-xs sm:text-sm text-[#111111] placeholder:text-[#646B65] focus:outline-none focus:ring-2 focus:ring-[#00B32D] focus:bg-white transition-all"
+                    className={`w-full pl-10 pr-4 h-11 bg-[#F7F8F7] border rounded-xl text-xs sm:text-sm text-[#111111] placeholder:text-[#646B65] focus:outline-none focus:ring-2 focus:bg-white transition-all ${
+                      forgotEmailError
+                        ? 'border-red-400 focus:border-red-500 focus:ring-red-500/20 bg-red-50/20'
+                        : 'border-[#E1E7E1] focus:border-[#00B32D] focus:ring-[#00B32D]/20'
+                    }`}
                   />
                 </div>
+                {forgotEmailError && (
+                  <p id="forgot-email-error" role="alert" className="text-[11px] text-red-600 font-medium flex items-center gap-1 mt-1">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{forgotEmailError}</span>
+                  </p>
+                )}
               </div>
 
               <button
                 type="submit"
-                disabled={isSubmitting || !forgotIdentifier.trim()}
+                disabled={isSubmitting || !forgotEmail.trim()}
                 className="w-full mt-2 inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[#00B32D] hover:bg-[#008F25] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold shadow-md shadow-emerald-500/20 active:scale-[0.98] transition-all cursor-pointer whitespace-nowrap"
               >
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Processing...</span>
+                    <span>Sending Email OTP...</span>
                   </>
                 ) : (
                   <>
-                    <span>Continue</span>
+                    <span>Send Verification OTP</span>
                     <ArrowRight className="w-4 h-4 stroke-[2.2]" />
                   </>
                 )}
@@ -1227,24 +1255,23 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
           )}
 
           {/* ========================================================= */}
-          {/* VERIFY RESET OTP VIEW (STEP 2)                            */}
+          {/* VERIFY RESET OTP VIEW (STEP 2 - EMAIL OTP ONLY)           */}
           {/* ========================================================= */}
           {view === 'verify-reset-otp' && (
             <form onSubmit={handleVerifyResetOtp} noValidate className="space-y-4">
               <div className="text-center space-y-2 pb-2">
                 <div className="w-12 h-12 rounded-xl bg-emerald-50 text-[#00B32D] flex items-center justify-center mx-auto">
-                  <Shield className="w-6 h-6" />
+                  <Mail className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-bold text-[#111111]">Verify Your Identity</h3>
+                <h3 className="text-base font-bold text-[#111111]">Check Your Email</h3>
                 <p className="text-xs text-[#646B65] max-w-xs mx-auto">
-                  Enter the 6-digit verification code sent to <strong className="text-[#111111]">{maskedContact}</strong>.
+                  Enter the 6-digit verification code sent to <strong className="text-[#111111]">{maskedEmail}</strong>.
                 </p>
-
               </div>
 
               <div className="space-y-1.5 text-left">
                 <label htmlFor="reset-otp-input" className="block text-xs font-bold text-[#111111]">
-                  Enter 6-Digit OTP Code
+                  Enter 6-Digit Email OTP Code
                 </label>
                 <input
                   id="reset-otp-input"
@@ -1270,7 +1297,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
                   </>
                 ) : (
                   <>
-                    <span>Verify OTP</span>
+                    <span>Verify Email OTP</span>
                     <ArrowRight className="w-4 h-4 stroke-[2.2]" />
                   </>
                 )}
@@ -1284,19 +1311,22 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
                       onClick={handleResendResetOtp}
                       className="font-bold text-[#00B32D] hover:underline cursor-pointer"
                     >
-                      Resend Verification OTP
+                      Resend Verification Email
                     </button>
                   ) : (
-                    <p>Resend OTP in <span className="font-bold text-[#111111]">{resetResendCountdown}s</span></p>
+                    <p>Resend email OTP in <span className="font-bold text-[#111111]">{resetResendCountdown}s</span></p>
                   )}
                 </div>
                 <div>
                   <button
                     type="button"
-                    onClick={() => setView('forgot')}
+                    onClick={() => {
+                      setErrorMessage(null);
+                      setView('forgot');
+                    }}
                     className="text-[#646B65] hover:text-[#111111] underline cursor-pointer"
                   >
-                    Change Email / Mobile
+                    Change Email Address
                   </button>
                 </div>
               </div>
@@ -1415,7 +1445,8 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
               <button
                 type="button"
                 onClick={() => {
-                  setForgotIdentifier('');
+                  setForgotEmail('');
+                  setForgotEmailTouched(false);
                   setResetOtpCode('');
                   setResetToken('');
                   setNewResetPassword('');

@@ -88,7 +88,7 @@ export function generateMfaEnrollment(email: string): { secretBase32: string; ot
   }
 
   const cleanEmail = encodeURIComponent(email);
-  const otpauthUrl = `otpauth://totp/PrintFlow:${cleanEmail}?secret=${secret}&issuer=PrintFlow&algorithm=SHA1&digits=6&period=30`;
+  const otpauthUrl = `otpauth://totp/EasyToPrint:${cleanEmail}?secret=${secret}&issuer=EasyToPrint&algorithm=SHA1&digits=6&period=30`;
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUrl)}`;
 
   return { secretBase32: secret, otpauthUrl, qrCodeUrl };

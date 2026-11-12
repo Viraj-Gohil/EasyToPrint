@@ -63,7 +63,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [connectionStage, setConnectionStage] = useState<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
-  const [detectedHostName, setDetectedHostName] = useState(config.deviceName || 'PrintFlow Desktop');
+  const [detectedHostName, setDetectedHostName] = useState(config.deviceName || 'EasyToPrint Desktop');
   const [copiedShopId, setCopiedShopId] = useState(false);
 
   const isConnected = Boolean(
@@ -145,7 +145,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       }
 
       setConnectionStage('Registering this device...');
-      const effectiveDeviceName = detectedHostName || config.deviceName || 'PrintFlow Desktop';
+      const effectiveDeviceName = detectedHostName || config.deviceName || 'EasyToPrint Desktop';
 
       const pairRes = await onPair({
         serverUrl: effectiveServerUrl,
@@ -185,7 +185,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } catch (error: any) {
       setStatusMessage({
         type: 'error',
-        text: error?.message || 'Could not connect to the PrintFlow server. Please try again.'
+        text: error?.message || 'Could not connect to the EasyToPrint server. Please try again.'
       });
     } finally {
       setIsSaving(false);
@@ -226,15 +226,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     <div className="w-full bg-white dark:bg-[#131D33] border border-[#E1E7E1] dark:border-slate-800 rounded-2xl shadow-xl p-8 space-y-6 animate-scale-in relative font-['Manrope',sans-serif]">
       {/* Top Branding & Logo */}
       <div className="text-center space-y-3">
-        <div className="w-14 h-14 rounded-2xl bg-[#E8F8EC] dark:bg-emerald-950/60 border border-[#A7F3D0] dark:border-emerald-800 text-[#00B32D] flex items-center justify-center mx-auto shadow-xs">
-          <Printer className="w-7 h-7 stroke-[2]" />
+        <div className="w-14 h-14 rounded-2xl bg-[#00B52D] text-white flex items-center justify-center mx-auto shadow-md shadow-[#00B52D]/20">
+          <svg viewBox="0 0 28 28" fill="none" className="w-8 h-8" aria-hidden="true">
+            <path d="M8 9V4.5C8 3.94772 8.44772 3.5 9 3.5H19C19.5523 3.5 20 3.94772 20 4.5V9" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+            <rect x="3.5" y="9" width="21" height="11" rx="3" stroke="currentColor" strokeWidth="2.2" />
+            <path d="M8 16.5H20V23.5C20 24.0523 19.5523 24.5 19 24.5H9C8.44772 24.5 8 24.0523 8 23.5V16.5Z" fill="white" stroke="currentColor" strokeWidth="2" />
+            <circle cx="19.5" cy="12.5" r="1.25" fill="white" />
+          </svg>
         </div>
         <div>
-          <h1 className="text-[24px] font-bold text-[#111111] dark:text-white tracking-tight">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#E8F8EC] text-[#008F25] border border-[#A7F3D0] mb-1.5">
+            EasyToPrint Agent
+          </span>
+          <h1 className="text-[24px] font-bold text-[#080808] dark:text-white tracking-tight">
             Connect Your Shop
           </h1>
-          <p className="text-[13px] text-[#646B65] dark:text-slate-400 mt-1">
-            Connect your Windows PC with PrintFlow.
+          <p className="text-[13px] text-[#777777] dark:text-slate-400 mt-1">
+            Connect your Windows PC with EasyToPrint.
           </p>
         </div>
       </div>

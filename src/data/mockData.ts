@@ -246,6 +246,7 @@ export const INITIAL_SHOPS: Shop[] = [
     id: 'shop_royal_cyber',
     name: 'Royal Cyber Xerox & Studio',
     slug: 'royal-cyber-xerox',
+    shopCode: '482916',
     ownerId: 'usr_owner_2',
     ownerName: 'Vikram Singh',
     ownerEmail: 'vikram.royalcyber@gmail.com',
@@ -275,6 +276,7 @@ export const INITIAL_SHOPS: Shop[] = [
     id: 'shop_univ_campus',
     name: 'Campus Fast Prints & Documentation',
     slug: 'campus-fast-prints',
+    shopCode: '731205',
     ownerId: 'usr_owner_3',
     ownerName: 'Sunita Sharma',
     ownerEmail: 'sunita.campusprints@gmail.com',
@@ -303,6 +305,7 @@ export const INITIAL_SHOPS: Shop[] = [
     id: 'shop_quickdoc',
     name: 'QuickDoc Xerox Point',
     slug: 'quickdoc-xerox',
+    shopCode: '905184',
     ownerId: 'usr_owner_4',
     ownerName: 'Anil Deshmukh',
     ownerEmail: 'anil.quickdoc@gmail.com',
@@ -979,7 +982,7 @@ export const INITIAL_SUPPORT_TICKETS: SupportTicket[] = [
         senderId: 'usr_admin_tech',
         senderName: 'Arjun Mehta (Hardware Eng)',
         senderRole: 'ADMIN',
-        message: 'Hello Vikram, could you verify if the Canon driver installed under Windows Devices & Printers is using Canon Generic Plus PCL6 or PS3? PrintFlow Agent v2.4 requires PostScript 3 emulation to pass RGB CMYK color streams directly.',
+        message: 'Hello Vikram, could you verify if the Canon driver installed under Windows Devices & Printers is using Canon Generic Plus PCL6 or PS3? EasyToPrint Agent v2.4 requires PostScript 3 emulation to pass RGB CMYK color streams directly.',
         isInternalNote: false,
         createdAt: '2026-10-07T09:00:00Z'
       },
@@ -999,7 +1002,7 @@ export const INITIAL_SUPPORT_TICKETS: SupportTicket[] = [
         senderId: 'usr_owner_2',
         senderName: 'Vikram Singh (Shop Owner)',
         senderRole: 'SHOP_OWNER',
-        message: 'We installed the PS3 driver and restarted PrintFlow Agent. The test page printed in full color! But checking with our student customer orders now.',
+        message: 'We installed the PS3 driver and restarted EasyToPrint Agent. The test page printed in full color! But checking with our student customer orders now.',
         isInternalNote: false,
         createdAt: '2026-10-07T10:30:00Z'
       }

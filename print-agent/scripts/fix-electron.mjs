@@ -25,7 +25,7 @@ function getPlatformExecutableName() {
 const execName = getPlatformExecutableName();
 
 console.log('======================================================');
-console.log('   PRINTFLOW AGENT — ELECTRON RUNTIME REPAIR TOOL     ');
+console.log('   EASYTOPRINT AGENT — ELECTRON RUNTIME REPAIR TOOL   ');
 console.log('======================================================');
 console.log(`OS Platform: ${process.platform} (${process.arch})`);
 console.log(`Node.js Version: ${process.version}`);
@@ -39,6 +39,9 @@ if (process.platform === 'win32') {
   } catch {
     console.log('      No conflicting electron.exe processes found.');
   }
+  try {
+    execSync('taskkill /F /IM "EasyToPrint Agent.exe" /T', { stdio: 'ignore' });
+  } catch {}
   try {
     execSync('taskkill /F /IM "PrintFlow Agent.exe" /T', { stdio: 'ignore' });
   } catch {}
@@ -169,7 +172,7 @@ if (fs.existsSync(finalExe) && fs.existsSync(pathFile)) {
 } else {
   console.log(`\n======================================================`);
   console.log(`MANUAL RESOLUTION STEPS FOR WINDOWS:`);
-  console.log(`1. Close any running instances of PrintFlow or Electron in Task Manager.`);
+  console.log(`1. Close any running instances of EasyToPrint Agent or Electron in Task Manager.`);
   console.log(`2. In your PowerShell terminal in the print-agent folder, run:`);
   console.log(`   .\\fix-electron.ps1`);
   console.log(`   OR`);

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell, dialog, clipboard } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, shell, dialog, clipboard } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -8,7 +8,7 @@ import { localVault } from './storage/LocalDataVault.js';
 import { printerManager } from './printer/WindowsPrinterManager.js';
 import { logger } from './logger/AgentLogger.js';
 import { systemHealthManager } from './health/SystemHealthManager.js';
-import { AgentConfig } from '../renderer/types/agent.js';
+import { AgentConfig, AgentConnectionStatus } from '../renderer/types/agent.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,6 +16,70 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+let lastNotifiedStatus: AgentConnectionStatus | null = null;
+const notifiedJobIds = new Set<string>();
+
+// Configure Windows desktop application identity while preserving upgrade appId compatibility
+try {
+  app.setName('EasyToPrint Agent');
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.printflow.agent');
+  }
+} catch {}
+
+function resolveAssetPath(...relativeCandidates: string[]): string | undefined {
+  const searchRoots = [
+    path.resolve(__dirname, '../..'),
+    path.resolve(__dirname, '../../..'),
+    process.cwd(),
+    typeof process.resourcesPath === 'string' ? process.resourcesPath : '',
+    typeof process.resourcesPath === 'string' ? path.join(process.resourcesPath, 'app.asar') : ''
+  ].filter(Boolean);
+
+  for (const root of searchRoots) {
+    for (const rel of relativeCandidates) {
+      const candidate = path.join(root, rel);
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return undefined;
+}
+
+function getAppWindowIcon(): Electron.NativeImage | string | undefined {
+  const iconFile = process.platform === 'win32'
+    ? resolveAssetPath('build/icon.ico', 'public/assets/icon.ico', 'dist/renderer/assets/icon.ico', 'build/icon.png')
+    : resolveAssetPath('build/icon.png', 'public/assets/icon.png', 'dist/renderer/assets/icon.png');
+  return iconFile;
+}
+
+function getTrayNativeImage(): Electron.NativeImage {
+  const trayFile = process.platform === 'win32'
+    ? resolveAssetPath('build/tray-icon.ico', 'build/tray-icon.png', 'public/assets/tray-icon.png', 'build/icon.ico')
+    : resolveAssetPath('build/tray-icon.png', 'public/assets/tray-icon.png', 'build/icon.png');
+  if (trayFile) {
+    const img = nativeImage.createFromPath(trayFile);
+    if (!img.isEmpty()) {
+      return process.platform === 'win32' ? img : img.resize({ width: 16, height: 16 });
+    }
+  }
+  return nativeImage.createEmpty();
+}
+
+function showAgentNotification(title: string, body: string) {
+  try {
+    if (Notification && Notification.isSupported()) {
+      const notification = new Notification({
+        title,
+        body,
+        icon: getAppWindowIcon(),
+        silent: true
+      });
+      notification.show();
+    }
+  } catch {}
+}
 
 // 1. Single Instance Lock
 const gotTheLock = app.requestSingleInstanceLock();
@@ -50,11 +114,36 @@ if (!gotTheLock) {
         mainWindow.webContents.send('event:status-changed', status);
       }
       updateTrayMenu();
+
+      if (status !== lastNotifiedStatus) {
+        if (status === 'ONLINE' || status === 'CONNECTED') {
+          showAgentNotification('EasyToPrint Agent – Connected', 'Your counter PC is online and ready to process print jobs.');
+        } else if (lastNotifiedStatus === 'ONLINE' && (status === 'ERROR' || status === 'OFFLINE' || status === 'DISCONNECTED')) {
+          showAgentNotification('EasyToPrint Agent – Disconnected', 'Connection to EasyToPrint Cloud was interrupted. Reconnecting in background...');
+        }
+        lastNotifiedStatus = status;
+      }
     });
 
     agentService.setOnJobUpdateListener((job) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('event:job-updated', job);
+      }
+      if (job.printStatus === 'COMPLETED' && !notifiedJobIds.has(`${job.id}:COMPLETED`)) {
+        notifiedJobIds.add(`${job.id}:COMPLETED`);
+        showAgentNotification(
+          'EasyToPrint Agent – Print Job Completed',
+          `Order ${job.id} (${job.files?.[0]?.fileName || 'Document'}) printed on ${job.printerName || 'default printer'}.`
+        );
+      } else if (
+        (job.printStatus === 'FAILED' || job.printStatus === 'MANUAL_ATTENTION' || job.printStatus === 'REQUIRES_ATTENTION') &&
+        !notifiedJobIds.has(`${job.id}:ERROR`)
+      ) {
+        notifiedJobIds.add(`${job.id}:ERROR`);
+        showAgentNotification(
+          'EasyToPrint Agent – Printer Attention Required',
+          job.errorMessage || `Order ${job.id} requires operator review.`
+        );
       }
     });
 
@@ -73,13 +162,15 @@ if (!gotTheLock) {
 app.commandLine.appendSwitch('allow-file-access-from-files');
 
 function createMainWindow() {
+  const windowIcon = getAppWindowIcon();
   mainWindow = new BrowserWindow({
     width: 1080,
     height: 740,
     minWidth: 860,
     minHeight: 600,
-    title: 'PrintFlow Agent - Desktop Spooler Service',
-    backgroundColor: '#0f172a',
+    title: 'EasyToPrint Agent',
+    icon: windowIcon,
+    backgroundColor: '#F7F7F7',
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -158,10 +249,9 @@ function createMainWindow() {
 }
 
 function createSystemTray() {
-  // Simple 16x16 tray icon fallback
-  const icon = nativeImage.createEmpty();
+  const icon = getTrayNativeImage();
   tray = new Tray(icon);
-  tray.setToolTip('PrintFlow Agent (Connected)');
+  tray.setToolTip('EasyToPrint Agent – Connected');
   updateTrayMenu();
 
   tray.on('double-click', () => {
@@ -175,13 +265,30 @@ function updateTrayMenu() {
 
   const status = agentService.getStatus().status;
   const config = localVault.getConfig();
+  const printers = printerManager.getCachedPrinters();
+  const hasOfflineRegisteredPrinter = printers.some(
+    (p) => (config.registeredPrinterNames || []).includes(p.name) && !p.isOnline
+  );
+
+  const tooltipStatus =
+    status === 'ONLINE' || status === 'CONNECTED'
+      ? hasOfflineRegisteredPrinter
+        ? 'EasyToPrint Agent – Printer Offline'
+        : 'EasyToPrint Agent – Connected'
+      : status === 'CONNECTING'
+      ? 'EasyToPrint Agent – Connecting...'
+      : status === 'RESTRICTED'
+      ? 'EasyToPrint Agent – Account Restricted'
+      : 'EasyToPrint Agent – Offline';
+
+  tray.setToolTip(tooltipStatus);
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: `PrintFlow Agent: ${config.shopSlug || 'Counter'}`, enabled: false },
-    { label: `Status: ${status}`, enabled: false },
+    { label: `EasyToPrint Agent: ${config.shopDetails?.shopName || config.shopSlug || 'Counter'}`, enabled: false },
+    { label: tooltipStatus, enabled: false },
     { type: 'separator' },
     {
-      label: 'Open Dashboard',
+      label: 'Open EasyToPrint Agent',
       click: () => {
         mainWindow?.show();
         mainWindow?.focus();
@@ -201,7 +308,7 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Exit Agent',
+      label: 'Exit EasyToPrint Agent',
       click: () => {
         isQuitting = true;
         app.quit();
@@ -453,8 +560,8 @@ ipcMain.handle('logs:clear', () => {
 
 ipcMain.handle('logs:export', async () => {
   const options = {
-    title: 'Export sanitized PrintFlow Agent logs',
-    defaultPath: `printflow-agent-logs-${new Date().toISOString().slice(0, 10)}.json`,
+    title: 'Export sanitized EasyToPrint Agent logs',
+    defaultPath: `easytoprint-agent-logs-${new Date().toISOString().slice(0, 10)}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   };
   const result: any = mainWindow && !mainWindow.isDestroyed()

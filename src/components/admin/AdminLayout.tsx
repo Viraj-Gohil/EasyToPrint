@@ -7,7 +7,8 @@ import {
   BarChart3,
   Store,
   Printer,
-  Cpu,
+  Users,
+  HardDrive,
   Crown,
   Layers,
   CreditCard,
@@ -15,18 +16,14 @@ import {
   ScrollText,
   Activity,
   Sliders,
-  Settings,
   Menu,
   X,
   Search,
   ExternalLink,
   LogOut,
-  Radio,
-  CheckCircle2,
-  AlertTriangle,
-  Command,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  ChevronRight
 } from 'lucide-react';
 import { AdminCommandPalette } from './AdminCommandPalette';
 
@@ -49,13 +46,11 @@ interface NavSection {
 
 export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab }) => {
   const {
-    navigate,
     currentUser,
-    logout,
-    adminRazorpay,
     supportTickets,
-    printJobs,
-    agents
+    adminRazorpay,
+    logout,
+    navigate
   } = useApp();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -64,7 +59,10 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
   // Persisted Collapsible Sidebar
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('printflow_admin_sidebar_collapsed') === 'true';
+      return (
+        localStorage.getItem('easytoprint_admin_sidebar_collapsed') === 'true' ||
+        localStorage.getItem('printflow_admin_sidebar_collapsed') === 'true'
+      );
     } catch {
       return false;
     }
@@ -74,7 +72,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
     const next = !isCollapsed;
     setIsCollapsed(next);
     try {
-      localStorage.setItem('printflow_admin_sidebar_collapsed', String(next));
+      localStorage.setItem('easytoprint_admin_sidebar_collapsed', String(next));
     } catch {}
   };
 
@@ -95,78 +93,68 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
     (t) => t.status !== 'RESOLVED' && t.status !== 'CLOSED'
   ).length;
 
-  const queuedJobsCount = (printJobs || []).filter(
-    (j) => j.printStatus === 'QUEUED' || j.printStatus === 'PRINTING'
-  ).length;
-
-  const offlineAgentsCount = (agents || []).filter((a) => a.status === 'OFFLINE').length;
-
-  // Exact 5 Organized Sections
+  // Organized Navigation Sections (Global Print Queue & Electron Agent Fleet removed per user instruction)
   const navSections: NavSection[] = [
     {
       title: 'OVERVIEW',
       items: [
         {
           id: 'dashboard',
-          label: 'Platform Overview',
+          label: 'Dashboard',
           icon: LayoutDashboard,
           path: '/admin/dashboard'
         },
         {
           id: 'analytics',
-          label: 'Platform Analytics',
+          label: 'Analytics',
           icon: BarChart3,
           path: '/admin/analytics'
         }
       ]
     },
     {
-      title: 'OPERATIONS',
+      title: 'TEAMS & HARDWARE',
       items: [
         {
           id: 'shops',
-          label: 'Shops Directory',
+          label: 'Shops Management',
           icon: Store,
           path: '/admin/shops'
         },
         {
-          id: 'print-jobs',
-          label: 'Global Print Queue',
-          icon: Printer,
-          path: '/admin/print-jobs',
-          badge: queuedJobsCount > 0 ? queuedJobsCount : undefined,
-          badgeColor: 'bg-blue-100 text-blue-700'
+          id: 'users',
+          label: 'Users Management',
+          icon: Users,
+          path: '/admin/users'
         },
         {
-          id: 'agents',
-          label: 'Print Agents Fleet',
-          icon: Cpu,
-          path: '/admin/agents',
-          badge: offlineAgentsCount > 0 ? `${offlineAgentsCount} off` : undefined,
-          badgeColor: 'bg-amber-100 text-amber-800'
+          id: 'printers',
+          label: 'Printers',
+          icon: Printer,
+          path: '/admin/printers'
         }
       ]
     },
     {
-      title: 'BILLING & REVENUE',
+      title: 'BILLING & STORAGE',
       items: [
         {
           id: 'plans',
-          label: 'SaaS Plans & Pricing',
+          label: 'Subscriptions & Plans',
           icon: Crown,
           path: '/admin/plans'
         },
         {
-          id: 'subscriptions',
-          label: 'Subscriptions',
-          icon: Layers,
-          path: '/admin/subscriptions'
-        },
-        {
           id: 'payments',
-          label: 'Platform Payments',
+          label: 'Payments & Revenue',
           icon: CreditCard,
           path: '/admin/payments'
+        },
+        {
+          id: 'storage',
+          label: 'Storage Management',
+          icon: HardDrive,
+          path: '/admin/storage'
         }
       ]
     },
@@ -179,11 +167,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
           icon: LifeBuoy,
           path: '/admin/support',
           badge: openTicketsCount > 0 ? openTicketsCount : undefined,
-          badgeColor: 'bg-purple-100 text-purple-700 font-bold'
+          badgeColor: 'bg-emerald-50 text-[#00B52D] font-bold border border-emerald-200'
         },
         {
           id: 'audit-logs',
-          label: 'Security & Audit Logs',
+          label: 'Audit Logs',
           icon: ScrollText,
           path: '/admin/audit-logs'
         },
@@ -191,9 +179,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
           id: 'health',
           label: 'System Health',
           icon: Activity,
-          path: '/admin/health',
-          badge: offlineAgentsCount === 0 ? '99.9%' : 'Alert',
-          badgeColor: offlineAgentsCount === 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+          path: '/admin/health'
         }
       ]
     },
@@ -212,22 +198,45 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
 
   const isTabActive = (itemId: string) => {
     if (activeTab === itemId) return true;
-    if (itemId === 'plans' && (activeTab === 'plans' || activeTab === 'saas-plans')) return true;
+    if (itemId === 'plans' && (activeTab === 'plans' || activeTab === 'saas-plans' || activeTab === 'subscriptions')) return true;
     if (itemId === 'health' && (activeTab === 'health' || activeTab === 'system-health')) return true;
+    if (itemId === 'platform-settings' && (activeTab === 'platform-settings' || activeTab === 'settings')) return true;
     return false;
   };
 
+  const getPageTitle = (tab: string) => {
+    switch (tab) {
+      case 'dashboard': return 'Dashboard Overview';
+      case 'shops': return 'Shops Management';
+      case 'users': return 'Users Management';
+      case 'printers': return 'Printers Management';
+      case 'plans':
+      case 'saas-plans':
+      case 'subscriptions': return 'Subscriptions & Plans';
+      case 'payments': return 'Payments & Revenue';
+      case 'storage': return 'Storage Management';
+      case 'analytics': return 'Platform Analytics';
+      case 'support': return 'Support Tickets';
+      case 'audit-logs': return 'Security & Audit Logs';
+      case 'health':
+      case 'system-health': return 'System Health';
+      case 'platform-settings':
+      case 'settings': return 'Platform Settings';
+      default: return 'Admin Console';
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col lg:flex-row">
+    <div className="min-h-screen bg-[#F7F7F7] text-[#080808] flex flex-col lg:flex-row font-sans">
       {/* Mobile Top Bar */}
       <div className="lg:hidden bg-white text-slate-900 px-4 py-3 flex items-center justify-between border-b border-slate-200 sticky top-0 z-40 shadow-xs">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-purple-600 text-white flex items-center justify-center shadow-xs">
-            <Shield className="w-4 h-4" />
+          <div className="w-8 h-8 rounded-lg bg-[#00B52D] text-white flex items-center justify-center shadow-xs">
+            <Printer className="w-4 h-4" />
           </div>
           <div>
-            <span className="font-bold text-xs text-slate-900 block">Super Admin</span>
-            <span className="text-[10px] text-purple-700 font-medium">Control Panel</span>
+            <span className="font-bold text-xs text-[#080808] block">EasyToPrint Admin</span>
+            <span className="text-[10px] text-[#00B52D] font-semibold">Master Control</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -257,22 +266,22 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
 
       {/* Sidebar Navigation */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 bg-white text-slate-700 flex flex-col justify-between transform transition-all duration-200 ease-in-out lg:translate-x-0 lg:sticky lg:top-0 lg:h-screen border-r border-slate-200/90 shadow-xl lg:shadow-none overflow-hidden ${
+        className={`fixed inset-y-0 left-0 z-50 bg-white text-slate-700 flex flex-col justify-between transform transition-all duration-200 ease-in-out lg:translate-x-0 lg:sticky lg:top-0 lg:h-screen border-r border-slate-200 shadow-xl lg:shadow-none overflow-hidden ${
           mobileMenuOpen ? 'translate-x-0 w-64' : '-translate-x-full lg:translate-x-0'
         } ${isCollapsed ? 'lg:w-20' : 'lg:w-64'}`}
       >
-        {/* Top Header & Branding */}
-        <div className="p-3.5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
+        {/* Top Header & EasyToPrint Branding */}
+        <div className="p-3.5 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white">
           <div className="flex items-center gap-2.5 overflow-hidden">
-            <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
-              <Shield className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-xl bg-[#00B52D] text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+              <Printer className="w-4 h-4 stroke-[2.2]" />
             </div>
             {!isCollapsed && (
               <div className="truncate">
-                <span className="text-xs font-bold text-slate-900 block truncate">
-                  PrintFlow Cloud
+                <span className="text-xs font-extrabold text-[#080808] block truncate tracking-tight">
+                  Easy<span className="text-[#00B52D]">To</span>Print
                 </span>
-                <span className="text-[10px] text-purple-700 font-semibold tracking-wide block">
+                <span className="text-[10px] text-[#777777] font-semibold tracking-wide block uppercase">
                   Super Admin
                 </span>
               </div>
@@ -301,14 +310,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
         <div className="p-2.5 shrink-0">
           <button
             onClick={() => setIsCommandPaletteOpen(true)}
-            className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-xs bg-slate-50 hover:bg-purple-50 text-slate-600 hover:text-purple-700 border border-slate-200 hover:border-purple-200 transition-colors cursor-pointer ${
+            className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-xs bg-slate-50 hover:bg-emerald-50/60 text-slate-600 hover:text-[#00B52D] border border-slate-200 hover:border-emerald-200 transition-colors cursor-pointer ${
               isCollapsed ? 'justify-center' : 'justify-between'
             }`}
             title="Search & Quick Jump (⌘K)"
           >
             <div className="flex items-center gap-2">
-              <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-purple-600" />
-              {!isCollapsed && <span className="text-[11px] text-slate-500 font-medium">Quick Nav...</span>}
+              <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#00B52D]" />
+              {!isCollapsed && <span className="text-[11px] text-[#777777] font-medium">Quick Nav...</span>}
             </div>
             {!isCollapsed && (
               <kbd className="px-1.5 py-0.5 text-[10px] font-mono bg-white border border-slate-200 rounded text-slate-400 shadow-2xs">
@@ -324,7 +333,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
             <div key={section.title} className="space-y-0.5">
               {/* Section Header */}
               {!isCollapsed ? (
-                <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#777777]">
                   {section.title}
                 </div>
               ) : (
@@ -352,13 +361,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
                         : 'px-2.5 py-1.5 gap-2.5 text-xs'
                     } ${
                       active
-                        ? 'text-purple-900 font-bold bg-purple-50 border border-purple-200/90 shadow-2xs'
+                        ? 'text-[#080808] font-bold bg-emerald-50 border border-emerald-200 shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
                     }`}
                   >
                     <Icon
                       className={`w-4 h-4 shrink-0 transition-colors ${
-                        active ? 'text-purple-600' : 'text-slate-400 group-hover:text-slate-700'
+                        active ? 'text-[#00B52D]' : 'text-slate-400 group-hover:text-slate-700'
                       }`}
                     />
 
@@ -373,8 +382,8 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
                       <span
                         className={`text-[10px] font-bold rounded-full transition-all ${
                           isCollapsed
-                            ? 'absolute top-1 right-1 w-2 h-2 p-0 bg-purple-600'
-                            : `px-1.5 py-0.5 ${item.badgeColor || 'bg-purple-100 text-purple-700'}`
+                            ? 'absolute top-1 right-1 w-2 h-2 p-0 bg-[#00B52D]'
+                            : `px-1.5 py-0.5 ${item.badgeColor || 'bg-emerald-50 text-[#00B52D]'}`
                         }`}
                       >
                         {!isCollapsed && item.badge}
@@ -391,34 +400,34 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
         <div className="shrink-0 p-3 border-t border-slate-200 bg-slate-50/80 space-y-2">
           {/* Gateway Status Pill */}
           {!isCollapsed ? (
-            <div className="flex items-center justify-between text-[11px] px-2 py-1 bg-white rounded-lg border border-slate-200/70">
-              <span className="text-slate-500 font-medium flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${adminRazorpay.keyId ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            <div className="flex items-center justify-between text-[11px] px-2 py-1 bg-white rounded-lg border border-slate-200">
+              <span className="text-[#777777] font-medium flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${adminRazorpay.keyId ? 'bg-[#00B52D]' : 'bg-amber-500'}`} />
                 Gateway
               </span>
-              <span className="font-semibold text-purple-700">
+              <span className="font-bold text-slate-800">
                 {adminRazorpay.isTestMode ? 'Test Mode' : 'Live'}
               </span>
             </div>
           ) : (
             <div className="flex justify-center" title={`Gateway: ${adminRazorpay.isTestMode ? 'Test' : 'Live'}`}>
-              <span className={`w-2 h-2 rounded-full ${adminRazorpay.keyId ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              <span className={`w-2 h-2 rounded-full ${adminRazorpay.keyId ? 'bg-[#00B52D]' : 'bg-amber-500'}`} />
             </div>
           )}
 
           {/* Admin Profile & Actions */}
           <div className="flex items-center justify-between gap-2 pt-1">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 rounded-xl bg-purple-100 text-purple-800 flex items-center justify-center font-bold text-xs shrink-0 border border-purple-200">
+              <div className="w-7 h-7 rounded-xl bg-emerald-50 text-[#00B52D] flex items-center justify-center font-bold text-xs shrink-0 border border-emerald-200">
                 AD
               </div>
               {!isCollapsed && (
                 <div className="truncate">
-                  <span className="text-xs font-bold text-slate-900 block truncate">
-                    {currentUser?.fullName || 'Master Admin'}
+                  <span className="text-xs font-bold text-[#080808] block truncate">
+                    {currentUser?.fullName || 'Platform Admin'}
                   </span>
-                  <span className="text-[10px] text-slate-400 font-mono block truncate">
-                    Platform Super Admin
+                  <span className="text-[10px] text-[#777777] font-mono block truncate">
+                    admin@easytoprint.io
                   </span>
                 </div>
               )}
@@ -439,9 +448,38 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
       </aside>
 
       {/* Main Content Viewport */}
-      <main className="flex-1 min-w-0 flex flex-col min-h-screen overflow-x-hidden">
+      <main className="flex-1 min-w-0 flex flex-col min-h-screen overflow-x-hidden bg-[#F7F8F7] relative">
+        {/* Subtle Architectural Grid matching Main Page */}
+        <div
+          className="fixed inset-0 pointer-events-none z-0 opacity-[0.35]"
+          style={{
+            backgroundImage: `linear-gradient(to right, #E1E7E1 1px, transparent 1px), linear-gradient(to bottom, #E1E7E1 1px, transparent 1px)`,
+            backgroundSize: '48px 48px',
+          }}
+        />
+
+        {/* Top Breadcrumb & Page Context Bar */}
+        <header className="bg-white/95 backdrop-blur-md border-b border-[#E1E7E1] px-4 sm:px-6 py-3 flex items-center justify-between sticky top-0 z-30">
+          <div className="flex items-center gap-2 text-xs text-[#777777]">
+            <span className="font-semibold text-slate-500">Admin</span>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+            <span className="font-bold text-[#080808]">{getPageTitle(activeTab)}</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsCommandPaletteOpen(true)}
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 text-xs text-slate-600 bg-[#F7F8F7] border border-[#E1E7E1] rounded-lg hover:border-[#00B52D]/50 hover:text-[#00B52D] transition-colors cursor-pointer"
+            >
+              <Search className="w-3.5 h-3.5 text-[#00B52D]" />
+              <span>Search</span>
+              <kbd className="px-1 text-[10px] font-mono bg-white border border-slate-200 rounded">⌘K</kbd>
+            </button>
+          </div>
+        </header>
+
         {/* Content Area with Animation */}
-        <div className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+        <div className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto relative z-10">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}

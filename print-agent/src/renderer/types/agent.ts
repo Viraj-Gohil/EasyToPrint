@@ -28,12 +28,14 @@ export type JobPrintStatus =
 export interface ShopDetails {
   shopId: string;
   shopName: string;
+  name?: string;
   shopSlug: string;
   shopStatus: 'ACTIVE' | 'SUSPENDED' | 'PENDING';
   agentId: string;
   deviceName: string;
   planName: string;
   planStatus: 'ACTIVE' | 'TRIAL' | 'EXPIRED' | 'SUSPENDED' | 'CANCELLED';
+  subscriptionStatus?: string;
   subscriptionPeriodStart: string | null;
   subscriptionPeriodEnd: string | null;
   printerLimit: number;
@@ -51,11 +53,15 @@ export interface PlanFeatures {
   basicQueue: boolean;
   manualPrinterSelection: boolean;
   smartPrinterSelection: boolean;
+  canSmartPrinterSelection?: boolean;
   multipleQueues: boolean;
+  canMultipleQueues?: boolean;
   advancedQueue: boolean;
   priorityManagement: boolean;
   loadBalancing: boolean;
+  canLoadBalancing?: boolean;
   queueOptimization: boolean;
+  canQueueOptimization?: boolean;
   advancedAnalytics: boolean;
   printerFailureMonitoring: boolean;
   advancedPrinterManagement: boolean;
@@ -75,6 +81,7 @@ export interface PlanEntitlements {
   };
   usage: {
     printJobsUsed: number;
+    monthlyPrintJobs?: number;
     printersUsed: number;
     usagePercent: number;
     warningThreshold: 'NORMAL' | 'WARNING_80' | 'WARNING_90' | 'LIMIT_100';

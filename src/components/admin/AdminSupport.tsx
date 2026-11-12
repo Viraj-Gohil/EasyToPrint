@@ -89,15 +89,15 @@ const CATEGORY_MAP: Record<string, { label: string; icon: any; color: string }> 
   PRINTER_OFFLINE: { label: 'Printer Offline', icon: AlertTriangle, color: 'text-rose-700 bg-rose-50 border-rose-200' },
   JOB_FAILURE: { label: 'Print Job Failure', icon: XCircle, color: 'text-red-700 bg-red-50 border-red-200' },
   PAYMENT_REFUND: { label: 'Payment / Refund', icon: CreditCard, color: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
-  SUBSCRIPTION_BILLING: { label: 'Subscription / Billing', icon: FileText, color: 'text-purple-700 bg-purple-50 border-purple-200' },
-  QR_CODE: { label: 'QR Code Issue', icon: Tag, color: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
-  FILE_UPLOAD: { label: 'File Upload Issue', icon: FileText, color: 'text-blue-700 bg-blue-50 border-blue-200' },
+  SUBSCRIPTION_BILLING: { label: 'Subscription / Billing', icon: FileText, color: 'text-[#008F25] bg-[#E8F8EC] border-[#A7F3D0]' },
+  QR_CODE: { label: 'QR Code Issue', icon: Tag, color: 'text-slate-700 bg-slate-100 border-slate-200' },
+  FILE_UPLOAD: { label: 'File Upload Issue', icon: FileText, color: 'text-teal-700 bg-teal-50 border-teal-200' },
   ACCOUNT_LOGIN: { label: 'Account / Login', icon: User, color: 'text-cyan-700 bg-cyan-50 border-cyan-200' },
-  FEATURE_REQUEST: { label: 'Feature Request', icon: Sparkles, color: 'text-violet-700 bg-violet-50 border-violet-200' },
+  FEATURE_REQUEST: { label: 'Feature Request', icon: Sparkles, color: 'text-[#008F25] bg-[#E8F8EC] border-[#A7F3D0]' },
   OTHER: { label: 'Other', icon: HelpCircle, color: 'text-slate-700 bg-slate-100 border-slate-200' },
   // Backward compatibility
   AGENT: { label: 'Print Agent', icon: Printer, color: 'text-rose-700 bg-rose-50 border-rose-200' },
-  BILLING: { label: 'Billing Issue', icon: CreditCard, color: 'text-purple-700 bg-purple-50 border-purple-200' },
+  BILLING: { label: 'Billing Issue', icon: CreditCard, color: 'text-[#008F25] bg-[#E8F8EC] border-[#A7F3D0]' },
   HARDWARE: { label: 'Hardware', icon: Printer, color: 'text-amber-700 bg-amber-50 border-amber-200' },
   GENERAL: { label: 'General Request', icon: HelpCircle, color: 'text-slate-700 bg-slate-100 border-slate-200' }
 };
@@ -118,14 +118,14 @@ const PRIORITY_BADGES: Record<string, { label: string; badge: string; dot: strin
   },
   NORMAL: {
     label: 'Normal',
-    badge: 'bg-blue-50 text-blue-700 border-blue-200 font-medium',
-    dot: 'bg-blue-500',
+    badge: 'bg-[#E8F8EC] text-[#008F25] border-[#A7F3D0] font-medium',
+    dot: 'bg-[#00B52D]',
     icon: Clock
   },
   MEDIUM: {
     label: 'Normal',
-    badge: 'bg-blue-50 text-blue-700 border-blue-200 font-medium',
-    dot: 'bg-blue-500',
+    badge: 'bg-[#E8F8EC] text-[#008F25] border-[#A7F3D0] font-medium',
+    dot: 'bg-[#00B52D]',
     icon: Clock
   },
   LOW: {
@@ -140,13 +140,13 @@ const PRIORITY_BADGES: Record<string, { label: string; badge: string; dot: strin
 const STATUS_BADGES: Record<string, { label: string; badge: string; dot: string }> = {
   OPEN: {
     label: 'Open',
-    badge: 'bg-purple-50 text-purple-700 border-purple-200 font-semibold',
-    dot: 'bg-purple-600'
+    badge: 'bg-[#E8F8EC] text-[#008F25] border-[#A7F3D0] font-semibold',
+    dot: 'bg-[#00B52D]'
   },
   IN_PROGRESS: {
     label: 'In Progress',
-    badge: 'bg-blue-50 text-blue-700 border-blue-200 font-semibold',
-    dot: 'bg-blue-600'
+    badge: 'bg-teal-50 text-teal-700 border-teal-200 font-semibold',
+    dot: 'bg-teal-600'
   },
   WAITING_SHOP: {
     label: 'Waiting for Shop',
@@ -155,8 +155,8 @@ const STATUS_BADGES: Record<string, { label: string; badge: string; dot: string 
   },
   WAITING_INTERNAL: {
     label: 'Waiting Internal',
-    badge: 'bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold',
-    dot: 'bg-indigo-600'
+    badge: 'bg-slate-100 text-slate-700 border-slate-200 font-semibold',
+    dot: 'bg-slate-600'
   },
   RESOLVED: {
     label: 'Resolved',
@@ -182,7 +182,7 @@ const CANNED_RESPONSES = [
   },
   {
     title: 'Printer Driver Configuration',
-    text: 'Please open Windows Devices & Printers -> Right click printer -> Printer Properties -> Advanced tab -> Switch driver from Generic Text to Canon PostScript 3 / HP PCL6. Then restart the PrintFlow Agent service.'
+    text: 'Please open Windows Devices & Printers -> Right click printer -> Printer Properties -> Advanced tab -> Switch driver from Generic Text to Canon PostScript 3 / HP PCL6. Then restart the EasyToPrint Agent service.'
   },
   {
     title: 'Plan Quota & Past Due Notice Cleared',
@@ -566,7 +566,7 @@ export const AdminSupport: React.FC = () => {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `printflow_support_tickets_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `easytoprint_support_tickets_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -649,7 +649,7 @@ export const AdminSupport: React.FC = () => {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2.5">
-              <LifeBuoy className="w-7 h-7 text-purple-600" />
+              <LifeBuoy className="w-7 h-7 text-[#00B52D]" />
               Support Tickets
             </h1>
             <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
@@ -684,13 +684,13 @@ export const AdminSupport: React.FC = () => {
               }}
               className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-xl shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <SlidersHorizontal className="w-3.5 h-3.5 text-purple-600" />
+              <SlidersHorizontal className="w-3.5 h-3.5 text-[#00B52D]" />
               <span>Support Settings</span>
             </button>
 
             <button
               onClick={() => setIsCreateOpen(true)}
-              className="px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-bold text-white bg-[#00B52D] hover:bg-[#008F25] rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Create Ticket</span>
@@ -710,7 +710,7 @@ export const AdminSupport: React.FC = () => {
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full pl-10 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 transition-all font-medium"
+              className="w-full pl-10 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] transition-all font-medium"
             />
             {searchQuery && (
               <button
@@ -736,13 +736,13 @@ export const AdminSupport: React.FC = () => {
           onClick={() => handleQuickViewSelect('ALL')}
           className={`p-4 bg-white rounded-2xl border text-left transition-all cursor-pointer ${
             quickView === 'ALL' && !hasActiveFilters
-              ? 'border-purple-500 shadow-sm ring-2 ring-purple-500/10'
+              ? 'border-[#00B52D] shadow-sm ring-2 ring-[#00B52D]/10'
               : 'border-slate-200 shadow-2xs hover:border-slate-300 hover:shadow-xs'
           }`}
         >
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total</span>
-            <LifeBuoy className="w-4 h-4 text-purple-600" />
+            <LifeBuoy className="w-4 h-4 text-[#00B52D]" />
           </div>
           <div className="text-2xl font-black text-slate-900 tracking-tight">{metrics.total}</div>
           <div className="text-[10px] text-slate-500 mt-1 font-medium">Platform wide</div>
@@ -753,15 +753,15 @@ export const AdminSupport: React.FC = () => {
           onClick={() => handleQuickViewSelect('OPEN')}
           className={`p-4 bg-white rounded-2xl border text-left transition-all cursor-pointer ${
             quickView === 'OPEN'
-              ? 'border-purple-500 shadow-sm ring-2 ring-purple-500/10'
-              : 'border-slate-200 shadow-2xs hover:border-purple-200 hover:shadow-xs'
+              ? 'border-[#00B52D] shadow-sm ring-2 ring-[#00B52D]/10'
+              : 'border-slate-200 shadow-2xs hover:border-emerald-200 hover:shadow-xs'
           }`}
         >
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-bold text-purple-700 uppercase tracking-wider">Open</span>
-            <span className="w-2 h-2 rounded-full bg-purple-600" />
+            <span className="text-[11px] font-bold text-[#008F25] uppercase tracking-wider">Open</span>
+            <span className="w-2 h-2 rounded-full bg-[#00B52D]" />
           </div>
-          <div className="text-2xl font-black text-purple-700 tracking-tight">{metrics.openCount}</div>
+          <div className="text-2xl font-black text-[#008F25] tracking-tight">{metrics.openCount}</div>
           <div className="text-[10px] text-slate-500 mt-1 font-medium">Pending triage</div>
         </button>
 
@@ -806,13 +806,13 @@ export const AdminSupport: React.FC = () => {
             setStatusFilter('OPEN');
             setCurrentPage(1);
           }}
-          className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs hover:border-blue-200 hover:shadow-xs text-left transition-all cursor-pointer"
+          className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs hover:border-emerald-200 hover:shadow-xs text-left transition-all cursor-pointer"
         >
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[11px] font-bold text-blue-700 uppercase tracking-wider">Awaiting Staff</span>
-            <Clock className="w-4 h-4 text-blue-500" />
+            <span className="text-[11px] font-bold text-[#008F25] uppercase tracking-wider">Awaiting Staff</span>
+            <Clock className="w-4 h-4 text-[#00B52D]" />
           </div>
-          <div className="text-2xl font-black text-blue-600 tracking-tight">{metrics.awaitingAdminCount}</div>
+          <div className="text-2xl font-black text-[#00B52D] tracking-tight">{metrics.awaitingAdminCount}</div>
           <div className="text-[10px] text-slate-500 mt-1 font-medium">Awaiting response</div>
         </button>
 
@@ -835,15 +835,15 @@ export const AdminSupport: React.FC = () => {
       </div>
 
       {/* SLA & Performance Bar (Calculated strictly from real timestamps) */}
-      <div className="bg-gradient-to-r from-purple-50 via-slate-50 to-slate-100 p-3.5 sm:p-4 rounded-2xl border border-purple-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+      <div className="bg-gradient-to-r from-[#E8F8EC] via-slate-50 to-slate-100 p-3.5 sm:p-4 rounded-2xl border border-[#A7F3D0] flex flex-wrap items-center justify-between gap-3 text-xs">
         <div className="flex items-center gap-2">
-          <Shield className="w-4 h-4 text-purple-600" />
+          <Shield className="w-4 h-4 text-[#00B52D]" />
           <span className="font-bold text-slate-800">Support Operations Telemetry:</span>
         </div>
 
         <div className="flex flex-wrap items-center gap-5 text-slate-600">
           <div className="flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-purple-500" />
+            <Clock className="w-3.5 h-3.5 text-[#00B52D]" />
             <span>Avg First Response:</span>
             <span className="font-bold text-slate-900">
               {metrics.avgResponseHours ? `${metrics.avgResponseHours} hrs` : 'No logs yet'}
@@ -894,7 +894,7 @@ export const AdminSupport: React.FC = () => {
                   onClick={() => handleQuickViewSelect(tab.id as QuickView)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
                     isSelected
-                      ? 'bg-purple-600 text-white shadow-2xs'
+                      ? 'bg-[#00B52D] text-white shadow-2xs'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900'
                   }`}
                 >
@@ -932,7 +932,7 @@ export const AdminSupport: React.FC = () => {
                 setStatusFilter(e.target.value as any);
                 setCurrentPage(1);
               }}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
             >
               <option value="ALL">All Statuses</option>
               <option value="OPEN">Open</option>
@@ -953,7 +953,7 @@ export const AdminSupport: React.FC = () => {
                 setPriorityFilter(e.target.value as any);
                 setCurrentPage(1);
               }}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
             >
               <option value="ALL">All Priorities</option>
               <option value="CRITICAL">Critical</option>
@@ -972,7 +972,7 @@ export const AdminSupport: React.FC = () => {
                 setCategoryFilter(e.target.value as any);
                 setCurrentPage(1);
               }}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
             >
               <option value="ALL">All Categories</option>
               <option value="PRINTING_ISSUE">Printing Issue</option>
@@ -997,7 +997,7 @@ export const AdminSupport: React.FC = () => {
                 setAdminFilter(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
             >
               <option value="ALL">All Admins</option>
               <option value="UNASSIGNED">Unassigned</option>
@@ -1018,7 +1018,7 @@ export const AdminSupport: React.FC = () => {
                 setShopFilter(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
             >
               <option value="ALL">All Shops</option>
               {shops.map((shop) => (
@@ -1035,7 +1035,7 @@ export const AdminSupport: React.FC = () => {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
             >
               <option value="NEWEST">Newest First</option>
               <option value="OLDEST">Oldest First</option>
@@ -1050,9 +1050,9 @@ export const AdminSupport: React.FC = () => {
           <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 text-xs">
             <span className="text-slate-400 text-[11px] font-semibold mr-1">Active filters:</span>
             {searchQuery && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-purple-50 text-purple-700 border border-purple-200 text-[11px] font-medium">
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-[#E8F8EC] text-[#008F25] border border-[#A7F3D0] text-[11px] font-medium">
                 Search: "{searchQuery}"
-                <button onClick={() => setSearchQuery('')} className="hover:text-purple-900">
+                <button onClick={() => setSearchQuery('')} className="hover:text-emerald-900">
                   <X className="w-3 h-3" />
                 </button>
               </span>
@@ -1123,7 +1123,7 @@ export const AdminSupport: React.FC = () => {
               )}
               <button
                 onClick={() => setIsCreateOpen(true)}
-                className="px-3.5 py-2 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 rounded-xl cursor-pointer"
+                className="px-3.5 py-2 text-xs font-semibold text-white bg-[#00B52D] hover:bg-[#008F25] rounded-xl cursor-pointer"
               >
                 Create New Ticket
               </button>
@@ -1168,14 +1168,14 @@ export const AdminSupport: React.FC = () => {
                     <tr
                       key={ticket.id}
                       onClick={() => setSelectedTicketId(ticket.id)}
-                      className={`hover:bg-purple-50/40 transition-colors cursor-pointer ${
-                        isSelected ? 'bg-purple-50/70 border-l-4 border-l-purple-600' : ''
+                      className={`hover:bg-[#E8F8EC]/40 transition-colors cursor-pointer ${
+                        isSelected ? 'bg-[#E8F8EC]/70 border-l-4 border-l-[#00B52D]' : ''
                       }`}
                     >
                       {/* Ticket Number & ID */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200 text-[11px]">
+                          <span className="font-mono font-bold text-[#008F25] bg-[#E8F8EC] px-2 py-0.5 rounded-md border border-[#A7F3D0] text-[11px]">
                             {ticket.ticketNumber || ticket.id}
                           </span>
                         </div>
@@ -1251,7 +1251,7 @@ export const AdminSupport: React.FC = () => {
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         {ticket.assignedAdminName ? (
                           <div className="flex items-center gap-1.5">
-                            <div className="w-5 h-5 rounded-full bg-purple-100 text-purple-700 font-bold text-[10px] flex items-center justify-center">
+                            <div className="w-5 h-5 rounded-full bg-[#E8F8EC] text-[#008F25] font-bold text-[10px] flex items-center justify-center">
                               {ticket.assignedAdminName.charAt(0)}
                             </div>
                             <span className="font-medium text-slate-800 text-[11px] truncate max-w-[110px]">
@@ -1278,7 +1278,7 @@ export const AdminSupport: React.FC = () => {
                             e.stopPropagation();
                             setSelectedTicketId(ticket.id);
                           }}
-                          className="px-2.5 py-1.5 text-xs font-semibold text-purple-700 hover:text-white bg-purple-50 hover:bg-purple-600 rounded-lg transition-colors cursor-pointer"
+                          className="px-2.5 py-1.5 text-xs font-semibold text-[#008F25] hover:text-white bg-[#E8F8EC] hover:bg-[#00B52D] rounded-lg transition-colors cursor-pointer"
                         >
                           View
                         </button>
@@ -1353,7 +1353,7 @@ export const AdminSupport: React.FC = () => {
             <div className="p-5 border-b border-slate-200 bg-slate-50/70 flex items-start justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                  <span className="font-mono font-bold text-xs text-purple-700 bg-purple-100/80 px-2.5 py-0.5 rounded-md border border-purple-200">
+                  <span className="font-mono font-bold text-xs text-[#008F25] bg-[#E8F8EC] px-2.5 py-0.5 rounded-md border border-[#A7F3D0]">
                     {activeTicket.ticketNumber || activeTicket.id}
                   </span>
 
@@ -1404,7 +1404,7 @@ export const AdminSupport: React.FC = () => {
                 <select
                   value={activeTicket.status}
                   onChange={(e) => updateTicketStatus(activeTicket.id, e.target.value as TicketStatus)}
-                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
                 >
                   <option value="OPEN">Open</option>
                   <option value="IN_PROGRESS">In Progress</option>
@@ -1420,7 +1420,7 @@ export const AdminSupport: React.FC = () => {
                 <select
                   value={activeTicket.priority}
                   onChange={(e) => updateTicketPriority(activeTicket.id, e.target.value as TicketPriority)}
-                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
                 >
                   <option value="CRITICAL">Critical</option>
                   <option value="HIGH">High</option>
@@ -1434,7 +1434,7 @@ export const AdminSupport: React.FC = () => {
                 <select
                   value={activeTicket.assignedAdminId || ''}
                   onChange={(e) => assignTicket(activeTicket.id, e.target.value || undefined)}
-                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
                 >
                   <option value="">Unassigned</option>
                   {supportAdmins.map((admin) => (
@@ -1452,7 +1452,7 @@ export const AdminSupport: React.FC = () => {
                 onClick={() => setDrawerTab('conversation')}
                 className={`py-3 px-3 border-b-2 flex items-center gap-1.5 cursor-pointer ${
                   drawerTab === 'conversation'
-                    ? 'border-purple-600 text-purple-700'
+                    ? 'border-[#00B52D] text-[#008F25]'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -1464,7 +1464,7 @@ export const AdminSupport: React.FC = () => {
                 onClick={() => setDrawerTab('info')}
                 className={`py-3 px-3 border-b-2 flex items-center gap-1.5 cursor-pointer ${
                   drawerTab === 'info'
-                    ? 'border-purple-600 text-purple-700'
+                    ? 'border-[#00B52D] text-[#008F25]'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -1476,7 +1476,7 @@ export const AdminSupport: React.FC = () => {
                 onClick={() => setDrawerTab('history')}
                 className={`py-3 px-3 border-b-2 flex items-center gap-1.5 cursor-pointer ${
                   drawerTab === 'history'
-                    ? 'border-purple-600 text-purple-700'
+                    ? 'border-[#00B52D] text-[#008F25]'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -1504,7 +1504,7 @@ export const AdminSupport: React.FC = () => {
                                 ? 'bg-amber-50/70 border-amber-200 text-amber-900 shadow-2xs'
                                 : isShop
                                 ? 'bg-slate-50 border-slate-200 text-slate-800'
-                                : 'bg-purple-50/70 border-purple-200 text-purple-950'
+                                : 'bg-[#E8F8EC]/70 border-[#A7F3D0] text-emerald-950'
                             }`}
                           >
                             <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-black/5">
@@ -1517,7 +1517,7 @@ export const AdminSupport: React.FC = () => {
                                 ) : (
                                   <span
                                     className={`font-bold text-[11px] ${
-                                      isShop ? 'text-slate-900' : 'text-purple-900'
+                                      isShop ? 'text-slate-900' : 'text-[#008F25]'
                                     }`}
                                   >
                                     {msg.senderName}
@@ -1547,7 +1547,7 @@ export const AdminSupport: React.FC = () => {
                           onClick={() => setIsInternalNote(false)}
                           className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
                             !isInternalNote
-                              ? 'bg-purple-600 text-white shadow-2xs'
+                              ? 'bg-[#00B52D] text-white shadow-2xs'
                               : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                           }`}
                         >
@@ -1607,7 +1607,7 @@ export const AdminSupport: React.FC = () => {
                       }
                       value={replyText}
                       onChange={(e) => setReplyText(e.target.value)}
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 resize-none font-medium"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D] resize-none font-medium"
                     />
 
                     <div className="flex items-center justify-between">
@@ -1629,7 +1629,7 @@ export const AdminSupport: React.FC = () => {
                           onClick={handleSendReply}
                           disabled={!replyText.trim() || isSendingReply}
                           className={`px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 ${
-                            isInternalNote ? 'bg-amber-600 hover:bg-amber-700' : 'bg-purple-600 hover:bg-purple-700'
+                            isInternalNote ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#00B52D] hover:bg-[#008F25]'
                           }`}
                         >
                           <Send className="w-3.5 h-3.5" />
@@ -1647,10 +1647,10 @@ export const AdminSupport: React.FC = () => {
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-slate-900 flex items-center gap-1.5">
-                        <Building2 className="w-4 h-4 text-purple-600" />
+                        <Building2 className="w-4 h-4 text-[#00B52D]" />
                         Shop Information
                       </span>
-                      <span className="px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 font-bold text-[10px]">
+                      <span className="px-2 py-0.5 rounded-md bg-[#E8F8EC] text-[#008F25] border border-[#A7F3D0] font-bold text-[10px]">
                         {activeTicketShop?.planName || 'Registered Tenant'}
                       </span>
                     </div>
@@ -1686,12 +1686,12 @@ export const AdminSupport: React.FC = () => {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
                         <div className="flex items-center gap-1.5 text-slate-500 mb-1">
-                          <Printer className="w-3.5 h-3.5 text-purple-600" />
+                          <Printer className="w-3.5 h-3.5 text-[#00B52D]" />
                           <span className="font-semibold text-[11px]">Related Print Job</span>
                         </div>
                         {activeTicket.relatedJobId ? (
                           <div>
-                            <span className="font-mono font-bold text-purple-700">{activeTicket.relatedJobId}</span>
+                            <span className="font-mono font-bold text-[#008F25]">{activeTicket.relatedJobId}</span>
                             {activeTicketJob && (
                               <div className="text-[10px] text-slate-500 mt-1">
                                 Status: {activeTicketJob.printStatus} • Amount: ₹{activeTicketJob.totalAmount}
@@ -1761,7 +1761,7 @@ export const AdminSupport: React.FC = () => {
                       >
                         <div>
                           <div className="flex items-center gap-1.5 font-semibold text-slate-800">
-                            <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 text-[10px] font-mono">
+                            <span className="px-1.5 py-0.5 rounded bg-[#E8F8EC] text-[#008F25] border border-[#A7F3D0] text-[10px] font-mono">
                               {hist.action}
                             </span>
                             <span>by {hist.actorName}</span>
@@ -1818,7 +1818,7 @@ export const AdminSupport: React.FC = () => {
           <div className="relative bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 z-10">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Plus className="w-5 h-5 text-purple-600" />
+                <Plus className="w-5 h-5 text-[#00B52D]" />
                 Create Support Ticket
               </h3>
               <button
@@ -1835,7 +1835,7 @@ export const AdminSupport: React.FC = () => {
                 <select
                   value={createForm.shopId}
                   onChange={(e) => setCreateForm({ ...createForm, shopId: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
                 >
                   {shops.map((shop) => (
                     <option key={shop.id} value={shop.id}>
@@ -1853,7 +1853,7 @@ export const AdminSupport: React.FC = () => {
                   placeholder="e.g. Printer Agent lost USB spooler connection"
                   value={createForm.subject}
                   onChange={(e) => setCreateForm({ ...createForm, subject: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D]"
                 />
               </div>
 
@@ -1863,7 +1863,7 @@ export const AdminSupport: React.FC = () => {
                   <select
                     value={createForm.category}
                     onChange={(e) => setCreateForm({ ...createForm, category: e.target.value as TicketCategory })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
                   >
                     <option value="PRINTING_ISSUE">Printing Issue</option>
                     <option value="PRINTER_OFFLINE">Printer Offline</option>
@@ -1883,7 +1883,7 @@ export const AdminSupport: React.FC = () => {
                   <select
                     value={createForm.priority}
                     onChange={(e) => setCreateForm({ ...createForm, priority: e.target.value as TicketPriority })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
                   >
                     <option value="CRITICAL">Critical (1h response)</option>
                     <option value="HIGH">High (2h response)</option>
@@ -1898,7 +1898,7 @@ export const AdminSupport: React.FC = () => {
                 <select
                   value={createForm.assignedAdminId}
                   onChange={(e) => setCreateForm({ ...createForm, assignedAdminId: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
                 >
                   <option value="">Unassigned (Queue)</option>
                   {supportAdmins.map((admin) => (
@@ -1917,7 +1917,7 @@ export const AdminSupport: React.FC = () => {
                   placeholder="Describe the issue reported by the shop owner..."
                   value={createForm.description}
                   onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] resize-none"
                 />
               </div>
 
@@ -1929,7 +1929,7 @@ export const AdminSupport: React.FC = () => {
                     placeholder="e.g. PJ-8821"
                     value={createForm.relatedJobId}
                     onChange={(e) => setCreateForm({ ...createForm, relatedJobId: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 font-mono text-[11px]"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] font-mono text-[11px]"
                   />
                 </div>
 
@@ -1940,7 +1940,7 @@ export const AdminSupport: React.FC = () => {
                     placeholder="e.g. pay_rcx_upi_9142"
                     value={createForm.relatedPaymentId}
                     onChange={(e) => setCreateForm({ ...createForm, relatedPaymentId: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-purple-500 font-mono text-[11px]"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-[#00B52D] font-mono text-[11px]"
                   />
                 </div>
               </div>
@@ -1955,7 +1955,7 @@ export const AdminSupport: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-xs cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-[#00B52D] hover:bg-[#008F25] text-white font-bold shadow-xs cursor-pointer"
                 >
                   Create Ticket
                 </button>
@@ -1972,7 +1972,7 @@ export const AdminSupport: React.FC = () => {
           <div className="relative bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 z-10">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <SlidersHorizontal className="w-5 h-5 text-purple-600" />
+                <SlidersHorizontal className="w-5 h-5 text-[#00B52D]" />
                 Support Policies & SLA Settings
               </h3>
               <button
@@ -2072,7 +2072,7 @@ export const AdminSupport: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-blue-700 uppercase mb-1">Normal Priority</label>
+                    <label className="block text-[10px] font-bold text-[#008F25] uppercase mb-1">Normal Priority</label>
                     <div className="flex items-center gap-2">
                       <div>
                         <span className="text-[10px] text-slate-500">Response:</span>
@@ -2164,7 +2164,7 @@ export const AdminSupport: React.FC = () => {
                     type="checkbox"
                     checked={settingsForm.autoAssignEnabled}
                     onChange={(e) => setSettingsForm({ ...settingsForm, autoAssignEnabled: e.target.checked })}
-                    className="rounded text-purple-600 focus:ring-purple-500"
+                    className="rounded text-[#00B52D] focus:ring-[#00B52D]"
                   />
                   <span>Auto-assign incoming tickets to default lead</span>
                 </label>
@@ -2197,7 +2197,7 @@ export const AdminSupport: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-xs cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-[#00B52D] hover:bg-[#008F25] text-white font-bold shadow-xs cursor-pointer"
                 >
                   Save Settings
                 </button>

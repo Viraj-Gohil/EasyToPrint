@@ -91,7 +91,7 @@ export const PrintWorkflowSvg: React.FC<{ className?: string }> = ({ className =
         <circle cx="70" cy="60" r="6" fill="#F59E0B" />
         <circle cx="90" cy="60" r="6" fill="#00B52D" />
         <text x="114" y="64" fill="#080808" fontSize="13" fontWeight="800" fontFamily="Plus Jakarta Sans, sans-serif">
-          PrintFlow Instant Spooler Pipeline
+          EasyToPrint Instant Spooler Pipeline
         </text>
 
         {/* Top Right Live Online Badge */}
@@ -152,7 +152,7 @@ export const PrintWorkflowSvg: React.FC<{ className?: string }> = ({ className =
             {/* Mobile App UI Header */}
             <rect x="12" y="28" width="96" height="26" rx="8" fill="#EAF8ED" />
             <circle cx="24" cy="41" r="6" fill="#00B52D" />
-            <text x="36" y="44" fill="#008A22" fontSize="8" fontWeight="800" fontFamily="Plus Jakarta Sans">PrintFlow Shop</text>
+            <text x="36" y="44" fill="#008A22" fontSize="8" fontWeight="800" fontFamily="Plus Jakarta Sans">EasyToPrint Shop</text>
 
             {/* Document Upload Preview Box */}
             <rect x="12" y="60" width="96" height="84" rx="10" fill="#FFFFFF" stroke="#E2E8F0" strokeWidth="1.5" />
@@ -182,7 +182,7 @@ export const PrintWorkflowSvg: React.FC<{ className?: string }> = ({ className =
         </g>
 
         {/* ========================================================================= */}
-        {/* STEP 2: PRINTFLOW CLOUD ORCHESTRATION & SECURITY STREAM                  */}
+        {/* STEP 2: EASYTOPRINT CLOUD ORCHESTRATION & SECURITY STREAM              */}
         {/* ========================================================================= */}
         <g id="cloud-orchestrator-section" transform="translate(320, 200)">
           {/* Cloud Base Outer Glow */}

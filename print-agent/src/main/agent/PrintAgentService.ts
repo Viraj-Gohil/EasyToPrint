@@ -198,7 +198,7 @@ export class PrintAgentService {
    * Initializes agent lifecycle, recovery audit, and background sync
    */
   public async start(): Promise<void> {
-    logger.info('AGENT', 'Starting PrintFlow Windows Desktop Agent Service...');
+    logger.info('AGENT', 'Starting EasyToPrint Windows Desktop Agent Service...');
 
     // 1. Crash recovery audit
     CrashRecoveryManager.performStartupRecovery();
@@ -215,7 +215,7 @@ export class PrintAgentService {
     this.apiClient.updateConfig(config);
     if (!config.serverUrl || !config.shopId || !config.agentId || !config.authToken) {
       this.setStatus('OFFLINE');
-      logger.info('AUTH', 'Agent setup is required before connecting to PrintFlow.');
+      logger.info('AUTH', 'Agent setup is required before connecting to EasyToPrint.');
       return;
     }
 
@@ -235,7 +235,7 @@ export class PrintAgentService {
     if (this.pollingTimer) clearTimeout(this.pollingTimer);
     if (this.printerScanTimer) clearInterval(this.printerScanTimer);
     this.setStatus('OFFLINE');
-    logger.info('AGENT', 'PrintFlow Agent service stopped.');
+    logger.info('AGENT', 'EasyToPrint Agent service stopped.');
   }
 
   private startBackgroundLoops(): void {
@@ -434,7 +434,7 @@ export class PrintAgentService {
     for (const job of interruptedJobs) {
       const result = await this.apiClient.updateJobStatus(job.id, 'QUEUED');
       if (!result.success) {
-        const message = 'Download was interrupted before printing, but the backend queue could not be safely reset. Check the job in PrintFlow before taking further action.';
+        const message = 'Download was interrupted before printing, but the backend queue could not be safely reset. Check the job in EasyToPrint before taking further action.';
         this.queueManager.markManualAttention(job, message);
         logger.warn('RECOVERY', `Could not reset interrupted download ${job.id} in the backend: ${result.error || 'status update failed'}`);
         continue;
@@ -646,7 +646,7 @@ export class PrintAgentService {
       (config.disabledPrinterNames || []).includes(printerName) ||
       !(config.registeredPrinterNames || []).includes(printerName)
     ) {
-      return { success: false, printerName, message: 'Register and enable this printer for the PrintFlow Agent before testing it.' };
+      return { success: false, printerName, message: 'Register and enable this printer for the EasyToPrint Agent before testing it.' };
     }
     return this.printerManager.executeTestPrint(printerName);
   }
@@ -692,7 +692,7 @@ export class PrintAgentService {
           shopSlug: (res.shopId || pairingData.shopId).replace(/^shop_/, '').replace(/_/g, '-'),
           authToken: pairingData.authToken,
           agentId: res.agentId || '',
-          deviceName: pairingData.deviceName || 'PrintFlow Counter'
+          deviceName: pairingData.deviceName || 'EasyToPrint Counter'
         });
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'Unable to save credentials securely' };

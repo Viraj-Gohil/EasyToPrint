@@ -24,7 +24,7 @@ function getPlatformExecutableName() {
 const execName = getPlatformExecutableName();
 const binaryPath = path.join(electronDir, 'dist', execName);
 
-console.log('[PrintFlow Agent] Ensuring Electron runtime environment...');
+console.log('[EasyToPrint Agent] Ensuring Electron runtime environment...');
 
 // 1. Check if node_modules/electron directory exists
 if (!fs.existsSync(electronDir)) {

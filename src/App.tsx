@@ -11,6 +11,18 @@ import { AdminLogin } from './components/admin/AdminLogin';
 import { PricingPage } from './components/pricing/PricingPage';
 import { ToastContainer } from './components/common/ToastContainer';
 import { QrScannerModal } from './components/common/QrScannerModal';
+import { SEOHead } from './components/common/SEOHead';
+import {
+  FeaturesSeoPage,
+  QrOrderingSeoPage,
+  PrintShopManagementSeoPage,
+  PrintAgentSeoPage,
+  AboutSeoPage,
+  ContactSeoPage,
+  FaqSeoPage,
+  NotFoundPage
+} from './components/public/PublicSeoPages';
+import { normalizePathname } from './lib/seoConfig';
 import { ShieldAlert, Shield, LogOut } from 'lucide-react';
 
 // Shop Owner Components & Layout
@@ -31,11 +43,12 @@ import { AdminLayout } from './components/admin/AdminLayout';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { AdminAnalytics } from './components/admin/AdminAnalytics';
 import { AdminShops } from './components/admin/AdminShops';
-import { AdminPrintJobs } from './components/admin/AdminPrintJobs';
+import { AdminUsers } from './components/admin/AdminUsers';
+import { AdminPrinters } from './components/admin/AdminPrinters';
+import { AdminStorage } from './components/admin/AdminStorage';
 import { AdminSubscriptions } from './components/admin/AdminSubscriptions';
 import { AdminShopSubscriptions } from './components/admin/AdminShopSubscriptions';
 import { AdminPayments } from './components/admin/AdminPayments';
-import { AdminAgents } from './components/admin/AdminAgents';
 import { AdminAuditLogs } from './components/admin/AdminAuditLogs';
 import { AdminSystemHealth } from './components/admin/AdminSystemHealth';
 import { AdminPlatformSettings } from './components/admin/AdminPlatformSettings';
@@ -59,12 +72,13 @@ const AppRouter: React.FC = () => {
   const { currentPath, activeShop, currentUser, navigate, logout } = useApp();
 
   // Normalize path
-  const path = currentPath || '/';
+  const rawPath = currentPath || '/';
+  const path = normalizePathname(rawPath);
 
   // Dedicated Fixed Admin Login URL: /admin/login
-  if (path === '/admin/login' || path === '#/admin/login' || path.startsWith('/admin/login')) {
+  if (path === '/admin/login' || rawPath === '#/admin/login' || path.startsWith('/admin/login')) {
     return (
-      <div className="min-h-screen bg-[#f8fafc] flex flex-col">
+      <div className="min-h-screen bg-[#F7F8F7] flex flex-col">
         <Navbar />
         <AnimatePresence mode="wait">
           <motion.main
@@ -83,8 +97,8 @@ const AppRouter: React.FC = () => {
   }
 
   // 1. Customer QR Print Flow: /s/:shopSlug or #s/:shopSlug
-  if (path.startsWith('/s/') || path.startsWith('#s/') || path.startsWith('s/')) {
-    const slug = path.replace(/^[/#]*s\//, '').split('/')[0] || activeShop.slug;
+  if (rawPath.startsWith('/s/') || rawPath.startsWith('#s/') || rawPath.startsWith('s/')) {
+    const slug = rawPath.replace(/^[/#]*s\//, '').split('/')[0] || activeShop.slug;
     return (
       <div className="min-h-screen bg-[#f8fafc] flex flex-col">
         <AnimatePresence mode="wait">
@@ -104,7 +118,7 @@ const AppRouter: React.FC = () => {
   }
 
   // 1.5. Track Print Page: /track-print
-  if (path === '/track-print' || path === '#/track-print' || path.startsWith('/track-print')) {
+  if (path === '/track-print' || rawPath === '#/track-print' || path.startsWith('/track-print')) {
     return (
       <div className="min-h-screen bg-[#F6F6F6] flex flex-col w-full overflow-x-hidden">
         <AnimatePresence mode="wait">
@@ -123,21 +137,32 @@ const AppRouter: React.FC = () => {
     );
   }
 
-  // 1.8. Public Pricing Page: /pricing
-  if (path === '/pricing' || path === '#/pricing' || path.startsWith('/pricing')) {
+  // 1.8. Public SEO & Marketing Pages
+  const publicPageMap: Record<string, React.ReactNode> = {
+    '/pricing': <PricingPage />,
+    '/features': <FeaturesSeoPage />,
+    '/qr-print-ordering': <QrOrderingSeoPage />,
+    '/print-shop-management': <PrintShopManagementSeoPage />,
+    '/print-agent': <PrintAgentSeoPage />,
+    '/about': <AboutSeoPage />,
+    '/contact': <ContactSeoPage />,
+    '/faq': <FaqSeoPage />
+  };
+
+  if (publicPageMap[path]) {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex flex-col">
         <Navbar />
         <AnimatePresence mode="wait">
           <motion.main
-            key="pricing-page"
+            key={`public-seo-${path}`}
             variants={pageTransitionVariants}
             initial="initial"
             animate="animate"
             exit="exit"
             className="flex-1"
           >
-            <PricingPage />
+            {publicPageMap[path]}
           </motion.main>
         </AnimatePresence>
         <Footer />
@@ -213,7 +238,7 @@ const AppRouter: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => navigate('/admin/dashboard')}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs sm:text-sm bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] transition-all cursor-pointer shadow-sm"
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs sm:text-sm bg-[#00B52D] text-white hover:bg-[#008F25] active:scale-[0.98] transition-all cursor-pointer shadow-sm"
                 >
                   <Shield className="w-4 h-4" />
                   <span>Return to Admin Dashboard</span>
@@ -298,7 +323,7 @@ const AppRouter: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => navigate('/shop/dashboard')}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs sm:text-sm bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] transition-all cursor-pointer shadow-sm"
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs sm:text-sm bg-[#00B52D] text-white hover:bg-[#008F25] active:scale-[0.98] transition-all cursor-pointer shadow-sm"
                 >
                   <span>Return to Shop Console</span>
                 </button>
@@ -320,7 +345,7 @@ const AppRouter: React.FC = () => {
     // If unauthenticated, show Admin Login
     if (!currentUser) {
       return (
-        <div className="min-h-screen bg-[#f8fafc] flex flex-col">
+        <div className="min-h-screen bg-[#F7F8F7] flex flex-col">
           <Navbar />
           <AnimatePresence mode="wait">
             <motion.main
@@ -340,16 +365,17 @@ const AppRouter: React.FC = () => {
 
     const tab = path.replace('/admin/', '').replace('/admin', '') || 'dashboard';
     return (
-      <div className="min-h-screen bg-[#f8fafc] flex flex-col">
+      <div className="min-h-screen bg-[#F7F8F7] flex flex-col">
         <AdminLayout activeTab={tab}>
           {tab === 'dashboard' && <AdminDashboard />}
           {tab === 'analytics' && <AdminAnalytics />}
           {tab === 'shops' && <AdminShops />}
-          {tab === 'print-jobs' && <AdminPrintJobs />}
+          {tab === 'users' && <AdminUsers />}
+          {tab === 'printers' && <AdminPrinters />}
           {(tab === 'plans' || tab === 'saas-plans') && <AdminSubscriptions />}
           {tab === 'subscriptions' && <AdminShopSubscriptions />}
           {tab === 'payments' && <AdminPayments />}
-          {tab === 'agents' && <AdminAgents />}
+          {tab === 'storage' && <AdminStorage />}
           {tab === 'support' && <AdminSupport />}
           {tab === 'audit-logs' && <AdminAuditLogs />}
           {(tab === 'health' || tab === 'system-health') && <AdminSystemHealth />}
@@ -359,20 +385,42 @@ const AppRouter: React.FC = () => {
     );
   }
 
-  // 6. Default: Public Marketing Landing Page
+  // 6. Homepage (exact /)
+  if (path === '/' || path === '') {
+    return (
+      <div className="min-h-screen bg-[#f8fafc] flex flex-col">
+        <Navbar />
+        <AnimatePresence mode="wait">
+          <motion.main
+            key="landing-page"
+            variants={pageTransitionVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className="flex-1"
+          >
+            <LandingPage />
+          </motion.main>
+        </AnimatePresence>
+        <Footer />
+      </div>
+    );
+  }
+
+  // 7. Unknown route -> Custom 404 Page
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col">
       <Navbar />
       <AnimatePresence mode="wait">
         <motion.main
-          key="landing-page"
+          key="not-found-page"
           variants={pageTransitionVariants}
           initial="initial"
           animate="animate"
           exit="exit"
           className="flex-1"
         >
-          <LandingPage />
+          <NotFoundPage />
         </motion.main>
       </AnimatePresence>
       <Footer />
@@ -381,10 +429,11 @@ const AppRouter: React.FC = () => {
 };
 
 const AppContent: React.FC = () => {
-  const { isQrScannerOpen, setIsQrScannerOpen, navigate } = useApp();
+  const { currentPath, isQrScannerOpen, setIsQrScannerOpen, navigate } = useApp();
 
   return (
     <>
+      <SEOHead currentPath={currentPath} />
       <AppRouter />
       <QrScannerModal
         isOpen={isQrScannerOpen}

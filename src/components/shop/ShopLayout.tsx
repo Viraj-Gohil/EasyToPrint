@@ -282,17 +282,17 @@ export const ShopLayout: React.FC<ShopLayoutProps> = ({ children, activeTab }) =
             {isCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
 
-          {/* PrintFlow Brand */}
+          {/* EasyToPrint Brand */}
           <button
             type="button"
             onClick={() => navigate('/shop/dashboard')}
             className="flex items-center gap-2 text-left cursor-pointer group shrink-0"
           >
-            <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-2xs group-hover:bg-blue-700 transition-colors">
+            <div className="w-7 h-7 rounded-lg bg-[#00A61C] flex items-center justify-center text-white shadow-2xs group-hover:bg-[#008f18] transition-colors">
               <Printer className="w-4 h-4 text-white" />
             </div>
-            <span className="font-semibold text-sm tracking-tight text-slate-900 hidden sm:inline">
-              PrintFlow
+            <span className="font-bold text-sm tracking-tight text-slate-900 hidden sm:inline">
+              Easy<span className="text-[#00A61C]">To</span>Print
             </span>
           </button>
 
@@ -486,10 +486,10 @@ export const ShopLayout: React.FC<ShopLayoutProps> = ({ children, activeTab }) =
           {/* Mobile Drawer Top Banner */}
           <div className="lg:hidden p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white">
+              <div className="w-7 h-7 rounded-lg bg-[#00A61C] flex items-center justify-center text-white">
                 <Printer className="w-4 h-4 text-white" />
               </div>
-              <span className="font-semibold text-sm text-slate-900">PrintFlow Console</span>
+              <span className="font-bold text-sm text-slate-900">Easy<span className="text-[#00A61C]">To</span>Print Console</span>
             </div>
             <button
               type="button"

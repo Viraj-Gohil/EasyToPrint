@@ -223,7 +223,7 @@ export const App: React.FC = () => {
     setIsPolling(true);
     try {
       const api = window.electronAgentAPI;
-      if (!api) throw new Error('PrintFlow Agent must run within the Electron desktop runtime.');
+      if (!api) throw new Error('EasyToPrint Agent must run within the Electron desktop runtime.');
       const result = await api.pollNow();
       if (!result.success) throw new Error(result.error || 'Cloud synchronization failed.');
       const [updatedJobs, updatedMetrics] = await Promise.all([api.getJobs(), api.getMetrics()]);
@@ -241,7 +241,7 @@ export const App: React.FC = () => {
     setIsScanning(true);
     try {
       const api = window.electronAgentAPI;
-      if (!api) throw new Error('PrintFlow Agent must run within the Electron desktop runtime.');
+      if (!api) throw new Error('EasyToPrint Agent must run within the Electron desktop runtime.');
       setPrinters(await api.rescanPrinters());
       setInitializationError(null);
     } catch (error) {
@@ -254,7 +254,7 @@ export const App: React.FC = () => {
   const handleTestPrint = async (printerName: string): Promise<TestPrintResult> => {
     const api = window.electronAgentAPI;
     if (api) return api.testPrint(printerName);
-    return { success: false, printerName, message: 'PrintFlow Agent must run within the Electron runtime.' };
+    return { success: false, printerName, message: 'EasyToPrint Agent must run within the Electron runtime.' };
   };
 
   const handleReprintJob = async (jobId: string) => {
@@ -284,7 +284,7 @@ export const App: React.FC = () => {
 
   const handleSaveConfig = async (partial: Partial<AgentConfig>) => {
     const api = window.electronAgentAPI;
-    if (!api) return { success: false, error: 'PrintFlow Agent must run within the Electron desktop runtime.' };
+    if (!api) return { success: false, error: 'EasyToPrint Agent must run within the Electron desktop runtime.' };
     const result = await api.saveConfig(partial);
     if (result.success) {
       const [savedConfig, savedMetrics] = await Promise.all([api.getConfig(), api.getMetrics()]);
@@ -304,7 +304,7 @@ export const App: React.FC = () => {
     deviceName?: string;
   }) => {
     const api = window.electronAgentAPI;
-    if (!api) return { success: false, error: 'PrintFlow Agent must run within the Electron desktop runtime.' };
+    if (!api) return { success: false, error: 'EasyToPrint Agent must run within the Electron desktop runtime.' };
     const result = await api.pairDevice(data);
     if (result.success) {
       // Delay state update briefly so the LoginScreen can display the successful connection card
@@ -325,7 +325,7 @@ export const App: React.FC = () => {
 
   const handleTestConnection = async () => {
     const api = window.electronAgentAPI;
-    if (!api) return { success: false, error: 'PrintFlow Agent must run within the Electron desktop runtime.' };
+    if (!api) return { success: false, error: 'EasyToPrint Agent must run within the Electron desktop runtime.' };
     const result = await api.testConnection();
     const currentStatus = await api.getStatus();
     setStatus(currentStatus.status);
@@ -335,7 +335,7 @@ export const App: React.FC = () => {
 
   const handleDisconnectDevice = async () => {
     const api = window.electronAgentAPI;
-    if (!api) return { success: false, error: 'PrintFlow Agent must run within the Electron desktop runtime.' };
+    if (!api) return { success: false, error: 'EasyToPrint Agent must run within the Electron desktop runtime.' };
     const result = await api.disconnectDevice();
     const [savedConfig, connection, savedMetrics] = await Promise.all([
       api.getConfig(),
@@ -352,7 +352,7 @@ export const App: React.FC = () => {
 
   const handleResetConfig = async () => {
     const api = window.electronAgentAPI;
-    if (!api) return { success: false, error: 'PrintFlow Agent must run within the Electron desktop runtime.' };
+    if (!api) return { success: false, error: 'EasyToPrint Agent must run within the Electron desktop runtime.' };
     const result = await api.resetConfig();
     if (result.success) {
       setConfig(await api.getConfig());

@@ -662,7 +662,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       return;
     }
     if (files.some((file) => !['A4', 'A3', 'A5', 'Letter', 'Legal'].includes(file.paperSize))) {
-      setStepError('The selected paper size is not supported by the connected PrintFlow printer agent.');
+      setStepError('The selected paper size is not supported by the connected EasyToPrint printer agent.');
       return;
     }
     setCurrentStep(3); // Payment step

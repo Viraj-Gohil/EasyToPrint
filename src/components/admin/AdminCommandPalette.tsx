@@ -6,7 +6,8 @@ import {
   BarChart3,
   Store,
   Printer,
-  Cpu,
+  Users,
+  HardDrive,
   Crown,
   Layers,
   CreditCard,
@@ -82,24 +83,31 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         keywords: ['shops', 'tenants', 'stores', 'xerox', 'directory', 'merchants', 'owners']
       },
       {
-        id: 'nav-print-jobs',
-        title: 'Global Print Queue',
+        id: 'nav-users',
+        title: 'Users Management',
         category: 'Navigation',
-        section: 'Operations',
-        icon: Printer,
-        path: '/admin/print-jobs',
-        badge: queuedJobsCount > 0 ? `${queuedJobsCount} active` : undefined,
-        keywords: ['queue', 'jobs', 'orders', 'print', 'spool', 'files']
+        section: 'Teams & Hardware',
+        icon: Users,
+        path: '/admin/users',
+        keywords: ['users', 'accounts', 'staff', 'owners', 'admins', 'members']
       },
       {
-        id: 'nav-agents',
-        title: 'Print Agents Fleet',
+        id: 'nav-printers',
+        title: 'Printers Hardware',
         category: 'Navigation',
-        section: 'Operations',
-        icon: Cpu,
-        path: '/admin/agents',
-        badge: offlineAgentsCount > 0 ? `${offlineAgentsCount} offline` : undefined,
-        keywords: ['agents', 'fleet', 'desktop', 'electron', 'printers', 'hardware']
+        section: 'Teams & Hardware',
+        icon: Printer,
+        path: '/admin/printers',
+        keywords: ['printers', 'hardware', 'devices', 'drivers', 'spooler']
+      },
+      {
+        id: 'nav-storage',
+        title: 'Storage Management',
+        category: 'Navigation',
+        section: 'Billing & Storage',
+        icon: HardDrive,
+        path: '/admin/storage',
+        keywords: ['storage', 'quota', 'cloud', 'files', 'artifacts', 'disk']
       },
       {
         id: 'nav-plans',
@@ -251,7 +259,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
       <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden z-10 flex flex-col max-h-[80vh]">
         {/* Header Search Input */}
         <div className="flex items-center px-4 py-3.5 border-b border-slate-100 gap-3">
-          <Search className="w-5 h-5 text-purple-600 shrink-0" />
+          <Search className="w-5 h-5 text-[#00B52D] shrink-0" />
           <input
             ref={inputRef}
             type="text"
@@ -289,7 +297,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
                     onMouseEnter={() => setSelectedIndex(index)}
                     className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left text-xs transition-colors cursor-pointer ${
                       isSelected
-                        ? 'bg-purple-50 text-purple-900 font-medium'
+                        ? 'bg-[#E8F8EC] text-[#080808] font-medium'
                         : 'text-slate-700 hover:bg-slate-50'
                     }`}
                   >
@@ -297,7 +305,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
                       <div
                         className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
                           isSelected
-                            ? 'bg-purple-600 text-white'
+                            ? 'bg-[#00B52D] text-white'
                             : 'bg-slate-100 text-slate-600'
                         }`}
                       >
@@ -315,14 +323,14 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
 
                     <div className="flex items-center gap-2 shrink-0">
                       {item.badge && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-[#008F25]">
                           {item.badge}
                         </span>
                       )}
                       <ArrowRight
                         className={`w-3.5 h-3.5 transition-transform ${
                           isSelected
-                            ? 'text-purple-600 translate-x-0.5'
+                            ? 'text-[#00B52D] translate-x-0.5'
                             : 'text-slate-300'
                         }`}
                       />
@@ -348,7 +356,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
               <kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded font-mono text-[10px]">esc</kbd> to close
             </span>
           </div>
-          <span className="text-purple-700 font-semibold">PrintFlow Super Admin</span>
+          <span className="text-[#00B52D] font-semibold">EasyToPrint Super Admin</span>
         </div>
       </div>
     </div>

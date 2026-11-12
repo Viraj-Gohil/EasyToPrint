@@ -24,11 +24,11 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
   isOpen,
   onClose,
   defaultAmountInRupees = 499,
-  orderDescription = 'PrintFlow SaaS Platform Subscription'
+  orderDescription = 'EasyToPrint SaaS Platform Subscription'
 }) => {
   const [amountRupees, setAmountRupees] = useState<number>(defaultAmountInRupees);
   const [customerName, setCustomerName] = useState<string>('Alex Johnson');
-  const [customerEmail, setCustomerEmail] = useState<string>('alex@printflow.example.com');
+  const [customerEmail, setCustomerEmail] = useState<string>('alex@easytoprint.example.com');
   const [customerPhone, setCustomerPhone] = useState<string>('9876543210');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [logs, setLogs] = useState<Array<{ step: string; status: 'ok' | 'error' | 'pending'; detail: string }>>([]);
@@ -131,7 +131,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
         key: keyId,
         amount: amountInPaise,
         currency: 'INR',
-        name: 'PrintFlow Cloud Platform',
+        name: 'EasyToPrint Cloud Platform',
         description: orderDescription,
         order_id: orderId,
         prefill: {

@@ -125,7 +125,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h2 className="text-[16px] font-bold text-[#111111] dark:text-white tracking-tight">
-                  {config.shopDetails?.shopName || config.shopSlug || 'PrintFlow Print Shop'}
+                  {config.shopDetails?.shopName || config.shopSlug || 'EasyToPrint Shop'}
                 </h2>
 
                 {config.shopDetails?.planName && (

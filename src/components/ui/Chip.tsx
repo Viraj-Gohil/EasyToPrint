@@ -20,7 +20,7 @@ export const Chip: React.FC<ChipProps> = ({
     success: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     danger: 'bg-red-50 text-red-700 border-red-200',
     warning: 'bg-amber-50 text-amber-800 border-amber-200',
-    special: 'bg-blue-50 text-blue-700 border-blue-200',
+    special: 'bg-[#E8F8EC] text-[#008F25] border-[#A7F3D0]',
     muted: 'bg-slate-100 text-slate-600 border-slate-200'
   };
 
@@ -29,7 +29,7 @@ export const Chip: React.FC<ChipProps> = ({
     success: 'bg-emerald-500',
     danger: 'bg-red-500',
     warning: 'bg-amber-500',
-    special: 'bg-blue-500',
+    special: 'bg-[#00B52D]',
     muted: 'bg-slate-400'
   };
 

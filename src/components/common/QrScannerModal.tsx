@@ -10,11 +10,11 @@ import {
   ArrowRight,
   Flashlight,
   SwitchCamera,
-  Keyboard,
-  Store
+  Keyboard
 } from 'lucide-react';
 import jsQR from 'jsqr';
 import { apiUrl } from '../../lib/apiConfig';
+import { ShopCodeInput } from './ShopCodeInput';
 
 interface QrScannerModalProps {
   isOpen: boolean;
@@ -28,6 +28,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose,
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
+  const [activeTab, setActiveTab] = useState<'scan' | 'code'>('scan');
   const [cameraState, setCameraState] = useState<'requesting' | 'active' | 'denied' | 'unsupported'>('requesting');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
@@ -77,12 +78,13 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose,
       setIsVerifying(false);
       setManualInput('');
       setUseManual(false);
+      setActiveTab('scan');
       setTorchOn(false);
       setScannedSuccess(null);
       return;
     }
 
-    if (useManual) {
+    if (activeTab === 'code' || useManual) {
       stopCamera();
       return;
     }
@@ -167,7 +169,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose,
       isSubscribed = false;
       stopCamera();
     };
-  }, [isOpen, useManual, currentCameraIndex]);
+  }, [isOpen, activeTab, useManual, currentCameraIndex]);
 
   // Scanning loop using jsQR
   const scanLoop = () => {
@@ -287,6 +289,34 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose,
       return;
     }
 
+    // Direct 6-digit shop code support
+    if (/^\d{6}$/.test(candidateSlug)) {
+      try {
+        const res = await fetch(apiUrl('/api/shop-access/resolve'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: candidateSlug })
+        });
+        const codeData = await res.json().catch(() => null);
+        if (res.ok && codeData?.success && codeData.shopSlug) {
+          setScannedSuccess(codeData.shopName || 'Shop');
+          setTimeout(() => {
+            onSuccess(codeData.shopSlug);
+            onClose();
+          }, 600);
+          return;
+        } else {
+          setVerifyError(codeData?.error || 'Shop not found. Please check the code and try again.');
+          setIsVerifying(false);
+          return;
+        }
+      } catch {
+        setVerifyError('Unable to connect to server to verify shop code. Please try again.');
+        setIsVerifying(false);
+        return;
+      }
+    }
+
     try {
       // Check backend verify endpoint
       const res = await fetch(apiUrl('/api/public/verify-qr'), {
@@ -381,10 +411,10 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose,
             </div>
             <div className="min-w-0">
               <h3 className="text-sm sm:text-base font-semibold text-[#111111] leading-tight truncate">
-                Scan Shop QR Code
+                Connect to Shop Counter
               </h3>
               <p className="text-[11px] text-[#646B65] leading-tight truncate">
-                Point camera at the EasyToPrint counter standee
+                Scan counter QR code or enter 6-digit shop code
               </p>
             </div>
           </div>
@@ -400,6 +430,45 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose,
           >
             <X className="w-4 h-4" />
           </button>
+        </div>
+
+        {/* Tab Switcher: Scan QR vs Enter Shop Code */}
+        <div className="px-5 pt-3 pb-1 bg-white flex items-center justify-center border-b border-[#E1E7E1]/60">
+          <div className="flex bg-[#F7F8F7] p-1 rounded-xl border border-[#E1E7E1] w-full">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('scan');
+                setUseManual(false);
+                setVerifyError(null);
+              }}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'scan' && !useManual
+                  ? 'bg-white text-[#111111] shadow-2xs'
+                  : 'text-[#646B65] hover:text-[#111111]'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5 text-[#00A61C]" />
+              <span>Scan QR Code</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                stopCamera();
+                setActiveTab('code');
+                setUseManual(true);
+                setVerifyError(null);
+              }}
+              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'code' || useManual
+                  ? 'bg-white text-[#111111] shadow-2xs'
+                  : 'text-[#646B65] hover:text-[#111111]'
+              }`}
+            >
+              <Keyboard className="w-3.5 h-3.5 text-[#00A61C]" />
+              <span>Enter 6-Digit Code</span>
+            </button>
+          </div>
         </div>
 
         {/* Modal Body */}
@@ -421,69 +490,44 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose,
             <div className="py-10 text-center space-y-3">
               <div className="w-12 h-12 rounded-full border-3 border-[#00A61C] border-t-transparent animate-spin mx-auto" />
               <div>
-                <h4 className="text-sm font-semibold text-[#111111]">Verifying Shop QR...</h4>
+                <h4 className="text-sm font-semibold text-[#111111]">Verifying Shop...</h4>
                 <p className="text-xs text-[#646B65] mt-1">Connecting to EasyToPrint verification server</p>
               </div>
             </div>
-          ) : useManual || cameraState === 'denied' || cameraState === 'unsupported' ? (
-            /* Manual Entry View or Permission Denied View */
+          ) : activeTab === 'code' || useManual || cameraState === 'denied' || cameraState === 'unsupported' ? (
+            /* 6-Digit Shop Code Entry View (User's Exact Component) */
             <div className="space-y-4">
-              {cameraError && (
-                <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200/80 flex items-start gap-3 text-xs text-amber-900">
+              {cameraError && cameraState === 'denied' && (
+                <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200/80 flex items-start gap-3 text-xs text-amber-900 text-left">
                   <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <p className="font-semibold text-amber-950">
-                      {cameraState === 'denied' ? 'Camera Permission Required' : 'Camera Unavailable'}
-                    </p>
+                    <p className="font-semibold text-amber-950">Camera Access Not Available</p>
                     <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
-                      {cameraError}
+                      Camera permission was blocked. Enter the 6-digit shop code printed on the counter standee below.
                     </p>
                   </div>
                 </div>
               )}
 
-              <form onSubmit={handleManualSubmit} className="space-y-3">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-semibold text-[#111111]">
-                    Enter Shop Name, Slug, or Counter URL
-                  </label>
-                  <p className="text-[11px] text-[#646B65]">
-                    Type the name printed below the counter QR code (e.g. <span className="font-mono text-[#00A61C]">printflow-counter</span>)
-                  </p>
-                </div>
-
-                <div className="relative">
-                  <Store className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#646B65] pointer-events-none" />
-                  <input
-                    type="text"
-                    value={manualInput}
-                    onChange={(e) => setManualInput(e.target.value)}
-                    placeholder="e.g. printflow-counter"
-                    className="w-full h-11 pl-10 pr-4 bg-[#F7F8F7] hover:bg-[#F0F2F0] focus:bg-white border border-[#E1E7E1] rounded-xl text-xs sm:text-sm font-mono text-[#111111] placeholder:text-[#646B65] focus:outline-none focus:ring-2 focus:ring-[#00A61C] focus:border-transparent transition-all"
-                    autoFocus
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={!manualInput.trim()}
-                  className="w-full h-11 bg-[#00A61C] hover:bg-[#008F25] disabled:opacity-50 text-white font-semibold text-xs sm:text-sm rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <span>Open Shop Upload Page</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </form>
-
-              {cameraState !== 'unsupported' && (
-                <button
-                  type="button"
-                  onClick={handleRestartScanner}
-                  className="w-full py-2.5 bg-[#F7F8F7] hover:bg-[#E1E7E1] text-[#111111] rounded-xl text-xs font-medium transition-colors cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <Camera className="w-3.5 h-3.5 text-[#00A61C]" />
-                  <span>Try Camera Scanner Again</span>
-                </button>
-              )}
+              <ShopCodeInput
+                autoFocusFirst={true}
+                hideCardContainer={true}
+                onCancelOrBack={
+                  cameraState !== 'denied' && cameraState !== 'unsupported'
+                    ? () => {
+                        setActiveTab('scan');
+                        setUseManual(false);
+                        setCameraState('requesting');
+                        setCameraError(null);
+                      }
+                    : undefined
+                }
+                onSuccess={(resolved) => {
+                  stopCamera();
+                  onSuccess(resolved.shopSlug);
+                  onClose();
+                }}
+              />
             </div>
           ) : (
             /* Live Camera Viewfinder */
@@ -548,11 +592,15 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose,
               {/* Alternative Manual Entry Trigger */}
               <button
                 type="button"
-                onClick={() => setUseManual(true)}
-                className="w-full py-2.5 bg-[#F7F8F7] hover:bg-[#E1E7E1] text-[#111111] rounded-xl text-xs font-medium transition-colors cursor-pointer flex items-center justify-center gap-2"
+                onClick={() => {
+                  stopCamera();
+                  setActiveTab('code');
+                  setUseManual(true);
+                }}
+                className="w-full py-2.5 bg-[#F7F8F7] hover:bg-[#E1E7E1] text-[#111111] rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-2 border border-[#E1E7E1]"
               >
-                <Keyboard className="w-3.5 h-3.5 text-[#646B65]" />
-                <span>Or enter shop code manually</span>
+                <Keyboard className="w-3.5 h-3.5 text-[#00A61C]" />
+                <span>Can't scan? Enter 6-digit shop code manually</span>
               </button>
             </div>
           )}

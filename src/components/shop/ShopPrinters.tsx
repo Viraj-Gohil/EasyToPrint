@@ -246,7 +246,7 @@ export const ShopPrinters: React.FC = () => {
             Printers & Hardware
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5 leading-relaxed">
-            Synchronized Windows printers detected by the PrintFlow Desktop Agent.
+            Synchronized Windows printers detected by the EasyToPrint Desktop Agent.
           </p>
         </div>
 
@@ -351,17 +351,17 @@ export const ShopPrinters: React.FC = () => {
       </div>
 
       {/* 4. READ-ONLY NOTE & PRINTER LIST */}
-      <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 text-xs text-blue-900 flex items-center gap-3">
-        <Info className="w-4 h-4 text-blue-600 shrink-0" />
+      <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-950 flex items-center gap-3">
+        <Info className="w-4 h-4 text-[#00A61C] shrink-0" />
         <div>
           <strong>Read-Only Configuration:</strong> Printer capabilities and settings are automatically detected by your Windows printer driver. 
-          To edit capabilities or add hardware, use the <a href="/shop/print-agent" className="underline font-bold text-blue-700">PrintFlow Desktop Agent</a>.
+          To edit capabilities or add hardware, use the <a href="/shop/print-agent" className="underline font-bold text-emerald-800">EasyToPrint Desktop Agent</a>.
         </div>
       </div>
 
       {isLoading ? (
         <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 space-y-3">
-          <RefreshCw className="w-6 h-6 text-blue-600 animate-spin mx-auto" />
+          <RefreshCw className="w-6 h-6 text-emerald-600 animate-spin mx-auto" />
           <p className="text-xs text-slate-500 font-medium">Synchronizing printers from agent...</p>
         </div>
       ) : printers.length === 0 ? (
@@ -372,7 +372,7 @@ export const ShopPrinters: React.FC = () => {
           <div className="space-y-1">
             <h3 className="text-sm font-bold text-slate-900">No Printers Detected</h3>
             <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Start your PrintFlow Desktop Agent on the shop PC to automatically discover and synchronize local USB and network Windows printers.
+              Start your EasyToPrint Desktop Agent on the shop PC to automatically discover and synchronize local USB and network Windows printers.
             </p>
           </div>
         </div>

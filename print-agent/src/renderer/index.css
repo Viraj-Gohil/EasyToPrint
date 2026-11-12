@@ -4,8 +4,8 @@
 :root {
   color-scheme: light;
 
-  /* QwikPrint Minimal Green & White Design System Tokens */
-  --bg-app: #F7F8F7;
+  /* EasyToPrint Official Brand Design System Tokens */
+  --bg-app: #F7F7F7;
   --bg-surface: #FFFFFF;
   --bg-card: #FFFFFF;
   --bg-sidebar: #FFFFFF;
@@ -15,18 +15,18 @@
   --bg-active: #D6F2DD;
   --bg-input: #FFFFFF;
 
-  /* Primary Green: #00B32D */
-  --color-primary: #00B32D;
+  /* Primary Green: #00B52D */
+  --color-primary: #00B52D;
   --color-primary-hover: #008F25;
   --color-primary-active: #00731E;
   --color-primary-light: #E8F8EC;
   --color-primary-border: #BCEAC4;
 
-  /* Typography: Primary Text (#111111), Secondary Text (#646B65) */
-  --text-primary: #111111;
-  --text-heading: #111111;
-  --text-body: #646B65;
-  --text-secondary: #646B65;
+  /* Typography: Primary Text (#080808), Secondary Text (#777777) */
+  --text-primary: #080808;
+  --text-heading: #080808;
+  --text-body: #777777;
+  --text-secondary: #777777;
   --text-muted: #848D86;
   --text-faint: #A5AFA7;
   --text-inverse: #FFFFFF;
@@ -35,11 +35,11 @@
   --border-default: #E1E7E1;
   --border-subtle: #F0F4F1;
   --border-strong: #C8D1C8;
-  --border-focus: #00B32D;
-  --ring-focus: rgba(0, 179, 45, 0.18);
+  --border-focus: #00B52D;
+  --ring-focus: rgba(0, 181, 45, 0.18);
 
-  /* Status Tokens: Online (#00B32D), Warning (#E6A000), Error (#DC2626), Neutral (#64748B) */
-  --status-success: #00B32D;
+  /* Status Tokens: Online (#00B52D), Warning (#E6A000), Error (#DC2626), Neutral (#64748B) */
+  --status-success: #00B52D;
   --status-success-bg: #E8F8EC;
   --status-success-text: #008F25;
   --status-success-border: #BCEAC4;

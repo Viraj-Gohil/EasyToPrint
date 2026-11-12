@@ -111,7 +111,7 @@ export const AdminPayments: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `printflow-platform-payments.csv`;
+    a.download = `easytoprint-platform-payments.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -132,7 +132,7 @@ export const AdminPayments: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowCheckoutModal(true)}
-            className="px-3.5 py-2 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3.5 py-2 text-xs font-semibold bg-[#00B52D] hover:bg-[#009624] text-white rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <CreditCard className="w-3.5 h-3.5" />
             <span>Test Razorpay Checkout</span>
@@ -168,11 +168,11 @@ export const AdminPayments: React.FC = () => {
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-semibold">Platform Fee Cut</span>
-            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-[#00B52D] flex items-center justify-center">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
-          <p className="text-2xl font-extrabold text-purple-900 font-mono">
+          <p className="text-2xl font-extrabold text-slate-900 font-mono">
             ₹{platformEarnings.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
           </p>
           <span className="text-[11px] text-slate-500 font-medium mt-1 block">
@@ -183,14 +183,14 @@ export const AdminPayments: React.FC = () => {
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-semibold">Shop Merchant Payouts</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-[#E8F8EC] text-[#00B52D] flex items-center justify-center border border-[#A7F3D0]">
               <Store className="w-4 h-4" />
             </div>
           </div>
           <p className="text-2xl font-extrabold text-slate-900 font-mono">
             ₹{shopPayouts.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
           </p>
-          <span className="text-[11px] text-blue-600 font-medium mt-1 block">
+          <span className="text-[11px] text-[#008F25] font-medium mt-1 block">
             Direct UPI settlements to shop accounts
           </span>
         </div>
@@ -219,7 +219,7 @@ export const AdminPayments: React.FC = () => {
             placeholder="Search by ID, order code, shop, customer..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-[#00B52D]"
           />
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
         </div>
@@ -229,7 +229,7 @@ export const AdminPayments: React.FC = () => {
           <select
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value)}
-            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
           >
             <option value="ALL">All Statuses</option>
             <option value="SUCCESS">Success</option>
@@ -242,7 +242,7 @@ export const AdminPayments: React.FC = () => {
           <select
             value={selectedType}
             onChange={(e) => setSelectedType(e.target.value)}
-            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
           >
             <option value="ALL">All Types</option>
             <option value="PRINT_JOB">Customer Print Orders</option>
@@ -253,7 +253,7 @@ export const AdminPayments: React.FC = () => {
           <select
             value={selectedGateway}
             onChange={(e) => setSelectedGateway(e.target.value)}
-            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+            className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#00B52D] cursor-pointer"
           >
             <option value="ALL">All Gateways</option>
             <option value="RAZORPAY">Razorpay Live / Test</option>
@@ -317,7 +317,7 @@ export const AdminPayments: React.FC = () => {
                       </td>
 
                       <td className="py-3.5 px-4">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 block w-fit mb-0.5">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-[#00B52D] block w-fit mb-0.5">
                           {tx.type === 'SAAS_SUBSCRIPTION' ? 'SaaS Fee' : 'Print Order'}
                         </span>
                         <span className="text-[10px] text-slate-500 font-mono">
@@ -329,7 +329,7 @@ export const AdminPayments: React.FC = () => {
                         ₹{tx.amount.toFixed(2)}
                       </td>
 
-                      <td className="py-3.5 px-4 font-mono text-purple-700 font-semibold">
+                      <td className="py-3.5 px-4 font-mono text-slate-700 font-semibold">
                         ₹{fee.toFixed(2)}
                       </td>
 
@@ -339,7 +339,7 @@ export const AdminPayments: React.FC = () => {
                             isSuccess
                               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                               : isRefunded
-                              ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                              ? 'bg-slate-100 text-slate-700 border border-slate-200'
                               : isPending
                               ? 'bg-amber-50 text-amber-700 border border-amber-200'
                               : 'bg-rose-50 text-rose-700 border border-rose-200'
@@ -350,7 +350,7 @@ export const AdminPayments: React.FC = () => {
                               isSuccess
                                 ? 'bg-emerald-500'
                                 : isRefunded
-                                ? 'bg-indigo-500'
+                                ? 'bg-slate-500'
                                 : isPending
                                 ? 'bg-amber-500'
                                 : 'bg-rose-500'
@@ -363,7 +363,7 @@ export const AdminPayments: React.FC = () => {
                       <td className="py-3.5 px-4 text-right">
                         <button
                           onClick={() => setSelectedTxModal(tx)}
-                          className="p-1.5 rounded-lg bg-slate-50 text-slate-600 hover:text-purple-700 hover:bg-purple-50 transition-colors cursor-pointer"
+                          className="p-1.5 rounded-lg bg-slate-50 text-slate-600 hover:text-[#00B52D] hover:bg-emerald-50 transition-colors cursor-pointer"
                           title="View Payment Breakdown"
                         >
                           <Eye className="w-3.5 h-3.5" />
@@ -384,7 +384,7 @@ export const AdminPayments: React.FC = () => {
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-purple-600" />
+                <Receipt className="w-4 h-4 text-[#00B52D]" />
                 <span>Transaction Financial Breakdown</span>
               </h3>
               <button
@@ -403,7 +403,7 @@ export const AdminPayments: React.FC = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Gateway Ref:</span>
-                  <span className="font-mono text-purple-700">
+                  <span className="font-mono text-slate-700">
                     {selectedTxModal.gatewayPaymentId || selectedTxModal.gatewayReference || 'rzp_pay_99210'}
                   </span>
                 </div>
@@ -413,7 +413,7 @@ export const AdminPayments: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 p-3 bg-purple-50/50 rounded-xl border border-purple-100">
+              <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <div>
                   <span className="text-slate-500 text-[10px] block">Shop Tenant</span>
                   <strong className="text-slate-900">{selectedTxModal.shopName}</strong>
@@ -437,7 +437,7 @@ export const AdminPayments: React.FC = () => {
                   <span className="text-slate-600">Gross Payment:</span>
                   <span className="font-mono font-bold text-slate-900">₹{selectedTxModal.amount.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between text-purple-700">
+                <div className="flex justify-between text-slate-600">
                   <span>Platform Fee (Commission):</span>
                   <span className="font-mono font-bold">
                     -₹{(selectedTxModal.platformFee ?? 0).toFixed(2)}
@@ -478,7 +478,7 @@ export const AdminPayments: React.FC = () => {
         isOpen={showCheckoutModal}
         onClose={() => setShowCheckoutModal(false)}
         defaultAmountInRupees={499}
-        orderDescription="PrintFlow Cloud SaaS Subscription"
+        orderDescription="EasyToPrint Cloud SaaS Subscription"
       />
     </div>
   );

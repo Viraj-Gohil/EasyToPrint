@@ -162,7 +162,7 @@ export const PrinterDriverSetupModal: React.FC<PrinterDriverSetupModalProps> = (
         onClose();
       }, 1200);
     } catch (err: any) {
-      setSyncErrorMessage(err?.message || 'Could not sync printer with PrintFlow Cloud.');
+      setSyncErrorMessage(err?.message || 'Could not sync printer with EasyToPrint Cloud.');
       setCloudSyncStatus('ERROR');
       setIsSyncingCloud(false);
     }
@@ -264,7 +264,7 @@ export const PrinterDriverSetupModal: React.FC<PrinterDriverSetupModalProps> = (
                   Connect Your Printer
                 </h1>
                 <p className="text-xs sm:text-sm text-[#64748B] dark:text-slate-400 leading-relaxed">
-                  Connect your printer to PrintFlow. We'll automatically detect your installed printer and check whether it's ready to print.
+                  Connect your printer to EasyToPrint. We'll automatically detect your installed printer and check whether it's ready to print.
                 </p>
               </div>
 
@@ -605,14 +605,14 @@ export const PrinterDriverSetupModal: React.FC<PrinterDriverSetupModalProps> = (
                     <li>Open Windows <strong>Devices &amp; Printers</strong> and check if "Use Printer Offline" is enabled in printer properties.</li>
                   </ul>
                 </div>
-              ) : targetPrinter?.status === 'PAUSED' ? (
+              ) : (targetPrinter?.status as string) === 'PAUSED' ? (
                 <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300 space-y-2">
                   <div className="flex items-center gap-2 font-bold text-xs">
                     <Pause className="w-4 h-4 text-amber-600" />
                     <span>Windows Queue Paused</span>
                   </div>
                   <p className="text-[11.5px] leading-relaxed">
-                    The Windows print spooler queue for this printer is currently PAUSED. Unpause the printer in Windows Devices &amp; Printers to allow PrintFlow jobs to spool.
+                    The Windows print spooler queue for this printer is currently PAUSED. Unpause the printer in Windows Devices &amp; Printers to allow EasyToPrint jobs to spool.
                   </p>
                 </div>
               ) : (
@@ -690,9 +690,9 @@ export const PrinterDriverSetupModal: React.FC<PrinterDriverSetupModalProps> = (
                 </div>
 
                 <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-2">
-                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">PrintFlow Shop Association</span>
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">EasyToPrint Shop Association</span>
                   <p className="text-xs font-bold text-blue-600 dark:text-blue-400 pt-1 font-mono">
-                    {config.shopDetails?.shopName || config.shopSlug || 'PrintFlow Shop'} ({config.shopId || 'Authenticated'})
+                    {config.shopDetails?.shopName || config.shopSlug || 'EasyToPrint Shop'} ({config.shopId || 'Authenticated'})
                   </p>
                 </div>
               </div>
@@ -709,7 +709,7 @@ export const PrinterDriverSetupModal: React.FC<PrinterDriverSetupModalProps> = (
                 <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2.5 animate-fade-in">
                   <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <div>
-                    <p className="font-bold">Successfully Synced to PrintFlow Cloud!</p>
+                    <p className="font-bold">Successfully Synced to EasyToPrint Cloud!</p>
                     <p className="text-[11px] opacity-80">This printer is now active and ready to receive customer print jobs.</p>
                   </div>
                 </div>

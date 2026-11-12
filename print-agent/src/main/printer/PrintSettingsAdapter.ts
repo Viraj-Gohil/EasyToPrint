@@ -114,7 +114,7 @@ try {
 
   # 2. Dispatch Document directly to bundled SumatraPDF
   if (-not (Test-Path -LiteralPath $sumatra)) {
-    throw 'The bundled Windows print engine is missing. Repair or reinstall PrintFlow Agent.'
+    throw 'The bundled Windows print engine is missing. Repair or reinstall EasyToPrint Agent.'
   }
 
   $argList = @('-print-to', $printer, '-silent')

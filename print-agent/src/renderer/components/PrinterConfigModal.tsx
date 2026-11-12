@@ -196,7 +196,7 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
           {saveSuccess && (
             <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 rounded-xl text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>Printer configuration saved permanently and synchronized with PrintFlow cloud!</span>
+              <span>Printer configuration saved permanently and synchronized with EasyToPrint cloud!</span>
             </div>
           )}
 

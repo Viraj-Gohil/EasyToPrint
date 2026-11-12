@@ -701,11 +701,11 @@ export const ShopPrintAgent: React.FC = () => {
           {activeTab === 'INSTALL' && (
             <div className="space-y-4 text-xs text-slate-700">
               <h3 className="font-semibold text-sm text-slate-900">
-                How to install PrintFlow Agent on your counter PC:
+                How to install EasyToPrint Agent on your counter PC:
               </h3>
               <ol className="list-decimal pl-5 space-y-2.5">
                 <li>
-                  Download the latest <code className="font-mono text-blue-700 font-semibold">PrintFlow-Agent-Setup.exe</code> installer for Windows 10/11.
+                  Download the latest <code className="font-mono text-emerald-700 font-semibold">EasyToPrint-Agent-Setup.exe</code> installer for Windows 10/11.
                 </li>
                 <li>
                   Run the installer with Administrator privileges to enable auto-discovery of USB and network printers.
@@ -728,11 +728,9 @@ export const ShopPrintAgent: React.FC = () => {
                   onClick={() => {
                     const link = document.createElement('a');
                     link.href = '#';
-                    link.setAttribute('download', 'PrintFlow-Agent-Setup-v1.4.2.exe');
-                    // Notification
-                    alert('PrintFlow Agent installer v1.4.2 ready. (Run with Admin privileges)');
+                    link.setAttribute('download', 'EasyToPrint-Agent-Setup-v1.4.2.exe');
                   }}
-                  className="gap-2"
+                  className="gap-2 bg-[#00A61C] hover:bg-[#008f18] text-white"
                 >
                   <Download className="w-4 h-4" />
                   <span>Download Windows Installer (v1.4.2)</span>

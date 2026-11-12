@@ -682,6 +682,43 @@ export const ShopSettings: React.FC = () => {
             </div>
           </div>
 
+          {/* Shop Access Code Card (Permanent & Non-Editable) */}
+          <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-900 text-sm">6-Digit Shop Code</span>
+                <Chip variant="success" size="sm" dot>Permanent</Chip>
+                <span className="text-[11px] text-slate-400 font-medium">Non-editable</span>
+              </div>
+              <p className="text-slate-500 max-w-lg leading-relaxed">
+                Customers can manually enter this 6-digit code on the customer access page if they cannot scan your counter QR code.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <span className="font-mono text-xl sm:text-2xl font-extrabold tracking-widest text-[#008F25] bg-[#E8F8EC] px-3.5 py-1 rounded-xl border border-[#A7F3D0] select-all">
+                {activeShop.shopCode || '100001'}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  const code = activeShop.shopCode || '100001';
+                  try {
+                    if (navigator.clipboard?.writeText) {
+                      await navigator.clipboard.writeText(code);
+                    }
+                    showToast('Shop Code Copied', `Code ${code} copied to clipboard.`, 'success', 2500);
+                  } catch {
+                    showToast('Copy Failed', 'Unable to copy code to clipboard.', 'error');
+                  }
+                }}
+              >
+                <Copy className="w-3.5 h-3.5 text-slate-500" />
+                <span>Copy Code</span>
+              </Button>
+            </div>
+          </div>
+
           {/* Quick Action Banner */}
           <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-4 text-xs">
             <div className="space-y-0.5">
@@ -1104,7 +1141,7 @@ export const ShopSettings: React.FC = () => {
                 <label className="text-xs font-bold text-slate-800 block">Platform Fee Structure</label>
                 <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1 text-xs">
                   <div className="flex justify-between items-center">
-                    <span className="font-semibold text-slate-800">PrintFlow Take-rate:</span>
+                    <span className="font-semibold text-slate-800">EasyToPrint Take-rate:</span>
                     <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                       0% (Direct Settlement)
                     </span>

@@ -551,7 +551,7 @@ export const AdminSubscriptions: React.FC = () => {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `printflow_subscribers_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `easytoprint_subscribers_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -691,7 +691,7 @@ export const AdminSubscriptions: React.FC = () => {
         <div className="pt-2">
           <button
             onClick={() => navigate('/auth')}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-xl cursor-pointer"
+            className="px-4 py-2 bg-[#00B52D] hover:bg-[#009624] text-white text-xs font-semibold rounded-xl cursor-pointer"
           >
             Sign In As Platform Admin
           </button>
@@ -717,9 +717,9 @@ export const AdminSubscriptions: React.FC = () => {
           {/* View Active Tenant Subscriptions */}
           <button
             onClick={() => navigate('/admin/subscriptions')}
-            className="px-3.5 py-2 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3.5 py-2 text-xs font-semibold text-[#00B52D] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <Layers className="w-3.5 h-3.5 text-purple-600" />
+            <Layers className="w-3.5 h-3.5 text-[#00B52D]" />
             <span>Active Subscriptions</span>
           </button>
 
@@ -755,7 +755,7 @@ export const AdminSubscriptions: React.FC = () => {
 
           <button
             onClick={handleOpenCreatePlan}
-            className="px-4 py-2 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-4 py-2 text-xs font-semibold text-white bg-[#00B52D] hover:bg-[#009624] rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Create Plan</span>
@@ -771,13 +771,13 @@ export const AdminSubscriptions: React.FC = () => {
             setActiveTab('catalog');
             setStatusFilter('ALL');
           }}
-          className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs hover:border-purple-300 transition-all cursor-pointer group"
+          className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-300 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between text-slate-500 mb-1.5">
             <span className="text-[11px] font-medium">Total Plans</span>
-            <Layers className="w-3.5 h-3.5 text-purple-600" />
+            <Layers className="w-3.5 h-3.5 text-[#00B52D]" />
           </div>
-          <p className="text-xl font-bold font-mono text-slate-900 group-hover:text-purple-600 transition-colors">
+          <p className="text-xl font-bold font-mono text-slate-900 group-hover:text-[#00B52D] transition-colors">
             {kpiData.totalPlans}
           </p>
           <span className="text-[10px] text-slate-400 mt-0.5 block">Catalog tiers</span>
@@ -807,13 +807,13 @@ export const AdminSubscriptions: React.FC = () => {
             setActiveTab('subscribers');
             setSubscriberStatusFilter('ACTIVE');
           }}
-          className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs hover:border-blue-300 transition-all cursor-pointer group"
+          className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-300 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between text-slate-500 mb-1.5">
             <span className="text-[11px] font-medium">Active Tenants</span>
-            <Store className="w-3.5 h-3.5 text-blue-600" />
+            <Store className="w-3.5 h-3.5 text-[#00B52D]" />
           </div>
-          <p className="text-xl font-bold font-mono text-slate-900 group-hover:text-blue-600 transition-colors">
+          <p className="text-xl font-bold font-mono text-slate-900 group-hover:text-[#00B52D] transition-colors">
             {kpiData.activeSubscriptions}
           </p>
           <span className="text-[10px] text-slate-400 mt-0.5 block">Paying & active</span>
@@ -825,13 +825,13 @@ export const AdminSubscriptions: React.FC = () => {
             setActiveTab('subscribers');
             setSubscriberStatusFilter('ACTIVE');
           }}
-          className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs hover:border-purple-300 transition-all cursor-pointer group"
+          className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-300 transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between text-slate-500 mb-1.5">
             <span className="text-[11px] font-medium">Monthly MRR</span>
-            <CreditCard className="w-3.5 h-3.5 text-purple-600" />
+            <CreditCard className="w-3.5 h-3.5 text-[#00B52D]" />
           </div>
-          <p className="text-xl font-bold font-mono text-slate-900 group-hover:text-purple-600 transition-colors">
+          <p className="text-xl font-bold font-mono text-slate-900 group-hover:text-[#00B52D] transition-colors">
             ₹{kpiData.mrr.toLocaleString()}
           </p>
           <span className="text-[10px] text-slate-400 mt-0.5 block">Valid subscriptions</span>
@@ -881,7 +881,7 @@ export const AdminSubscriptions: React.FC = () => {
             onClick={() => setActiveTab('catalog')}
             className={`px-3.5 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'catalog'
-                ? 'border-purple-600 text-purple-700 bg-purple-50/50 rounded-t-lg'
+                ? 'border-[#00B52D] text-[#00B52D] bg-emerald-50/50 rounded-t-lg'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -893,7 +893,7 @@ export const AdminSubscriptions: React.FC = () => {
             onClick={() => setActiveTab('subscribers')}
             className={`px-3.5 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'subscribers'
-                ? 'border-purple-600 text-purple-700 bg-purple-50/50 rounded-t-lg'
+                ? 'border-[#00B52D] text-[#00B52D] bg-emerald-50/50 rounded-t-lg'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -905,7 +905,7 @@ export const AdminSubscriptions: React.FC = () => {
             onClick={() => setActiveTab('usage')}
             className={`px-3.5 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'usage'
-                ? 'border-purple-600 text-purple-700 bg-purple-50/50 rounded-t-lg'
+                ? 'border-[#00B52D] text-[#00B52D] bg-emerald-50/50 rounded-t-lg'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -917,7 +917,7 @@ export const AdminSubscriptions: React.FC = () => {
             onClick={() => setActiveTab('policies')}
             className={`px-3.5 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'policies'
-                ? 'border-purple-600 text-purple-700 bg-purple-50/50 rounded-t-lg'
+                ? 'border-[#00B52D] text-[#00B52D] bg-emerald-50/50 rounded-t-lg'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -929,7 +929,7 @@ export const AdminSubscriptions: React.FC = () => {
             onClick={() => setActiveTab('gateway')}
             className={`px-3.5 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'gateway'
-                ? 'border-purple-600 text-purple-700 bg-purple-50/50 rounded-t-lg'
+                ? 'border-[#00B52D] text-[#00B52D] bg-emerald-50/50 rounded-t-lg'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -941,7 +941,7 @@ export const AdminSubscriptions: React.FC = () => {
             onClick={() => setActiveTab('audit')}
             className={`px-3.5 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'audit'
-                ? 'border-purple-600 text-purple-700 bg-purple-50/50 rounded-t-lg'
+                ? 'border-[#00B52D] text-[#00B52D] bg-emerald-50/50 rounded-t-lg'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -966,7 +966,7 @@ export const AdminSubscriptions: React.FC = () => {
                   placeholder="Search plan by name, slug..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-[#00B52D]"
                 />
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
               </div>
@@ -1013,7 +1013,7 @@ export const AdminSubscriptions: React.FC = () => {
               <button
                 onClick={() => setViewMode('grid')}
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                  viewMode === 'grid' ? 'bg-white shadow-2xs text-purple-700' : 'text-slate-600 hover:text-slate-900'
+                  viewMode === 'grid' ? 'bg-white shadow-2xs text-[#00B52D]' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 Cards Grid
@@ -1021,7 +1021,7 @@ export const AdminSubscriptions: React.FC = () => {
               <button
                 onClick={() => setViewMode('table')}
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-                  viewMode === 'table' ? 'bg-white shadow-2xs text-purple-700' : 'text-slate-600 hover:text-slate-900'
+                  viewMode === 'table' ? 'bg-white shadow-2xs text-[#00B52D]' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 Table View
@@ -1037,7 +1037,7 @@ export const AdminSubscriptions: React.FC = () => {
               <p className="text-xs text-slate-400">Try adjusting your filters or create a new plan.</p>
               <button
                 onClick={handleOpenCreatePlan}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 cursor-pointer mt-2"
+                className="px-4 py-2 bg-[#00B52D] hover:bg-[#009624] text-white text-xs font-semibold rounded-xl inline-flex items-center gap-1.5 cursor-pointer mt-2"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Create New Plan</span>
@@ -1058,7 +1058,7 @@ export const AdminSubscriptions: React.FC = () => {
                     key={p.id}
                     className={`bg-white rounded-2xl border flex flex-col justify-between transition-all relative overflow-hidden ${
                       p.isPopular
-                        ? 'border-purple-500 shadow-xs'
+                        ? 'border-[#00B52D] shadow-xs'
                         : isArchived
                         ? 'border-slate-200 bg-slate-50/60 opacity-80'
                         : 'border-slate-200 hover:border-slate-300 shadow-2xs'
@@ -1066,7 +1066,7 @@ export const AdminSubscriptions: React.FC = () => {
                   >
                     {/* Top banner / Popular chip */}
                     {p.isPopular && (
-                      <div className="bg-purple-600 text-white text-[10px] font-semibold tracking-wider uppercase text-center py-1">
+                      <div className="bg-[#00B52D] text-white text-[10px] font-semibold tracking-wider uppercase text-center py-1">
                         Recommended Plan
                       </div>
                     )}
@@ -1079,7 +1079,7 @@ export const AdminSubscriptions: React.FC = () => {
                             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
                               {p.name}
                             </h3>
-                            <span className="text-[10px] font-mono text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
+                            <span className="text-[10px] font-mono text-[#00B52D] bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
                               /{p.slug || p.id}
                             </span>
                           </div>
@@ -1173,7 +1173,7 @@ export const AdminSubscriptions: React.FC = () => {
                               key={idx}
                               className="inline-flex items-center gap-1 text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md truncate max-w-full"
                             >
-                              <Check className="w-2.5 h-2.5 text-purple-600 shrink-0" />
+                              <Check className="w-2.5 h-2.5 text-[#00B52D] shrink-0" />
                               <span className="truncate">{feat}</span>
                             </span>
                           ))}
@@ -1192,7 +1192,7 @@ export const AdminSubscriptions: React.FC = () => {
                             setActiveTab('subscribers');
                             setSubscriberPlanFilter(p.id);
                           }}
-                          className="text-purple-700 font-semibold hover:underline flex items-center gap-1 cursor-pointer"
+                          className="text-[#00B52D] font-semibold hover:underline flex items-center gap-1 cursor-pointer"
                         >
                           <Store className="w-3 h-3" />
                           <span>{subscriberCount} Subscribed Shop{subscriberCount !== 1 ? 's' : ''}</span>
@@ -1207,7 +1207,7 @@ export const AdminSubscriptions: React.FC = () => {
                     <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center gap-1.5 text-xs">
                       <button
                         onClick={() => handleOpenEditPlan(p)}
-                        className="flex-1 py-1.5 px-2 bg-white hover:bg-purple-50 hover:text-purple-700 text-slate-700 font-semibold rounded-lg border border-slate-200 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                        className="flex-1 py-1.5 px-2 bg-white hover:bg-emerald-50 hover:text-[#00B52D] text-slate-700 font-semibold rounded-lg border border-slate-200 flex items-center justify-center gap-1 transition-colors cursor-pointer"
                       >
                         <Edit2 className="w-3 h-3" />
                         <span>Edit Plan</span>
@@ -1277,7 +1277,7 @@ export const AdminSubscriptions: React.FC = () => {
                         <tr key={p.id} className="hover:bg-slate-50/50">
                           <td className="py-3.5 px-4">
                             <span className="font-bold text-slate-900 block">{p.name}</span>
-                            <span className="text-[10px] font-mono text-purple-700">/{p.slug || p.id}</span>
+                            <span className="text-[10px] font-mono text-[#00B52D]">/{p.slug || p.id}</span>
                           </td>
                           <td className="py-3.5 px-4 font-mono">
                             <span className="font-bold text-slate-900">
@@ -1306,7 +1306,7 @@ export const AdminSubscriptions: React.FC = () => {
                                 setActiveTab('subscribers');
                                 setSubscriberPlanFilter(p.id);
                               }}
-                              className="font-bold text-purple-700 hover:underline cursor-pointer"
+                              className="font-bold text-[#00B52D] hover:underline cursor-pointer"
                             >
                               {subscriberCount} shops
                             </button>
@@ -1328,7 +1328,7 @@ export const AdminSubscriptions: React.FC = () => {
                             <div className="flex items-center justify-end gap-1.5">
                               <button
                                 onClick={() => handleOpenEditPlan(p)}
-                                className="p-1.5 text-slate-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg cursor-pointer"
+                                className="p-1.5 text-slate-600 hover:text-[#00B52D] hover:bg-emerald-50 rounded-lg cursor-pointer"
                                 title="Edit"
                               >
                                 <Edit2 className="w-3.5 h-3.5" />
@@ -1382,7 +1382,7 @@ export const AdminSubscriptions: React.FC = () => {
                   placeholder="Search shop, ID, owner..."
                   value={subscriberSearch}
                   onChange={(e) => setSubscriberSearch(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-[#00B52D]"
                 />
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
               </div>
@@ -1461,7 +1461,7 @@ export const AdminSubscriptions: React.FC = () => {
                         </td>
 
                         <td className="py-3.5 px-4">
-                          <span className="font-semibold text-purple-700 block">{sub.planName}</span>
+                          <span className="font-semibold text-[#00B52D] block">{sub.planName}</span>
                           <span className="text-[10px] text-slate-500 uppercase tracking-wider">
                             {sub.billingPeriod}
                           </span>
@@ -1514,7 +1514,7 @@ export const AdminSubscriptions: React.FC = () => {
                                     ? 'bg-red-500'
                                     : jobsPercent >= 75
                                     ? 'bg-amber-500'
-                                    : 'bg-purple-600'
+                                    : 'bg-[#00B52D]'
                                 }`}
                                 style={{ width: `${Math.max(4, Math.min(100, jobsPercent))}%` }}
                               />
@@ -1529,7 +1529,7 @@ export const AdminSubscriptions: React.FC = () => {
                                 setSubToChangePlan(sub);
                                 setTargetNewPlanId(sub.planId);
                               }}
-                              className="px-2 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold rounded-lg cursor-pointer"
+                              className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-[#00B52D] font-semibold rounded-lg cursor-pointer"
                             >
                               Change Plan
                             </button>
@@ -1562,7 +1562,7 @@ export const AdminSubscriptions: React.FC = () => {
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-2">
               <div className="flex items-center justify-between text-slate-500 text-xs">
                 <span className="font-semibold">Print Orders Handled</span>
-                <Printer className="w-4 h-4 text-purple-600" />
+                <Printer className="w-4 h-4 text-[#00B52D]" />
               </div>
               <p className="text-2xl font-bold font-mono text-slate-900">
                 {subscriptions.reduce((acc, s) => acc + (s.jobsUsedThisMonth || 0), 0).toLocaleString()}
@@ -1640,7 +1640,7 @@ export const AdminSubscriptions: React.FC = () => {
                           <span className="font-bold text-slate-900 block">{sub.shopName}</span>
                           <span className="text-[10px] text-slate-400 font-mono">{sub.shopId}</span>
                         </td>
-                        <td className="py-3.5 px-4 font-semibold text-purple-700">
+                        <td className="py-3.5 px-4 font-semibold text-[#00B52D]">
                           {sub.planName}
                         </td>
                         <td className="py-3.5 px-4">
@@ -1651,7 +1651,7 @@ export const AdminSubscriptions: React.FC = () => {
                             <div className="w-32 bg-slate-200 h-1.5 rounded-full overflow-hidden">
                               <div
                                 className={`h-full rounded-full ${
-                                  jobRatio >= 0.95 ? 'bg-red-500' : jobRatio >= 0.8 ? 'bg-amber-500' : 'bg-purple-600'
+                                  jobRatio >= 0.95 ? 'bg-red-500' : jobRatio >= 0.8 ? 'bg-amber-500' : 'bg-[#00B52D]'
                                 }`}
                                 style={{ width: `${Math.min(100, Math.max(5, Math.round(jobRatio * 100)))}%` }}
                               />
@@ -1703,7 +1703,7 @@ export const AdminSubscriptions: React.FC = () => {
                   Universal platform restrictions that enforce system boundaries across all tenant tiers.
                 </p>
               </div>
-              <div className="text-[11px] text-purple-700 bg-purple-50 px-2.5 py-1 rounded-xl border border-purple-100 font-medium">
+              <div className="text-[11px] text-[#00B52D] bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-100 font-medium">
                 Last updated: {platformPolicies.updatedAt?.slice(0, 10) || 'Recent'}
               </div>
             </div>
@@ -1835,7 +1835,7 @@ export const AdminSubscriptions: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isSavingPolicies}
-                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-5 py-2.5 bg-[#00B52D] hover:bg-[#009624] text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>{isSavingPolicies ? 'Saving...' : 'Save Platform Policies'}</span>
@@ -1864,7 +1864,7 @@ export const AdminSubscriptions: React.FC = () => {
                 type="button"
                 onClick={handleTestGateway}
                 disabled={isTestingGateway}
-                className="px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold rounded-xl border border-purple-200 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-[#00B52D] text-xs font-semibold rounded-xl border border-emerald-200 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isTestingGateway ? 'animate-spin' : ''}`} />
                 <span>{isTestingGateway ? 'Verifying...' : 'Verify Gateway Handshake'}</span>
@@ -1897,19 +1897,19 @@ export const AdminSubscriptions: React.FC = () => {
               </div>
             )}
 
-            <div className="p-4 bg-blue-50/80 border border-blue-200 rounded-xl space-y-2 text-xs text-blue-900">
+            <div className="p-4 bg-[#E8F8EC] border border-[#A7F3D0] rounded-xl space-y-2 text-xs text-[#080808]">
               <div className="font-bold flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" />
+                <ShieldCheck className="w-4 h-4 text-[#00B52D] shrink-0" />
                 <span>Configured via Server-Side Environment Variables</span>
               </div>
-              <p className="text-blue-800 leading-relaxed">
-                Platform SaaS Razorpay Gateway API credentials (<code className="font-mono bg-blue-100 px-1 py-0.5 rounded">RAZORPAY_KEY_ID</code> / <code className="font-mono bg-blue-100 px-1 py-0.5 rounded">RAZORPAY_KEY_SECRET</code>) are configured exclusively via server-side environment variables. Admin dashboard configuration, editing, saving, and overrides have been permanently disabled for security.
+              <p className="text-slate-700 leading-relaxed">
+                Platform SaaS Razorpay Gateway API credentials (<code className="font-mono bg-white border border-[#A7F3D0] px-1 py-0.5 rounded">RAZORPAY_KEY_ID</code> / <code className="font-mono bg-white border border-[#A7F3D0] px-1 py-0.5 rounded">RAZORPAY_KEY_SECRET</code>) are configured exclusively via server-side environment variables. Admin dashboard configuration, editing, saving, and overrides have been permanently disabled for security.
               </p>
             </div>
 
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 text-xs space-y-2">
               <h4 className="font-semibold text-slate-800 flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-purple-600" />
+                <Shield className="w-3.5 h-3.5 text-[#00B52D]" />
                 <span>Security Architecture Notes</span>
               </h4>
               <ul className="text-slate-500 space-y-1 text-[11px] list-disc list-inside">
@@ -1952,7 +1952,7 @@ export const AdminSubscriptions: React.FC = () => {
                   .map((log) => (
                     <tr key={log.id} className="hover:bg-slate-50/50">
                       <td className="py-2.5 px-4 text-slate-500">{log.createdAt.replace('T', ' ').slice(0, 19)}</td>
-                      <td className="py-2.5 px-4 font-bold text-purple-700">{log.action}</td>
+                      <td className="py-2.5 px-4 font-bold text-[#00B52D]">{log.action}</td>
                       <td className="py-2.5 px-4 text-slate-600">{log.entityId}</td>
                       <td className="py-2.5 px-4 font-sans text-slate-800">{log.actorName}</td>
                       <td className="py-2.5 px-4 font-sans text-slate-600">{log.details}</td>
@@ -1994,7 +1994,7 @@ export const AdminSubscriptions: React.FC = () => {
             <form onSubmit={handleSavePlanForm} className="space-y-6 text-xs">
               {/* SECTION A: BASIC INFORMATION */}
               <div className="space-y-3">
-                <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider text-purple-700">
+                <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider text-[#00B52D]">
                   1. Basic Information
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2061,7 +2061,7 @@ export const AdminSubscriptions: React.FC = () => {
               {/* SECTION B: PRICING */}
               <div className="space-y-3 pt-3 border-t border-slate-100">
                 <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider text-purple-700">
+                  <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider text-[#00B52D]">
                     2. Pricing & Commercials (INR ₹)
                   </h4>
                   <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-700">
@@ -2069,7 +2069,7 @@ export const AdminSubscriptions: React.FC = () => {
                       type="checkbox"
                       checked={planForm.isFree}
                       onChange={(e) => setPlanForm({ ...planForm, isFree: e.target.checked })}
-                      className="rounded text-purple-600"
+                      className="rounded text-[#00B52D]"
                     />
                     <span>Free Plan (₹0 / month)</span>
                   </label>
@@ -2130,19 +2130,19 @@ export const AdminSubscriptions: React.FC = () => {
 
               {/* SECTION C: HARDWARE & QUOTAS */}
               <div className="space-y-3 pt-3 border-t border-slate-100">
-                <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider text-purple-700">
+                <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider text-[#00B52D]">
                   3. Hardware & Volume Quotas
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
                       <label className="font-semibold text-slate-800">Monthly Print Orders</label>
-                      <label className="text-[10px] text-purple-700 cursor-pointer flex items-center gap-1">
+                      <label className="text-[10px] text-[#00B52D] cursor-pointer flex items-center gap-1">
                         <input
                           type="checkbox"
                           checked={planForm.isUnlimitedPrintJobs}
                           onChange={(e) => setPlanForm({ ...planForm, isUnlimitedPrintJobs: e.target.checked })}
-                          className="rounded text-purple-600"
+                          className="rounded text-[#00B52D]"
                         />
                         <span>Unlimited</span>
                       </label>
@@ -2159,12 +2159,12 @@ export const AdminSubscriptions: React.FC = () => {
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
                       <label className="font-semibold text-slate-800">Max Allowed Printers</label>
-                      <label className="text-[10px] text-purple-700 cursor-pointer flex items-center gap-1">
+                      <label className="text-[10px] text-[#00B52D] cursor-pointer flex items-center gap-1">
                         <input
                           type="checkbox"
                           checked={planForm.isUnlimitedPrinters}
                           onChange={(e) => setPlanForm({ ...planForm, isUnlimitedPrinters: e.target.checked })}
-                          className="rounded text-purple-600"
+                          className="rounded text-[#00B52D]"
                         />
                         <span>Unlimited</span>
                       </label>
@@ -2182,12 +2182,12 @@ export const AdminSubscriptions: React.FC = () => {
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
                       <label className="font-semibold text-slate-800">Storage Limit (MB)</label>
-                      <label className="text-[10px] text-purple-700 cursor-pointer flex items-center gap-1">
+                      <label className="text-[10px] text-[#00B52D] cursor-pointer flex items-center gap-1">
                         <input
                           type="checkbox"
                           checked={planForm.isUnlimitedStorage}
                           onChange={(e) => setPlanForm({ ...planForm, isUnlimitedStorage: e.target.checked })}
-                          className="rounded text-purple-600"
+                          className="rounded text-[#00B52D]"
                         />
                         <span>Unlimited</span>
                       </label>
@@ -2232,7 +2232,7 @@ export const AdminSubscriptions: React.FC = () => {
 
               {/* SECTION D: FEATURE ENTITLEMENTS */}
               <div className="space-y-3 pt-3 border-t border-slate-100">
-                <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider text-purple-700">
+                <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider text-[#00B52D]">
                   4. Feature Entitlements
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -2254,7 +2254,7 @@ export const AdminSubscriptions: React.FC = () => {
                         key={key}
                         className={`p-2 rounded-xl border flex items-center gap-2 cursor-pointer transition-colors ${
                           isChecked
-                            ? 'bg-purple-50/70 border-purple-200 text-purple-900 font-semibold'
+                            ? 'bg-emerald-50/70 border-emerald-200 text-slate-900 font-semibold'
                             : 'bg-slate-50 border-slate-200 text-slate-600'
                         }`}
                       >
@@ -2270,7 +2270,7 @@ export const AdminSubscriptions: React.FC = () => {
                               }
                             })
                           }
-                          className="rounded text-purple-600"
+                          className="rounded text-[#00B52D]"
                         />
                         <span className="truncate">{label}</span>
                       </label>
@@ -2435,7 +2435,7 @@ export const AdminSubscriptions: React.FC = () => {
                   </button>
                   <button
                     type="submit"
-                    className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
+                    className="px-6 py-2 bg-[#00B52D] hover:bg-[#009624] text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer"
                   >
                     {isCreatingNew ? 'Create & Publish Plan' : 'Save Plan Changes'}
                   </button>
@@ -2555,7 +2555,7 @@ export const AdminSubscriptions: React.FC = () => {
               </select>
             </div>
 
-            <div className="p-3 bg-purple-50 rounded-xl text-[11px] text-purple-900 border border-purple-100">
+            <div className="p-3 bg-emerald-50 rounded-xl text-[11px] text-slate-900 border border-emerald-100">
               <p className="font-semibold">Consequence Summary:</p>
               <p className="mt-0.5">
                 The shop's hardware allocation and print limits will immediately sync with the selected tier. A subscription billing record will be stamped in platform financials.
@@ -2573,7 +2573,7 @@ export const AdminSubscriptions: React.FC = () => {
               <button
                 type="button"
                 onClick={handleExecuteChangePlan}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl cursor-pointer shadow-xs"
+                className="px-4 py-2 bg-[#00B52D] hover:bg-[#009624] text-white font-semibold rounded-xl cursor-pointer shadow-xs"
               >
                 Confirm Plan Switch
               </button>

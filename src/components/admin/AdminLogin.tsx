@@ -17,15 +17,15 @@ export const AdminLogin: React.FC = () => {
   // If already logged in as admin, offer to jump directly
   if (currentUser?.role === 'ADMIN') {
     return (
-      <div className="min-h-[80vh] flex items-center justify-center p-4 bg-slate-50/60">
-        <div className="max-w-md w-full bg-white p-7 sm:p-8 rounded-2xl border border-slate-200/90 shadow-2xs text-center space-y-4">
-          <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center mx-auto">
+      <div className="min-h-[80vh] flex items-center justify-center p-4 bg-[#F7F8F7]">
+        <div className="max-w-md w-full bg-white p-7 sm:p-8 rounded-2xl border border-[#E1E7E1] shadow-2xs text-center space-y-4">
+          <div className="w-12 h-12 rounded-xl bg-[#E8F8EC] text-[#008F25] flex items-center justify-center mx-auto border border-[#A7F3D0]">
             <CheckCircle2 className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-900">Already Authenticated as Admin</h2>
-            <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              You are currently signed in as <strong className="text-slate-800">{currentUser.fullName}</strong> ({currentUser.email}).
+            <h2 className="text-xl font-bold text-[#080808]">Already Authenticated as Admin</h2>
+            <p className="text-xs sm:text-sm text-[#777777] mt-1">
+              You are currently signed in as <strong className="text-[#080808]">{currentUser.fullName}</strong> ({currentUser.email}).
             </p>
           </div>
           <div className="pt-2 flex flex-col gap-2">
@@ -33,7 +33,7 @@ export const AdminLogin: React.FC = () => {
               variant="solid"
               size="md"
               onClick={() => navigate('/admin/dashboard')}
-              className="w-full bg-purple-600 hover:bg-purple-700 focus-visible:ring-purple-500"
+              className="w-full bg-[#00B52D] hover:bg-[#008F25] focus-visible:ring-[#00B52D]"
             >
               Go to Admin Console
             </Button>
@@ -84,21 +84,28 @@ export const AdminLogin: React.FC = () => {
   };
 
   return (
-    <div className="min-h-[85vh] flex items-center justify-center py-10 px-4 sm:px-6 lg:px-8 bg-slate-50/60">
-      <div className="max-w-[420px] w-full space-y-5">
+    <div className="min-h-[85vh] flex items-center justify-center py-10 px-4 sm:px-6 lg:px-8 bg-[#F7F8F7] relative">
+      <div
+        className="fixed inset-0 pointer-events-none z-0 opacity-[0.4]"
+        style={{
+          backgroundImage: `linear-gradient(to right, #E1E7E1 1px, transparent 1px), linear-gradient(to bottom, #E1E7E1 1px, transparent 1px)`,
+          backgroundSize: '48px 48px',
+        }}
+      />
+      <div className="max-w-[420px] w-full space-y-5 relative z-10">
         {/* Brand Header */}
         <div className="text-center space-y-2">
-          <div className="w-11 h-11 rounded-xl bg-purple-600 text-white flex items-center justify-center mx-auto shadow-2xs">
+          <div className="w-11 h-11 rounded-xl bg-[#00B52D] text-white flex items-center justify-center mx-auto shadow-2xs">
             <Shield className="w-6 h-6" />
           </div>
           <div className="space-y-1">
-            <span className="text-[10px] font-mono font-semibold uppercase tracking-wider text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200/60 inline-block">
+            <span className="text-[10px] font-mono font-semibold uppercase tracking-wider text-[#008F25] bg-[#E8F8EC] px-2.5 py-0.5 rounded-full border border-[#A7F3D0] inline-block">
               Fixed URL: /admin/login
             </span>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 mt-1">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#080808] mt-1">
               Platform Master Admin
             </h1>
-            <p className="text-xs sm:text-sm text-slate-500 max-w-sm mx-auto leading-relaxed">
+            <p className="text-xs sm:text-sm text-[#777777] max-w-sm mx-auto leading-relaxed">
               Restricted access for platform administrators, multi-tenant governance, and billing.
             </p>
           </div>
@@ -130,7 +137,7 @@ export const AdminLogin: React.FC = () => {
                   name="email"
                   type="email"
                   autoComplete="email"
-                  placeholder="admin@printflow.io"
+                  placeholder="admin@easytoprint.io"
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value);
@@ -143,7 +150,7 @@ export const AdminLogin: React.FC = () => {
                   className={`w-full pl-9 pr-3.5 h-10 sm:h-11 bg-white border rounded-xl text-xs sm:text-sm font-mono text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${
                     emailError
                       ? 'border-red-400 focus:border-red-500 focus:ring-red-500/20 bg-red-50/20'
-                      : 'border-slate-200 focus:border-purple-600 focus:ring-purple-600/20'
+                      : 'border-slate-200 focus:border-[#00B52D] focus:ring-[#00B52D]/20'
                   }`}
                 />
               </div>
@@ -180,7 +187,7 @@ export const AdminLogin: React.FC = () => {
                   className={`w-full pl-9 pr-10 h-10 sm:h-11 bg-white border rounded-xl text-xs sm:text-sm font-mono text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${
                     passwordError
                       ? 'border-red-400 focus:border-red-500 focus:ring-red-500/20 bg-red-50/20'
-                      : 'border-slate-200 focus:border-purple-600 focus:ring-purple-600/20'
+                      : 'border-slate-200 focus:border-[#00B52D] focus:ring-[#00B52D]/20'
                   }`}
                 />
                 <button
@@ -207,7 +214,7 @@ export const AdminLogin: React.FC = () => {
               variant="solid"
               size="lg"
               disabled={isSubmitting}
-              className="w-full mt-1 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 focus-visible:ring-purple-500"
+              className="w-full mt-1 bg-[#00B52D] hover:bg-[#008F25] active:bg-[#007A20] focus-visible:ring-[#00B52D]"
             >
               {isSubmitting ? (
                 <>
@@ -236,7 +243,7 @@ export const AdminLogin: React.FC = () => {
             <button
               type="button"
               onClick={() => navigate('/auth/login')}
-              className="font-semibold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+              className="font-semibold text-[#00B52D] hover:text-[#008F25] hover:underline cursor-pointer"
             >
               Shop Owner Login
             </button>

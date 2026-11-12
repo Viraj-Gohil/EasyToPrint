@@ -47,40 +47,64 @@ export const Footer: React.FC = () => {
             </h4>
             <ul className="space-y-2.5 text-xs">
               <li>
-                <button
-                  type="button"
-                  onClick={() => scrollToSection('features')}
-                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left"
+                <a
+                  href="/features"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/features');
+                  }}
+                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left block"
                 >
                   Features
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  type="button"
-                  onClick={() => scrollToSection('desktop-agent')}
-                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left"
+                <a
+                  href="/qr-print-ordering"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/qr-print-ordering');
+                  }}
+                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left block"
+                >
+                  QR Print Ordering
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/print-shop-management"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/print-shop-management');
+                  }}
+                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left block"
+                >
+                  Print Shop Management
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/print-agent"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/print-agent');
+                  }}
+                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left block"
                 >
                   EasyToPrint Agent
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  type="button"
-                  onClick={() => scrollToSection('how-it-works')}
-                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left"
-                >
-                  How It Works
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  onClick={() => scrollToSection('pricing')}
-                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left"
+                <a
+                  href="/pricing"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/pricing');
+                  }}
+                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left block"
                 >
                   Pricing
-                </button>
+                </a>
               </li>
             </ul>
           </div>
@@ -92,40 +116,40 @@ export const Footer: React.FC = () => {
             </h4>
             <ul className="space-y-2.5 text-xs">
               <li>
-                <button
-                  type="button"
-                  onClick={() => setActiveLegalModal('about')}
-                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left"
+                <a
+                  href="/about"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/about');
+                  }}
+                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left block"
                 >
                   About Us
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  type="button"
-                  onClick={() => setActiveLegalModal('contact')}
-                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left"
+                <a
+                  href="/contact"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/contact');
+                  }}
+                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left block"
                 >
                   Contact Us
-                </button>
+                </a>
               </li>
               <li>
-                <button
-                  type="button"
-                  onClick={() => scrollToSection('faq')}
-                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left"
+                <a
+                  href="/faq"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/faq');
+                  }}
+                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left block"
                 >
-                  Help Center
-                </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  onClick={() => scrollToSection('faq')}
-                  className="hover:text-[#00B32D] transition-colors cursor-pointer text-left"
-                >
-                  FAQs
-                </button>
+                  FAQs &amp; Help Center
+                </a>
               </li>
               <li>
                 <button
@@ -173,14 +197,18 @@ export const Footer: React.FC = () => {
                 </button>
               </li>
               <li>
-                <button
-                  type="button"
-                  onClick={() => navigate('/track-print')}
+                <a
+                  href="/track-print"
+                  rel="nofollow"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/track-print');
+                  }}
                   className="hover:text-[#00B32D] transition-colors cursor-pointer text-left flex items-center gap-1"
                 >
                   <span>Track Customer Order</span>
                   <ArrowUpRight className="w-3 h-3 text-[#00B32D]" />
-                </button>
+                </a>
               </li>
             </ul>
           </div>
