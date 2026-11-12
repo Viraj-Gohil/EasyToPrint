@@ -201,8 +201,8 @@ export const PricingPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Pricing Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch">
+        {/* Pricing Cards Flex Row on Laptop/Desktop */}
+        <div className="flex flex-col md:flex-row md:flex-nowrap items-stretch justify-center gap-6 lg:gap-8">
           {CANONICAL_PLANS.map((plan) => {
             const rawMonthly = plan.monthlyPrice;
             const effectivePrice = billingCycle === 'annual' ? Math.round(rawMonthly * 0.8) : rawMonthly;
@@ -217,7 +217,7 @@ export const PricingPage: React.FC = () => {
                 key={plan.id}
                 whileHover={{ y: -4 }}
                 transition={{ duration: 0.2 }}
-                className={`relative flex flex-col rounded-3xl p-8 transition-all ${
+                className={`relative flex-1 min-w-0 flex flex-col rounded-3xl p-6 lg:p-8 transition-all ${
                   plan.highlighted
                     ? 'bg-white border-2 border-[#00B52D] shadow-xl ring-4 ring-emerald-500/10'
                     : 'bg-white border border-slate-200 shadow-md'

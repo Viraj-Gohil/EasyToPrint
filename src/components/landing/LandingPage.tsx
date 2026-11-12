@@ -1100,19 +1100,19 @@ export const LandingPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Pricing Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto items-stretch">
+            {/* Pricing Cards Flex Row on Laptop/Desktop */}
+            <div className="flex flex-col md:flex-row md:flex-nowrap items-stretch justify-center gap-5 lg:gap-6 max-w-7xl mx-auto">
               {displayPlans.map((plan: any, idx: number) => {
-                const isRec = plan.isRecommended || idx === 1;
+                const isRec = plan.isRecommended || plan.isPopular || idx === 1;
                 const price = billingPeriod === 'YEARLY' ? plan.priceYearly : plan.priceMonthly;
                 const perMonthEquiv = billingPeriod === 'YEARLY' ? Math.round(plan.priceYearly / 12) : plan.priceMonthly;
 
                 return (
                   <div
                     key={plan.id || idx}
-                    className={`rounded-3xl p-7 flex flex-col justify-between transition-all bg-white border ${
+                    className={`flex-1 min-w-0 rounded-3xl p-6 lg:p-7 flex flex-col justify-between transition-all bg-white border ${
                       isRec
-                        ? 'border-2 border-[#00B32D] shadow-xl shadow-emerald-500/10 relative scale-[1.02]'
+                        ? 'border-2 border-[#00B32D] shadow-xl shadow-emerald-500/10 relative md:scale-[1.02]'
                         : 'border-[#E1E7E1] shadow-xs hover:border-[#A7F3D0]'
                     }`}
                   >

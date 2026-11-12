@@ -1045,9 +1045,9 @@ export const AdminSubscriptions: React.FC = () => {
             </div>
           )}
 
-          {/* GRID VIEW */}
+          {/* FLEX CARDS VIEW */}
           {viewMode === 'grid' && filteredPlans.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="flex flex-col md:flex-row md:flex-nowrap items-stretch justify-center gap-4">
               {filteredPlans.map((p) => {
                 const subscriberCount = planSubscribersMap[p.id] || 0;
                 const isArchived = p.status === 'ARCHIVED';
@@ -1056,7 +1056,7 @@ export const AdminSubscriptions: React.FC = () => {
                 return (
                   <div
                     key={p.id}
-                    className={`bg-white rounded-2xl border flex flex-col justify-between transition-all relative overflow-hidden ${
+                    className={`flex-1 min-w-0 bg-white rounded-2xl border flex flex-col justify-between transition-all relative overflow-hidden ${
                       p.isPopular
                         ? 'border-[#00B52D] shadow-xs'
                         : isArchived

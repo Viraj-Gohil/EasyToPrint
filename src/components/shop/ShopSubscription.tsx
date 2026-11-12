@@ -288,13 +288,13 @@ export const ShopSubscription: React.FC = () => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="flex flex-col md:flex-row md:flex-nowrap items-stretch justify-center gap-4">
           {plans.map((plan) => {
             const isCurrent = plan.id === currentPlan.id;
             return (
               <div
                 key={plan.id}
-                className={`p-5 rounded-2xl border flex flex-col justify-between transition-all relative ${
+                className={`flex-1 min-w-0 p-5 rounded-2xl border flex flex-col justify-between transition-all relative ${
                   isCurrent
                     ? 'border-blue-500 bg-blue-50/20 shadow-xs ring-1 ring-blue-500'
                     : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-xs'
