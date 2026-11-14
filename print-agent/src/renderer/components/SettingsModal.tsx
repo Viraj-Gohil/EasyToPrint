@@ -139,9 +139,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       await new Promise((r) => setTimeout(r, 350));
 
       setConnectionStage('Authenticating shop...');
-      let effectiveServerUrl = (config.serverUrl || 'https://printflow.devpixel.space').trim().replace(/\/+$/, '');
+      let effectiveServerUrl = (config.serverUrl || 'https://easytoprint.devpixel.space').trim().replace(/\/+$/, '');
       if (!effectiveServerUrl.startsWith('http://') && !effectiveServerUrl.startsWith('https://')) {
         effectiveServerUrl = `https://${effectiveServerUrl}`;
+      }
+      if (/^https?:\/\/printflow\.devpixel\.space$/i.test(effectiveServerUrl)) {
+        effectiveServerUrl = 'https://easytoprint.devpixel.space';
       }
 
       setConnectionStage('Registering this device...');

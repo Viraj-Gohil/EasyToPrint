@@ -600,7 +600,7 @@ export const DevicePreferencesView: React.FC<DevicePreferencesViewProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      const server = (config.serverUrl || 'https://printflow.devpixel.space').replace(/\/+$/, '');
+                      const server = (config.serverUrl || 'https://easytoprint.devpixel.space').replace(/\/+$/, '');
                       const portalUrl = `${server}/shop/subscription`;
                       if (window.electronAgentAPI?.openExternal) {
                         window.electronAgentAPI.openExternal(portalUrl);

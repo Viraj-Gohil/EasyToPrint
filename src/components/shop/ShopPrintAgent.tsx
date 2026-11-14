@@ -362,12 +362,12 @@ export const ShopPrintAgent: React.FC = () => {
                 <div className="truncate mr-2">
                   <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Server URL</span>
                   <span className="text-xs font-mono font-bold text-slate-800 truncate block">
-                    {typeof window !== 'undefined' && window.location.origin.startsWith('http') ? window.location.origin : 'https://printflow.devpixel.space'}
+                    {typeof window !== 'undefined' && window.location.origin.startsWith('http') ? window.location.origin : 'https://easytoprint.devpixel.space'}
                   </span>
                 </div>
                 <button
                   type="button"
-                  onClick={() => void handleCopyText(typeof window !== 'undefined' && window.location.origin.startsWith('http') ? window.location.origin : 'https://printflow.devpixel.space', 'Server URL')}
+                  onClick={() => void handleCopyText(typeof window !== 'undefined' && window.location.origin.startsWith('http') ? window.location.origin : 'https://easytoprint.devpixel.space', 'Server URL')}
                   className="p-1 hover:bg-slate-200 rounded text-slate-500 shrink-0 cursor-pointer"
                   title="Copy Server URL"
                 >

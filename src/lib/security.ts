@@ -489,8 +489,9 @@ export function isOriginAllowed(originHeader: string | undefined, hostHeader: st
       return true;
     }
 
-    // Allow custom production domain printflow.devpixel.space and preview subdomains
+    // Allow custom production domain easytoprint.devpixel.space and preview subdomains
     if (
+      originUrl.hostname === 'easytoprint.devpixel.space' ||
       originUrl.hostname === 'printflow.devpixel.space' ||
       originUrl.hostname.endsWith('.devpixel.space') ||
       originUrl.hostname.endsWith('.run.app') ||

@@ -25,8 +25,19 @@ import { AgentConfig, PrintJobItem, QueueMetrics, PlanEntitlements } from '../..
 import { safeVault } from './SafeStorageVault.js';
 import { logger } from '../logger/AgentLogger.js';
 
+const DEFAULT_SERVER_URL = 'https://easytoprint.devpixel.space';
+
+function normalizeServerUrl(url: unknown): string {
+  if (typeof url !== 'string' || !url.trim()) return DEFAULT_SERVER_URL;
+  const trimmed = url.trim().replace(/\/+$/, '');
+  if (/^https?:\/\/printflow\.devpixel\.space$/i.test(trimmed)) {
+    return DEFAULT_SERVER_URL;
+  }
+  return trimmed;
+}
+
 const DEFAULT_CONFIG: AgentConfig = {
-  serverUrl: 'https://printflow.devpixel.space',
+  serverUrl: DEFAULT_SERVER_URL,
   shopId: '',
   shopSlug: '',
   agentId: '',
@@ -163,7 +174,7 @@ export class LocalDataVault {
         this.credentialStorageSecure = Boolean(stored.encryptedToken) || !authToken;
         const config: AgentConfig = {
           ...DEFAULT_CONFIG,
-          serverUrl: typeof stored.serverUrl === 'string' ? stored.serverUrl : DEFAULT_CONFIG.serverUrl,
+          serverUrl: normalizeServerUrl(stored.serverUrl),
           shopId: typeof stored.shopId === 'string' ? stored.shopId : DEFAULT_CONFIG.shopId,
           shopSlug: typeof stored.shopSlug === 'string' ? stored.shopSlug : DEFAULT_CONFIG.shopSlug,
           agentId: typeof stored.agentId === 'string' ? stored.agentId : DEFAULT_CONFIG.agentId,

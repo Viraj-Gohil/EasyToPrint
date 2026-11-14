@@ -161,7 +161,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
   const hostname = config?.deviceName || systemHealth?.os?.hostname || 'COUNTER-PC-1';
   const spoolerRunning = systemHealth?.spooler?.running !== false;
   const shopName = config?.shopDetails?.name || (config?.shopId ? `Shop (${config.shopId})` : 'Main Counter Station');
-  const targetServerUrl = (serverUrl || config?.serverUrl || 'https://printflow.devpixel.space').replace(/\/+$/, '');
+  const targetServerUrl = (serverUrl || config?.serverUrl || 'https://easytoprint.devpixel.space').replace(/\/+$/, '');
 
   return (
     <div className="space-y-6 animate-fade-in pb-12 font-['Manrope',sans-serif]">

@@ -16,7 +16,7 @@ export interface LoginScreenProps {
 export const LoginScreen: React.FC<LoginScreenProps> = ({
   onPair,
   defaultShopId = '',
-  serverUrl = 'https://printflow.devpixel.space',
+  serverUrl = 'https://easytoprint.devpixel.space',
   onSuccess
 }) => {
   const [shopId, setShopId] = useState(defaultShopId);
@@ -47,7 +47,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     if (lower.includes('fetch failed') || lower.includes('network') || lower.includes('enotfound') || lower.includes('econnrefused')) {
       return 'Network unavailable. Please check your internet connection and try again.';
     }
-    if (lower.includes('502') || lower.includes('503') || lower.includes('504') || lower.includes('temporarily unavailable')) {
+    if (lower.includes('502') || lower.includes('503') || lower.includes('504') || lower.includes('530') || lower.includes('temporarily unavailable')) {
       return 'EasyToPrint server is temporarily unreachable. Please try again shortly.';
     }
     if (lower.includes('invalid') || lower.includes('unauthorized') || lower.includes('401') || lower.includes('403') || lower.includes('credentials') || lower.includes('token')) {
@@ -95,9 +95,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setConnectionStage('Validating credentials...');
 
     try {
-      let effectiveServer = (serverUrl || 'https://printflow.devpixel.space').trim().replace(/\/+$/, '');
+      let effectiveServer = (serverUrl || 'https://easytoprint.devpixel.space').trim().replace(/\/+$/, '');
       if (!effectiveServer.startsWith('http://') && !effectiveServer.startsWith('https://')) {
         effectiveServer = `https://${effectiveServer}`;
+      }
+      if (/^https?:\/\/printflow\.devpixel\.space$/i.test(effectiveServer)) {
+        effectiveServer = 'https://easytoprint.devpixel.space';
       }
 
       let detectedDeviceName = 'EasyToPrint Counter';

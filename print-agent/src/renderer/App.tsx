@@ -37,7 +37,7 @@ import {
 type AgentPage = 'DASHBOARD' | 'HEALTH' | 'QUEUE' | 'PRINTERS' | 'LOGS' | 'DEVICE_PREFERENCES' | 'ABOUT';
 
 const DEFAULT_CONFIG: AgentConfig = {
-  serverUrl: 'https://printflow.devpixel.space',
+  serverUrl: 'https://easytoprint.devpixel.space',
   shopId: '',
   shopSlug: '',
   agentId: '',

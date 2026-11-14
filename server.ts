@@ -156,6 +156,8 @@ const envOrigins = (process.env.CORS_ALLOWED_ORIGINS || process.env.FRONTEND_URL
   .filter(Boolean);
 
 const ALLOWED_ORIGINS = Array.from(new Set([
+  'https://easytoprint.devpixel.space',
+  'http://easytoprint.devpixel.space',
   'https://printflow.devpixel.space',
   'http://printflow.devpixel.space',
   ...envOrigins
@@ -3290,8 +3292,8 @@ app.get('/api/payment/platform-config', createRateLimiter(60, 60_000, { bucketKe
       hasSecret: Boolean(RAZORPAY_KEY_SECRET),
       lastUpdatedAt: new Date().toISOString(),
       endpoints: {
-        subscriptions: 'https://printflow.devpixel.space/api/webhooks/razorpay',
-        orders: 'https://printflow.devpixel.space/api/payment/webhook'
+        subscriptions: 'https://easytoprint.devpixel.space/api/webhooks/razorpay',
+        orders: 'https://easytoprint.devpixel.space/api/payment/webhook'
       }
     });
   } catch (error: any) {

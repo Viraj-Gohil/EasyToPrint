@@ -17,8 +17,15 @@ export class ApiClient {
     this.config = config;
   }
 
+  private normalizeUrl(rawUrl: string): string {
+    const cleaned = (rawUrl || 'https://easytoprint.devpixel.space').trim().replace(/\/+$/, '');
+    return /^https?:\/\/printflow\.devpixel\.space$/i.test(cleaned)
+      ? 'https://easytoprint.devpixel.space'
+      : cleaned;
+  }
+
   private getBaseUrl(): string {
-    return this.config.serverUrl.replace(/\/+$/, '');
+    return this.normalizeUrl(this.config.serverUrl);
   }
 
   private getHeaders(): Record<string, string> {
@@ -40,7 +47,7 @@ export class ApiClient {
   }): Promise<{ success: boolean; agentId?: string; shopId?: string; error?: string; code?: string; activeDevice?: any }> {
     let backendUrl: URL;
     try {
-      backendUrl = new URL(pairingData.serverUrl);
+      backendUrl = new URL(this.normalizeUrl(pairingData.serverUrl));
     } catch {
       return { success: false, error: 'Enter a valid EasyToPrint backend URL.' };
     }
@@ -62,7 +69,7 @@ export class ApiClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'PrintFlow-Agent-Win64/v1.4.2'
+          'User-Agent': 'EasyToPrint-Agent-Win64/v1.4.2'
         },
         body: JSON.stringify({
           shopId: pairingData.shopId,
