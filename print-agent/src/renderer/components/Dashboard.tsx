@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AgentConfig, AgentConnectionStatus, DiscoveredPrinter, PrintJobItem, QueueMetrics, PlanEntitlements } from '../types/agent';
 import { formatPrintError } from '../utils/printError';
 import { JobStatusBadge } from './StatusBadge';
+import { filterPhysicalPrinters, isVirtualPrinter } from '../utils/printerFilter';
 import {
   Printer,
   Clock,
@@ -72,10 +73,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const recentJobs = jobs.slice(0, 6);
   // Exclude virtual / non-physical printers from ready count
-  const physicalPrinters = printers.filter((p) => {
-    const name = (p.name || p.displayName || '').toLowerCase();
-    return !name.includes('pdf') && !name.includes('xps') && !name.includes('onenote') && !name.includes('fax');
-  });
+  const physicalPrinters = filterPhysicalPrinters(printers);
   const readyPrintersCount = physicalPrinters.filter((p) => p.isOnline).length;
   const isOnline = status === 'ONLINE' || status === 'CONNECTED';
 
@@ -182,7 +180,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               className="secondary-button !text-xs font-semibold"
             >
               <Printer className="w-3.5 h-3.5 text-[#00B32D]" />
-              <span>Manage Printers ({printers.length})</span>
+              <span>Manage Printers ({physicalPrinters.length})</span>
             </button>
           </div>
         </div>
@@ -364,7 +362,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         const jobLimit = ent?.limits?.monthlyPrintJobs ?? (planKey === 'business' ? 5000 : planKey === 'growth' ? 2000 : 500);
         const jobPercent = jobLimit > 0 ? Math.min(100, Math.round((jobUsage / jobLimit) * 100)) : 0;
 
-        const regCount = (config.registeredPrinterNames || []).length;
+        const regCount = (config.registeredPrinterNames || []).filter((n) => !isVirtualPrinter(n)).length;
         const printerLimit = ent?.limits?.printers ?? config.printerLimit ?? (planKey === 'business' ? 10 : planKey === 'growth' ? 5 : 1);
 
         const canMultipleQueues = ent?.features?.canMultipleQueues ?? (planKey !== 'starter');

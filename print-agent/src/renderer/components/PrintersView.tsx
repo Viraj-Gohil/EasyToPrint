@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { PrinterConfigModal } from './PrinterConfigModal.js';
 import { PrinterDriverSetupModal } from './PrinterDriverSetupModal.js';
+import { filterPhysicalPrinters, isVirtualPrinter } from '../utils/printerFilter';
 
 interface PrintersViewProps {
   printers: DiscoveredPrinter[];
@@ -51,30 +52,19 @@ export const PrintersView: React.FC<PrintersViewProps> = ({
   const [configModalPrinter, setConfigModalPrinter] = useState<DiscoveredPrinter | null>(null);
   const [isSetupWizardOpen, setIsSetupWizardOpen] = useState(false);
 
-  const registeredNames = config.registeredPrinterNames || [];
+  const registeredNames = (config.registeredPrinterNames || []).filter((n) => !isVirtualPrinter(n));
   const printerLimit = config.printerLimit ?? 1;
-  const isLimitReached = registeredNames.length >= printerLimit;
 
-  // Separate physical printers from virtual drivers (PDF, XPS, Fax, OneNote)
+  // Exclude virtual drivers (Microsoft Print to PDF, XPS, Fax, OneNote, etc.)
   const physicalPrinters = useMemo(() => {
-    return printers.filter((p) => {
-      const name = (p.name || p.displayName || '').toLowerCase();
-      return !name.includes('pdf') && !name.includes('xps') && !name.includes('onenote') && !name.includes('fax');
-    });
-  }, [printers]);
-
-  const virtualPrinters = useMemo(() => {
-    return printers.filter((p) => {
-      const name = (p.name || p.displayName || '').toLowerCase();
-      return name.includes('pdf') || name.includes('xps') || name.includes('onenote') || name.includes('fax');
-    });
+    return filterPhysicalPrinters(printers);
   }, [printers]);
 
   const counts = useMemo(() => {
     const totalPhysical = physicalPrinters.length;
     const onlinePhysical = physicalPrinters.filter((p) => p.isOnline).length;
     const offlinePhysical = totalPhysical - onlinePhysical;
-    const registeredCount = registeredNames.length;
+    const registeredCount = physicalPrinters.filter((p) => registeredNames.includes(p.name)).length;
     const unregisteredCount = physicalPrinters.filter((p) => !registeredNames.includes(p.name)).length;
 
     return {
@@ -82,10 +72,10 @@ export const PrintersView: React.FC<PrintersViewProps> = ({
       onlinePhysical,
       offlinePhysical,
       registeredCount,
-      unregisteredCount,
-      virtualCount: virtualPrinters.length
+      unregisteredCount
     };
-  }, [physicalPrinters, virtualPrinters, registeredNames]);
+  }, [physicalPrinters, registeredNames]);
+  const isLimitReached = counts.registeredCount >= printerLimit;
 
   const handleSavePrinterConfig = async (printerName: string, ownerConfig: any) => {
     if (window.electronAgentAPI?.savePrinterOwnerConfig) {
@@ -192,7 +182,7 @@ export const PrintersView: React.FC<PrintersViewProps> = ({
             </div>
           </div>
           <span className="text-[11px] text-[#646B65] dark:text-slate-400 mt-2 block truncate">
-            {counts.virtualCount} Virtual Drivers Excluded
+            Virtual Drivers Auto-Excluded
           </span>
         </div>
 
@@ -283,7 +273,7 @@ export const PrintersView: React.FC<PrintersViewProps> = ({
             </div>
             <div>
               <p className="font-bold text-[#111111] dark:text-white">
-                Printer Connection Limit Reached ({registeredNames.length} / {printerLimit} Slots Used)
+                Printer Connection Limit Reached ({counts.registeredCount} / {printerLimit} Slots Used)
               </p>
               <p className="text-[#646B65] dark:text-slate-400 mt-0.5">
                 Your current {entitlements?.planName || config.shopDetails?.planName || 'Starter'} plan allows up to {printerLimit} printer connection(s). Upgrade to Growth (5 printers) or Business (10 printers) to register additional counter machines.
@@ -340,7 +330,7 @@ export const PrintersView: React.FC<PrintersViewProps> = ({
       )}
 
       {/* EMPTY STATE */}
-      {printers.length === 0 && (
+      {physicalPrinters.length === 0 && (
         <div className="pf-card p-12 text-center rounded-[10px] border border-dashed border-[#E1E7E1] dark:border-slate-800 bg-white dark:bg-[#131D33] space-y-4">
           <div className="w-14 h-14 rounded-lg bg-[#F0F4F1] dark:bg-slate-800 text-[#848D86] flex items-center justify-center mx-auto">
             <Printer className="w-7 h-7 stroke-[1.75]" />
@@ -375,16 +365,15 @@ export const PrintersView: React.FC<PrintersViewProps> = ({
 
       {/* 5. PRINTER CARDS GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {printers.map((printer) => {
+        {physicalPrinters.map((printer) => {
           const isEnabled = !(config.disabledPrinterNames || []).includes(printer.name);
           const isRegistered = registeredNames.includes(printer.name);
           const isSelected =
             isEnabled &&
             isRegistered &&
             (config.selectedPrinterName ? config.selectedPrinterName === printer.name : printer.isDefault);
-          const canRegister = !isRegistered && (!isLimitReached || registeredNames.length < printerLimit);
-
-          const isVirtual = virtualPrinters.some(v => v.name === printer.name);
+          const canRegister = !isRegistered && (!isLimitReached || counts.registeredCount < printerLimit);
+          const isVirtual = false;
 
           return (
             <div
@@ -617,11 +606,11 @@ export const PrintersView: React.FC<PrintersViewProps> = ({
           isOpen={isSetupWizardOpen}
           onClose={() => setIsSetupWizardOpen(false)}
           config={config}
-          printers={printers}
+          printers={physicalPrinters}
           isScanning={isScanning}
           onRescanPrinters={async () => {
             onRescan();
-            return printers;
+            return physicalPrinters;
           }}
           onRegisterPrinter={async (name, registered) => {
             await onSetPrinterRegistered(name, registered);

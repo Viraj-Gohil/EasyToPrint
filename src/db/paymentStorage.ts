@@ -22,6 +22,20 @@ try {
   dns.setDefaultResultOrder('ipv4first');
 } catch {}
 
+const VIRTUAL_PRINTER_REGEX = /(microsoft print to pdf|microsoft xps document writer|microsoft office document image writer|send to onenote|onenote|fax|microsoft shared fax|adobe pdf|foxit (reader |phantompdf )?pdf|pdfcreator|cutepdf|bullzip pdf|dopdf|primopdf|nitro pdf|pdf24|print to pdf|anydesk printer|journal note writer|snagit \d* printer)/i;
+const VIRTUAL_PORT_REGEX = /^(portprompt:|xpsport:|shrfax:|nul:)/i;
+
+function isVirtualPrinterDriver(name?: string | null, driverName?: string | null, portName?: string | null): boolean {
+  const combined = `${name || ''} ${driverName || ''}`.trim();
+  if (combined && VIRTUAL_PRINTER_REGEX.test(combined)) {
+    return true;
+  }
+  if (portName && VIRTUAL_PORT_REGEX.test(String(portName).trim())) {
+    return true;
+  }
+  return false;
+}
+
 export interface ShopPaymentIntegrationRecord {
   id: string;
   shop_id: string;
@@ -1202,13 +1216,14 @@ export async function getShopAgentAvailability(shopId: string): Promise<ShopAgen
       try {
         const canonicalId = await resolvePrintFlowShopId(shopId);
         const dbPrinters = await pool.query(
-          `SELECT name, status, is_registered FROM public.printers
+          `SELECT name, driver_name, port_name, status, is_registered FROM public.printers
            WHERE ((shop_id::text = ANY($1::text[])) OR shop_id::text = $2)
              AND is_registered = true AND status = 'ONLINE'`,
           [candidateIds, canonicalId]
         );
         if (dbPrinters.rowCount && dbPrinters.rows.length > 0) {
           for (const dp of dbPrinters.rows) {
+            if (isVirtualPrinterDriver(dp.name, dp.driver_name, dp.port_name)) continue;
             if (!readyPrintersList.includes(dp.name)) {
               readyPrintersList.push(dp.name);
             }
@@ -1217,22 +1232,25 @@ export async function getShopAgentAvailability(shopId: string): Promise<ShopAgen
       } catch {}
 
       if (Array.isArray(row.printers)) {
-        totalPrinters += row.printers.length;
+        const physicalRowPrinters = row.printers.filter(
+          (p: any) => p && typeof p === 'object' && p.name && !isVirtualPrinterDriver(p.name, p.driverName || p.displayName, p.portName)
+        );
+        totalPrinters += physicalRowPrinters.length;
         if (readyPrintersList.length === 0) {
-          for (const p of row.printers) {
-            if (p && typeof p === 'object' && p.name) {
-              const isReg = p.isRegistered === true || p.is_registered === true;
-              const isPrinterReady = isReg && p.isOnline === true && p.status !== 'OFFLINE' && p.status !== 'ERROR';
-              if (isPrinterReady && !readyPrintersList.includes(p.name)) {
-                readyPrintersList.push(p.name);
-              }
+          for (const p of physicalRowPrinters) {
+            const isReg = p.isRegistered === true || p.is_registered === true;
+            const isPrinterReady = isReg && p.isOnline === true && p.status !== 'OFFLINE' && p.status !== 'ERROR';
+            if (isPrinterReady && !readyPrintersList.includes(p.name)) {
+              readyPrintersList.push(p.name);
             }
           }
         }
       }
     } else {
       if (Array.isArray(row.printers)) {
-        totalPrinters += row.printers.length;
+        totalPrinters += row.printers.filter(
+          (p: any) => p && typeof p === 'object' && p.name && !isVirtualPrinterDriver(p.name, p.driverName || p.displayName, p.portName)
+        ).length;
       }
     }
   }
@@ -2430,7 +2448,10 @@ export async function getPrintAgentStatus(agentId: string, shopId: string): Prom
 }
 
 export async function savePrintAgentPrinters(agentId: string, printers: unknown[]): Promise<number> {
-  const printerArr = Array.isArray(printers) ? printers : [];
+  const printerArr = (Array.isArray(printers) ? printers : []).filter((item: any) => {
+    if (!item || typeof item !== 'object') return false;
+    return !isVirtualPrinterDriver(item.name, item.driverName || item.displayName || item.model, item.portName);
+  });
   let pgSaved = false;
 
   if (isNeonDatabaseConfigured()) {
@@ -2554,12 +2575,15 @@ export async function getShopPrintersWithEntitlements(shopId: string): Promise<{
       [candidateShopIds, canonicalShopId]
     );
 
-    const registeredPrinters = res.rows.filter((r) => r.is_registered);
+    const physicalRows = res.rows.filter(
+      (r) => !isVirtualPrinterDriver(r.name, r.driver_name || r.model, r.port_name)
+    );
+    const registeredPrinters = physicalRows.filter((r) => r.is_registered);
     const registeredCount = registeredPrinters.length;
     const printerLimit = entitlements.printerLimit;
 
     return {
-      printers: res.rows.map((row) => {
+      printers: physicalRows.map((row) => {
         const caps = (typeof row.capabilities === 'object' && row.capabilities !== null) ? row.capabilities : {};
         const isKnownMono = /(laserjet.*(p100|p110|101|102|1005|1020)|p1007|p1008|p1102|1020|1018|lbp2900|monochrome)/i.test(`${row.name} ${row.driver_name || ''} ${row.model || ''}`);
         const supportsColor = caps.supportsColor !== undefined && caps.supportsColor !== null
@@ -2659,7 +2683,18 @@ export async function syncShopAgentPrinters(params: {
   try {
     await client.query('BEGIN');
 
-    // 1. Lock existing printers for this shop to guarantee transactional atomicity
+    // 0. Auto-purge any previously synced virtual printer rows (e.g. Microsoft Print to PDF)
+    await client.query(
+      `DELETE FROM public.printers
+       WHERE shop_id = $1::uuid
+         AND (
+           CONCAT_WS(' ', name, driver_name, model) ~* '(microsoft print to pdf|microsoft xps document writer|microsoft office document image writer|send to onenote|onenote|fax|microsoft shared fax|adobe pdf|foxit (reader |phantompdf )?pdf|pdfcreator|cutepdf|bullzip pdf|dopdf|primopdf|nitro pdf|pdf24|print to pdf|anydesk printer|journal note writer|snagit \\d* printer)'
+           OR COALESCE(port_name, '') ~* '^(portprompt:|xpsport:|shrfax:|nul:)'
+         )`,
+      [canonicalShopId]
+    );
+
+    // 1. Lock existing physical printers for this shop to guarantee transactional atomicity
     const existingRes = await client.query(
       `SELECT id, name, is_registered, is_manual_override, capabilities, is_default, connection_type,
               hardware_capabilities, owner_configuration, effective_capabilities, config_version
@@ -2675,10 +2710,16 @@ export async function syncShopAgentPrinters(params: {
     }
 
     let currentRegisteredCount = existingRes.rows.filter((r) => r.is_registered).length;
+    const physicalInputPrinters = (Array.isArray(params.printers) ? params.printers : []).filter(
+      (p) =>
+        p &&
+        typeof p === 'object' &&
+        typeof p.name === 'string' &&
+        p.name.trim().length > 0 &&
+        !isVirtualPrinterDriver(p.name, p.driverName || p.displayName || p.model, p.portName)
+    );
 
-    for (const p of params.printers) {
-      if (!p || typeof p !== 'object' || typeof p.name !== 'string' || !p.name.trim()) continue;
-
+    for (const p of physicalInputPrinters) {
       const lowerName = p.name.trim().toLowerCase();
       const existing = existingMap.get(lowerName);
 
@@ -2800,10 +2841,10 @@ export async function syncShopAgentPrinters(params: {
       );
     }
 
-    // Keep print_agent_devices.printers JSON synchronized for backward compatibility
+    // Keep print_agent_devices.printers JSON synchronized with physical printers only
     await client.query(
       `UPDATE print_agent_devices SET printers = $2::jsonb, updated_at = NOW() WHERE agent_id = $1`,
-      [params.agentId, JSON.stringify(params.printers)]
+      [params.agentId, JSON.stringify(physicalInputPrinters)]
     );
 
     await client.query('COMMIT');
@@ -2817,7 +2858,7 @@ export async function syncShopAgentPrinters(params: {
   const allPrinters = await getShopPrintersWithEntitlements(canonicalShopId);
   return {
     success: true,
-    syncedCount: params.printers.length,
+    syncedCount: allPrinters.printers.length,
     printers: allPrinters.printers,
     registeredCount: allPrinters.registeredCount,
     printerLimit: allPrinters.printerLimit,
@@ -3136,9 +3177,9 @@ export async function validateJobAgainstRegisteredPrinters(
   const canonicalShopId = await resolvePrintFlowShopId(shopId);
   const candidateShopIds = await getCandidateShopIds(shopId);
 
-  // 1. Query registered printers for this shop from authoritative public.printers table
+  // 1. Query registered physical printers for this shop from authoritative public.printers table
   const printerRes = await pool.query(
-    `SELECT id, name, model, status, capabilities, is_default, is_registered,
+    `SELECT id, name, model, driver_name, port_name, status, capabilities, is_default, is_registered,
             effective_capabilities, hardware_capabilities
      FROM public.printers
      WHERE ((shop_id::text = ANY($1::text[])) OR shop_id::text = $2)
@@ -3147,7 +3188,11 @@ export async function validateJobAgainstRegisteredPrinters(
     [candidateShopIds, canonicalShopId]
   );
 
-  if (printerRes.rowCount === 0) {
+  const physicalRegisteredRows = printerRes.rows.filter(
+    (p) => !isVirtualPrinterDriver(p.name, p.driver_name || p.model, p.port_name)
+  );
+
+  if (physicalRegisteredRows.length === 0) {
     return {
       eligible: false,
       code: 'NO_REGISTERED_PRINTERS',
@@ -3155,8 +3200,8 @@ export async function validateJobAgainstRegisteredPrinters(
     };
   }
 
-  // 2. Filter for online printers
-  const onlineRegisteredPrinters = printerRes.rows.filter((p) => p.status === 'ONLINE');
+  // 2. Filter for online physical printers
+  const onlineRegisteredPrinters = physicalRegisteredRows.filter((p) => p.status === 'ONLINE');
   if (onlineRegisteredPrinters.length === 0) {
     return {
       eligible: false,
@@ -3384,7 +3429,7 @@ export async function getPublicShopCapabilities(shopIdOrSlug: string): Promise<{
     const candidateShopIds = await getCandidateShopIds(shopIdOrSlug);
 
     const res = await pool.query(
-      `SELECT id, name, status, capabilities, is_default, is_registered,
+      `SELECT id, name, model, driver_name, port_name, status, capabilities, is_default, is_registered,
               effective_capabilities, hardware_capabilities
        FROM public.printers
        WHERE ((shop_id::text = ANY($1::text[])) OR shop_id::text = $2)
@@ -3392,7 +3437,9 @@ export async function getPublicShopCapabilities(shopIdOrSlug: string): Promise<{
       [candidateShopIds, canonicalShopId]
     );
 
-    const registered = res.rows;
+    const registered = res.rows.filter(
+      (p) => !isVirtualPrinterDriver(p.name, p.driver_name || p.model, p.port_name)
+    );
     const online = registered.filter((p) => p.status === 'ONLINE');
 
     const paperSizesMap = new Map<string, { name: string; widthMm?: number; heightMm?: number }>();
@@ -3572,39 +3619,44 @@ export async function getShopPrintAgentPrinters(shopId: string): Promise<PrintAg
     );
 
     if (dbPrintersRes.rowCount && dbPrintersRes.rows.length > 0) {
-      return dbPrintersRes.rows.map((row) => {
-        const caps = (typeof row.capabilities === 'object' && row.capabilities !== null) ? row.capabilities : {};
-        const isKnownMono = /(laserjet.*(p100|p110|101|102|1005|1020)|p1007|p1008|p1102|1020|1018|lbp2900|monochrome)/i.test(`${row.name} ${row.driver_name || ''} ${row.model || ''}`);
-        const supportsColor = caps.supportsColor !== undefined && caps.supportsColor !== null
-          ? caps.supportsColor
-          : (isKnownMono ? false : null);
-        const supportsDuplex = caps.supportsDuplex !== undefined && caps.supportsDuplex !== null
-          ? caps.supportsDuplex
-          : (isKnownMono ? false : null);
+      const physicalDbRows = dbPrintersRes.rows.filter(
+        (row) => !isVirtualPrinterDriver(row.name, row.driver_name || row.model, row.port_name)
+      );
+      if (physicalDbRows.length > 0) {
+        return physicalDbRows.map((row) => {
+          const caps = (typeof row.capabilities === 'object' && row.capabilities !== null) ? row.capabilities : {};
+          const isKnownMono = /(laserjet.*(p100|p110|101|102|1005|1020)|p1007|p1008|p1102|1020|1018|lbp2900|monochrome)/i.test(`${row.name} ${row.driver_name || ''} ${row.model || ''}`);
+          const supportsColor = caps.supportsColor !== undefined && caps.supportsColor !== null
+            ? caps.supportsColor
+            : (isKnownMono ? false : null);
+          const supportsDuplex = caps.supportsDuplex !== undefined && caps.supportsDuplex !== null
+            ? caps.supportsDuplex
+            : (isKnownMono ? false : null);
 
-        return {
-          agentId: row.agent_id || 'agent_primary',
-          deviceName: row.device_name || 'PrintFlow Station',
-          printer: {
-            name: row.name,
-            displayName: row.name,
-            driverName: row.driver_name || row.model,
-            portName: row.port_name,
-            status: row.status as any,
-            isOnline: row.status === 'ONLINE',
-            isDefault: Boolean(row.is_default),
-            isRegistered: Boolean(row.is_registered),
-            connectionType: row.connection_type,
-            capabilities: {
-              paperSizes: Array.isArray(caps.paperSizes) ? caps.paperSizes : ['A4'],
-              supportsColor,
-              supportsDuplex,
-              colorModes: caps.colorModes || (supportsColor ? ['BW', 'COLOR'] : ['BW']),
-              resolutions: caps.resolutions || []
+          return {
+            agentId: row.agent_id || 'agent_primary',
+            deviceName: row.device_name || 'PrintFlow Station',
+            printer: {
+              name: row.name,
+              displayName: row.name,
+              driverName: row.driver_name || row.model,
+              portName: row.port_name,
+              status: row.status as any,
+              isOnline: row.status === 'ONLINE',
+              isDefault: Boolean(row.is_default),
+              isRegistered: Boolean(row.is_registered),
+              connectionType: row.connection_type,
+              capabilities: {
+                paperSizes: Array.isArray(caps.paperSizes) ? caps.paperSizes : ['A4'],
+                supportsColor,
+                supportsDuplex,
+                colorModes: caps.colorModes || (supportsColor ? ['BW', 'COLOR'] : ['BW']),
+                resolutions: caps.resolutions || []
+              }
             }
-          }
-        };
-      });
+          };
+        });
+      }
     }
 
     // Fallback to print_agent_devices.printers
@@ -3622,6 +3674,7 @@ export async function getShopPrintAgentPrinters(shopId: string): Promise<PrintAg
         if (!value || typeof value !== 'object') continue;
         const printer = value as PrintAgentPrinter['printer'];
         if (typeof printer.name !== 'string' || !printer.name) continue;
+        if (isVirtualPrinterDriver(printer.name, printer.driverName || printer.displayName, printer.portName)) continue;
         printers.push({ agentId: row.agent_id, deviceName: row.device_name, printer });
       }
     }
@@ -3643,10 +3696,12 @@ export async function getShopPrintAgentPrinters(shopId: string): Promise<PrintAg
         if (Array.isArray(dev.printers)) {
           for (const item of dev.printers) {
             if (item && typeof item === 'object') {
+              const p = item as any;
+              if (isVirtualPrinterDriver(p.name, p.driverName || p.displayName || p.model, p.portName)) continue;
               printers.push({
                 agentId,
                 deviceName: dev.device_name,
-                printer: item as any
+                printer: p
               });
             }
           }

@@ -4,6 +4,7 @@ import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { printerManager } from '../printer/WindowsPrinterManager.js';
+import { PrintSettingsAdapter } from '../printer/PrintSettingsAdapter.js';
 import { localVault } from '../storage/LocalDataVault.js';
 import { logger } from '../logger/AgentLogger.js';
 
@@ -194,7 +195,9 @@ class SystemHealthManager {
     const processMemMb = parseFloat((memUsage.rss / (1024 * 1024)).toFixed(1));
 
     const spoolerCheck = await this.checkWindowsSpooler();
-    const cachedPrinters = printerManager.getCachedPrinters();
+    const cachedPrinters = printerManager
+      .getCachedPrinters()
+      .filter((p) => !PrintSettingsAdapter.isVirtualPrinter(p.name, p.driverName, p.portName));
     const jobs = localVault.getAllJobs();
     const metrics = localVault.getMetrics();
 

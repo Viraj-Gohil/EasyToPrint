@@ -36,6 +36,18 @@ function normalizeServerUrl(url: unknown): string {
   return trimmed;
 }
 
+function isVirtualPrinterName(name: unknown): boolean {
+  if (typeof name !== 'string' || !name.trim()) return false;
+  return /(microsoft print to pdf|microsoft xps document writer|microsoft office document image writer|send to onenote|onenote|fax|microsoft shared fax|adobe pdf|foxit (reader |phantompdf )?pdf|pdfcreator|cutepdf|bullzip pdf|dopdf|primopdf|nitro pdf|pdf24|print to pdf|anydesk printer|journal note writer|snagit \d* printer)/i.test(
+    name
+  );
+}
+
+function sanitizePrinterNames(names: unknown): string[] | undefined {
+  if (!Array.isArray(names)) return undefined;
+  return names.filter((n): n is string => typeof n === 'string' && n.trim().length > 0 && !isVirtualPrinterName(n));
+}
+
 const DEFAULT_CONFIG: AgentConfig = {
   serverUrl: DEFAULT_SERVER_URL,
   shopId: '',
@@ -125,7 +137,33 @@ export class LocalDataVault {
   private printerConfigs: Map<string, StoredPrinterConfig> = new Map();
 
   public reloadConfig(): void {
+    const rawExists = fs.existsSync(this.configFilePath);
+    const prevSelected = rawExists ? (() => {
+      try {
+        return JSON.parse(fs.readFileSync(this.configFilePath, 'utf8'));
+      } catch {
+        return null;
+      }
+    })() : null;
+
     this.config = this.loadConfig();
+
+    const hadVirtualInDiskConfig = Boolean(
+      prevSelected &&
+      (isVirtualPrinterName(prevSelected.selectedPrinterName) ||
+        (Array.isArray(prevSelected.disabledPrinterNames) && prevSelected.disabledPrinterNames.some(isVirtualPrinterName)) ||
+        (Array.isArray(prevSelected.registeredPrinterNames) && prevSelected.registeredPrinterNames.some(isVirtualPrinterName)))
+    );
+
+    if (hadVirtualInDiskConfig) {
+      try {
+        this.writeConfigFile(this.config);
+        logger.info('SPOOLER', 'Auto-removed virtual printer entries (e.g. Microsoft Print to PDF) from local agent config.');
+      } catch {
+        // Non-fatal
+      }
+    }
+
     if (this.config.authToken && !this.credentialStorageSecure) {
       try {
         this.saveConfig({});
@@ -186,15 +224,12 @@ export class LocalDataVault {
           autoStartOnBoot: typeof stored.autoStartOnBoot === 'boolean'
             ? stored.autoStartOnBoot
             : DEFAULT_CONFIG.autoStartOnBoot,
-          selectedPrinterName: typeof stored.selectedPrinterName === 'string'
-            ? stored.selectedPrinterName
-            : undefined,
-          disabledPrinterNames: Array.isArray(stored.disabledPrinterNames)
-            ? stored.disabledPrinterNames.filter((name): name is string => typeof name === 'string')
-            : [],
-          registeredPrinterNames: Array.isArray(stored.registeredPrinterNames)
-            ? stored.registeredPrinterNames.filter((name): name is string => typeof name === 'string')
-            : undefined,
+          selectedPrinterName:
+            typeof stored.selectedPrinterName === 'string' && !isVirtualPrinterName(stored.selectedPrinterName)
+              ? stored.selectedPrinterName
+              : undefined,
+          disabledPrinterNames: sanitizePrinterNames(stored.disabledPrinterNames) || [],
+          registeredPrinterNames: sanitizePrinterNames(stored.registeredPrinterNames),
           printerLimit: typeof stored.printerLimit === 'number' &&
             Number.isSafeInteger(stored.printerLimit) &&
             stored.printerLimit >= 0
@@ -337,7 +372,18 @@ export class LocalDataVault {
 
   public saveConfig(newConfig: Partial<AgentConfig>): void {
     const previousConfig = this.config;
-    this.config = { ...this.config, ...newConfig };
+    const sanitizedPartial: Partial<AgentConfig> = { ...newConfig };
+    if (sanitizedPartial.selectedPrinterName !== undefined && isVirtualPrinterName(sanitizedPartial.selectedPrinterName)) {
+      sanitizedPartial.selectedPrinterName = undefined;
+    }
+    if (sanitizedPartial.registeredPrinterNames !== undefined) {
+      sanitizedPartial.registeredPrinterNames = sanitizePrinterNames(sanitizedPartial.registeredPrinterNames);
+    }
+    if (sanitizedPartial.disabledPrinterNames !== undefined) {
+      sanitizedPartial.disabledPrinterNames = sanitizePrinterNames(sanitizedPartial.disabledPrinterNames) || [];
+    }
+
+    this.config = { ...this.config, ...sanitizedPartial };
     try {
       this.writeConfigFile(this.config);
       this.credentialStorageSecure = true;
@@ -452,12 +498,21 @@ export class LocalDataVault {
       if (fs.existsSync(this.printerConfigsFilePath)) {
         const raw = fs.readFileSync(this.printerConfigsFilePath, 'utf8');
         const parsed = JSON.parse(raw);
+        let removedVirtual = false;
         if (parsed && typeof parsed === 'object') {
           for (const [key, val] of Object.entries(parsed)) {
+            if (isVirtualPrinterName(key) || isVirtualPrinterName((val as any)?.printerName)) {
+              removedVirtual = true;
+              continue;
+            }
             if (val && typeof val === 'object' && (val as any).hardware) {
               this.printerConfigs.set(key.toLowerCase(), val as StoredPrinterConfig);
             }
           }
+        }
+        if (removedVirtual) {
+          this.savePrinterConfigsFile();
+          logger.info('STORAGE', 'Auto-removed virtual printer configs from printer_configs.json.');
         }
       }
     } catch (err: any) {

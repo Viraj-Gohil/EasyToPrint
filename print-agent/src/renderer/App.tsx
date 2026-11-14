@@ -19,6 +19,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { LoginScreen } from './components/LoginScreen';
 import { AboutView } from './components/AboutView';
 import { DevicePreferencesView } from './components/DevicePages';
+import { filterPhysicalPrinters } from './utils/printerFilter';
 import {
   Activity,
   CircleHelp,
@@ -144,7 +145,7 @@ export const App: React.FC = () => {
         setStatus(loadedStatus.status);
         setLastHeartbeat(loadedStatus.lastHeartbeat);
         setMetrics(loadedMetrics);
-        setPrinters(loadedPrinters);
+        setPrinters(filterPhysicalPrinters(loadedPrinters));
         setJobs(loadedJobs);
         setLogs(loadedLogs);
         setIsScanning(Boolean(scanningState));
@@ -192,7 +193,7 @@ export const App: React.FC = () => {
     );
 
     const unsubPrinters = api.onPrintersUpdated((updatedPrinters) => {
-      setPrinters(updatedPrinters);
+      setPrinters(filterPhysicalPrinters(updatedPrinters));
     });
 
     const unsubScanning = api.onPrinterScanningChanged
@@ -242,7 +243,7 @@ export const App: React.FC = () => {
     try {
       const api = window.electronAgentAPI;
       if (!api) throw new Error('EasyToPrint Agent must run within the Electron desktop runtime.');
-      setPrinters(await api.rescanPrinters());
+      setPrinters(filterPhysicalPrinters(await api.rescanPrinters()));
       setInitializationError(null);
     } catch (error) {
       setInitializationError(error instanceof Error ? error.message : 'Could not query installed Windows printers.');

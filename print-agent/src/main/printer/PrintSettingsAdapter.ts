@@ -13,8 +13,19 @@ export interface SpoolCommandArgs {
 }
 
 export class PrintSettingsAdapter {
-  public static isVirtualPrinter(printerName: string): boolean {
-    return /microsoft print to pdf|microsoft xps document writer|onenote|fax|adobe pdf|foxit pdf|pdfcreator/i.test(printerName);
+  public static isVirtualPrinter(printerName: string, driverName?: string, portName?: string): boolean {
+    const combined = `${printerName || ''} ${driverName || ''}`;
+    if (
+      /(microsoft print to pdf|microsoft xps document writer|microsoft office document image writer|send to onenote|onenote|fax|microsoft shared fax|adobe pdf|foxit (reader |phantompdf )?pdf|pdfcreator|cutepdf|bullzip pdf|dopdf|primopdf|nitro pdf|pdf24|print to pdf|anydesk printer|journal note writer|snagit \d* printer)/i.test(
+        combined
+      )
+    ) {
+      return true;
+    }
+    if (portName && /^(portprompt:|xpsport:|shrfax:|nul:)/i.test(portName.trim())) {
+      return true;
+    }
+    return false;
   }
 
   /** Builds a settings-aware SumatraPDF command and waits for the Windows queue outcome. */

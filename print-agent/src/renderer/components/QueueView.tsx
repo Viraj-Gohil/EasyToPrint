@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { DiscoveredPrinter, PrintJobItem, PrinterQueueState, PlanEntitlements, AgentConfig } from '../types/agent';
 import { JobStatusBadge } from './StatusBadge';
+import { filterPhysicalPrinters, isVirtualPrinter } from '../utils/printerFilter';
 import {
   AlertTriangle,
   FileText,
@@ -67,7 +68,7 @@ export const QueueView: React.FC<QueueViewProps> = ({
     if (window.electronAgentAPI?.getPrinterQueues) {
       try {
         const queues = await window.electronAgentAPI.getPrinterQueues();
-        setPrinterQueues(queues || []);
+        setPrinterQueues((queues || []).filter((q) => !isVirtualPrinter(q.printerName)));
       } catch (err) {
         console.error('Failed fetching printer queues:', err);
       }
@@ -79,11 +80,15 @@ export const QueueView: React.FC<QueueViewProps> = ({
 
     if (window.electronAgentAPI?.onQueueStateChanged) {
       const unsubscribe = window.electronAgentAPI.onQueueStateChanged((queues) => {
-        setPrinterQueues(queues || []);
+        setPrinterQueues((queues || []).filter((q) => !isVirtualPrinter(q.printerName)));
       });
       return () => unsubscribe();
     }
   }, []);
+
+  useEffect(() => {
+    void fetchPrinterQueues();
+  }, [printers, config?.selectedPrinterName, config?.registeredPrinterNames?.join(',')]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -95,12 +100,9 @@ export const QueueView: React.FC<QueueViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedJob]);
 
-  // Exclude virtual printers (PDF, XPS, Fax, OneNote) from physical customer queues
+  // Exclude virtual printers (Microsoft Print to PDF, XPS, Fax, OneNote) from physical customer queues
   const physicalPrinters = useMemo(() => {
-    return printers.filter((p) => {
-      const name = (p.name || p.displayName || '').toLowerCase();
-      return !name.includes('pdf') && !name.includes('xps') && !name.includes('onenote') && !name.includes('fax');
-    });
+    return filterPhysicalPrinters(printers);
   }, [printers]);
 
   const counts = useMemo(() => {

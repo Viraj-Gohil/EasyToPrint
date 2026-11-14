@@ -76,16 +76,18 @@ export class WindowsPrinterManager {
             const electronPrinters = await mainWindow.webContents.getPrintersAsync();
             for (const ep of electronPrinters) {
               if (!ep.name || !ep.name.trim()) continue;
+              if (PrintSettingsAdapter.isVirtualPrinter(ep.name, (ep as any).options?.driver, (ep as any).options?.port)) {
+                continue;
+              }
               const key = ep.name.trim().toLowerCase();
-              const isVirtual = PrintSettingsAdapter.isVirtualPrinter(ep.name);
               const cached = existingCacheMap.get(key);
 
               discoveredByName.set(key, {
                 name: ep.name,
                 displayName: ep.displayName || ep.name,
                 isDefault: ep.isDefault,
-                status: isVirtual ? 'ERROR' : ep.status === 0 ? 'READY' : 'ERROR',
-                isOnline: !isVirtual && ep.status === 0,
+                status: ep.status === 0 ? 'READY' : 'ERROR',
+                isOnline: ep.status === 0,
                 capabilities: cached?.capabilities || {
                   paperSizes: [],
                   supportsColor: null,
@@ -112,7 +114,11 @@ export class WindowsPrinterManager {
                 const name = item.Name;
                 if (typeof name !== 'string' || !name || !name.trim()) continue;
                 const key = name.trim().toLowerCase();
-                const isVirtual = PrintSettingsAdapter.isVirtualPrinter(name);
+                const isVirtual = PrintSettingsAdapter.isVirtualPrinter(name, item.DriverName, item.PortName);
+                if (isVirtual) {
+                  discoveredByName.delete(key);
+                  continue;
+                }
 
                 const isOffline = Boolean(item.WorkOffline) ||
                   item.PrinterStatus === 6 ||
@@ -120,10 +126,10 @@ export class WindowsPrinterManager {
                   item.DetectedErrorState === 10;
                 const hasDeviceError = [4, 5, 8, 9, 11, 12].includes(Number(item.DetectedErrorState));
                 const statusIsKnownOnline = [3, 4, 5].includes(Number(item.PrinterStatus));
-                const isOnline = !isVirtual && !isOffline && !hasDeviceError && statusIsKnownOnline;
+                const isOnline = !isOffline && !hasDeviceError && statusIsKnownOnline;
 
                 const existingEntry = discoveredByName.get(key) || existingCacheMap.get(key);
-                const status: 'READY' | 'PRINTING' | 'OFFLINE' | 'BUSY' | 'ERROR' = isVirtual || hasDeviceError || (!isOnline && !isOffline)
+                const status: 'READY' | 'PRINTING' | 'OFFLINE' | 'BUSY' | 'ERROR' = hasDeviceError || (!isOnline && !isOffline)
                   ? 'ERROR'
                   : isOffline
                     ? 'OFFLINE'
@@ -190,7 +196,9 @@ export class WindowsPrinterManager {
           }
         }
 
-        const discovered = Array.from(discoveredByName.values());
+        const discovered = Array.from(discoveredByName.values()).filter(
+          (p) => !PrintSettingsAdapter.isVirtualPrinter(p.name, p.driverName, p.portName)
+        );
         this.cachedPrinters = discovered;
 
         const duration = Date.now() - startTime;
@@ -239,6 +247,7 @@ export class WindowsPrinterManager {
           for (const d of rawList) {
             if (d && d.Name) {
               const driverName = String(d.Name).split(',')[0].trim();
+              if (PrintSettingsAdapter.isVirtualPrinter(driverName)) continue;
               const mfr = printerCapabilityDetector.detectManufacturer(driverName, driverName);
               driverList.push({
                 name: driverName,

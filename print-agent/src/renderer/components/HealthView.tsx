@@ -96,15 +96,11 @@ export const HealthView: React.FC<HealthViewProps> = ({ onNavigateQueue }) => {
   const overall = h.overallStatus || 'HEALTHY';
   const lastUpdated = h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : 'Just now';
 
-  // Filter physical vs virtual printers
+  // Filter physical printers (virtual drivers are auto-excluded)
   const allPrinters = h.printers || [];
   const physicalPrinters = allPrinters.filter((p: any) => {
-    const name = (p.name || p.displayName || '').toLowerCase();
-    return !name.includes('pdf') && !name.includes('xps') && !name.includes('onenote') && !name.includes('fax');
-  });
-  const virtualPrinters = allPrinters.filter((p: any) => {
-    const name = (p.name || p.displayName || '').toLowerCase();
-    return name.includes('pdf') || name.includes('xps') || name.includes('onenote') || name.includes('fax');
+    const combined = `${p.name || ''} ${p.displayName || ''} ${p.driverName || ''}`.toLowerCase();
+    return !combined.includes('pdf') && !combined.includes('xps') && !combined.includes('onenote') && !combined.includes('fax');
   });
 
   return (
@@ -491,7 +487,7 @@ export const HealthView: React.FC<HealthViewProps> = ({ onNavigateQueue }) => {
             <div>
               <h3 className="text-[16px] font-bold text-[#111111] dark:text-white">Connected Printer Health</h3>
               <p className="text-[13px] text-[#646B65] dark:text-slate-400">
-                {physicalPrinters.length} physical device(s) &middot; {virtualPrinters.length} virtual driver(s)
+                {physicalPrinters.length} physical device(s) &middot; Virtual drivers auto-excluded
               </p>
             </div>
             <span className="text-xs text-[#848D86] font-mono">Win32 Spooler</span>
@@ -534,20 +530,10 @@ export const HealthView: React.FC<HealthViewProps> = ({ onNavigateQueue }) => {
                   </tr>
                 ))}
 
-                {virtualPrinters.length > 0 && virtualPrinters.map((p: any, idx: number) => (
-                  <tr key={`v-${p.name || idx}`} className="hover:bg-[#F0F4F1] dark:hover:bg-slate-800/50 transition-colors opacity-70">
-                    <td className="py-2 px-2 font-medium text-[#646B65] dark:text-slate-400">{p.name || p.displayName}</td>
-                    <td className="py-2 px-2 text-[#848D86] font-mono truncate max-w-[160px]">{p.driverName || 'Virtual'}</td>
-                    <td className="py-2 px-2 text-[#848D86]">Virtual</td>
-                    <td className="py-2 px-2 text-[#848D86]">Software</td>
-                    <td className="py-2 px-2 text-right text-[#848D86]">Virtual Driver</td>
-                  </tr>
-                ))}
-
-                {allPrinters.length === 0 && (
+                {physicalPrinters.length === 0 && (
                   <tr>
                     <td colSpan={5} className="py-6 text-center text-[#646B65] dark:text-slate-400">
-                      No Windows printers detected on this station.
+                      No physical Windows printers detected on this station.
                     </td>
                   </tr>
                 )}
@@ -672,8 +658,7 @@ function getMockHealthReport() {
     spooler: { running: true, serviceName: 'Spooler', statusMessage: 'Windows Print Spooler service is running normally.', recentErrors: [] },
     printers: [
       { name: 'HP LaserJet Pro M404dn', status: 'Ready', isOnline: true, driverName: 'HP Universal Printing PCL 6', portName: 'USB001' },
-      { name: 'Canon imageRUNNER 2525', status: 'Ready', isOnline: true, driverName: 'Canon iR-ADV UFR II', portName: '192.168.1.50' },
-      { name: 'Microsoft Print to PDF', status: 'Virtual', isOnline: true, driverName: 'Microsoft Print To PDF', portName: 'PORTPROMPT:' }
+      { name: 'Canon imageRUNNER 2525', status: 'Ready', isOnline: true, driverName: 'Canon iR-ADV UFR II', portName: '192.168.1.50' }
     ],
     queue: { pendingJobs: 0, activeJobs: 0, failedJobs: 0, stuckJobs: 0, oldTempFilesCount: 0 },
     network: { internetConnected: true, backendReachable: true, wsConnected: true, lastSuccessfulSync: new Date().toISOString(), apiResponseTimeMs: 38, connectionFailures: 0 },

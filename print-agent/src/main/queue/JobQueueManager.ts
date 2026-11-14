@@ -6,6 +6,7 @@ import fs from 'fs';
 import { PrintJobItem, PrinterQueueState, PrinterQueueItem, PlanEntitlements, DiscoveredPrinter } from '../../renderer/types/agent.js';
 import { ApiClient } from '../api/ApiClient.js';
 import { WindowsPrinterManager } from '../printer/WindowsPrinterManager.js';
+import { PrintSettingsAdapter } from '../printer/PrintSettingsAdapter.js';
 import { localVault } from '../storage/LocalDataVault.js';
 import { outboxManager } from '../storage/OutboxManager.js';
 import { logger } from '../logger/AgentLogger.js';
@@ -154,19 +155,34 @@ export class JobQueueManager {
 
   public getPrinterQueues(): PrinterQueueState[] {
     const config = localVault.getConfig();
-    const registeredNames = config.registeredPrinterNames || [];
-    const discoveredPrinters = this.printerManager.getCachedPrinters();
+    const registeredNames = (config.registeredPrinterNames || []).filter(
+      (name) => !PrintSettingsAdapter.isVirtualPrinter(name)
+    );
+    const discoveredPrinters = this.printerManager
+      .getCachedPrinters()
+      .filter((p) => !PrintSettingsAdapter.isVirtualPrinter(p.name, p.driverName, p.portName));
     const allStoredJobs = localVault.getAllJobs();
     const features = this.getEffectiveFeatures();
     const canMultipleQueues = features.canMultipleQueues;
 
-    // Include registered printers + any cached printers
-    let targetPrinters = discoveredPrinters.filter(p => registeredNames.includes(p.name) || registeredNames.length === 0);
+    // Prefer registered physical printers when present, otherwise show all discovered physical printers
+    const activeRegistered = discoveredPrinters.filter((p) => registeredNames.includes(p.name));
+    let targetPrinters = activeRegistered.length > 0 ? activeRegistered : discoveredPrinters;
 
     // STARTER TIER: Multiple printer queues blocked (only 1 active printer queue permitted)
     if (!canMultipleQueues && targetPrinters.length > 1) {
-      const primaryName = config.selectedPrinterName || targetPrinters[0]?.name;
-      targetPrinters = targetPrinters.filter(p => p.name === primaryName);
+      const validSelected =
+        config.selectedPrinterName &&
+        !PrintSettingsAdapter.isVirtualPrinter(config.selectedPrinterName) &&
+        targetPrinters.find((p) => p.name === config.selectedPrinterName);
+      const primaryPrinter =
+        validSelected ||
+        targetPrinters.find((p) => p.isOnline && p.isDefault) ||
+        targetPrinters.find((p) => p.isOnline) ||
+        targetPrinters[0];
+      if (primaryPrinter) {
+        targetPrinters = [primaryPrinter];
+      }
     }
 
     return targetPrinters.map((printer) => {
@@ -222,7 +238,7 @@ export class JobQueueManager {
     });
   }
 
-  private notifyQueueStateChanged(): void {
+  public notifyQueueStateChanged(): void {
     if (this.onQueueStateChangeListener) {
       try {
         const queues = this.getPrinterQueues();
@@ -284,13 +300,15 @@ export class JobQueueManager {
     }
 
     const sourcePrinters = printerListOverride || this.printerManager.getCachedPrinters();
-    const availablePrinters = sourcePrinters.filter((printer) =>
+    const physicalOnlinePrinters = sourcePrinters.filter((printer) =>
+      !PrintSettingsAdapter.isVirtualPrinter(printer.name, printer.driverName, printer.portName) &&
       printer.isOnline &&
-      (registeredNames.includes(printer.name) || registeredNames.length === 0) &&
       !disabledNames.includes(printer.name) &&
       !this.printerPaused.get(printer.name) &&
       printer.status !== 'OFFLINE'
     );
+    const registeredPhysical = physicalOnlinePrinters.filter((printer) => registeredNames.includes(printer.name));
+    const availablePrinters = registeredPhysical.length > 0 ? registeredPhysical : physicalOnlinePrinters;
 
     if (availablePrinters.length === 0) {
       job.assignmentReason = 'No registered physical printers are currently online.';
@@ -314,14 +332,13 @@ export class JobQueueManager {
 
     // Rule 1: STARTER TIER (Smart printer selection is BLOCKED, manual selection required)
     if (!features.canSmartPrinterSelection) {
-      const selectedName = config.selectedPrinterName || availablePrinters[0]?.name;
-      if (!selectedName) {
-        job.assignmentReason = 'Manual printer selection required on Starter plan. Select a default printer in settings, or upgrade to Growth for Smart Selection.';
-        return null;
-      }
-      const preferred = availablePrinters.find((p) => p.name === selectedName);
+      const validSelected =
+        config.selectedPrinterName &&
+        !PrintSettingsAdapter.isVirtualPrinter(config.selectedPrinterName) &&
+        availablePrinters.find((p) => p.name === config.selectedPrinterName);
+      const preferred = validSelected || availablePrinters.find((p) => p.isDefault) || availablePrinters[0];
       if (!preferred) {
-        job.assignmentReason = `Selected printer "${selectedName}" is offline.`;
+        job.assignmentReason = 'Manual printer selection required on Starter plan. Select a physical printer in settings.';
         return null;
       }
       job.assignmentReason = `Assigned to manual printer "${preferred.name}" (Starter plan manual printer selection).`;
