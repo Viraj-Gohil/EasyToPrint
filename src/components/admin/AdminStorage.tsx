@@ -11,7 +11,7 @@ import {
   Database,
   ArrowUpRight
 } from 'lucide-react';
-import { apiUrl } from '../../lib/apiConfig';
+import { authenticatedFetch } from '../../lib/apiConfig';
 import { Button } from '../ui/Button';
 import {
   Table,
@@ -70,18 +70,7 @@ export const AdminStorage: React.FC = () => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const token = typeof window !== 'undefined'
-        ? localStorage.getItem('easytoprint_access_token') || localStorage.getItem('printflow_access_token')
-        : null;
-
-      const res = await fetch(apiUrl('/api/admin/storage'), {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-dev-role': 'ADMIN',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        credentials: 'same-origin'
-      });
+      const res = await authenticatedFetch('/api/admin/storage');
 
       if (!res.ok) {
         throw new Error(`Failed to load storage telemetry (HTTP ${res.status})`);

@@ -32,6 +32,7 @@ import {
   generateRecoveryCodes,
   createJwtAccessToken,
   verifyJwtAccessToken,
+  revokeJwtToken,
   consumeRecoveryCode,
   createPasswordResetToken,
   consumePasswordResetToken,
@@ -49,6 +50,7 @@ import {
   safeSsrfFetch,
   isDatabaseNetworkError
 } from './src/lib/security';
+import { ADMIN_API_LOGIN_PATH } from './src/lib/adminConfig';
 import {
   initializePaymentTables,
   issuePrintAgentToken,
@@ -134,12 +136,20 @@ import type { PaymentOrderRecord } from './src/db/durablePaymentRepository';
 dotenv.config({ override: true });
 
 const app = express();
+app.set(
+  'trust proxy',
+  process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production'
+    ? 'loopback, linklocal, uniquelocal'
+    : false
+);
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 // Security configuration
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 const CSRF_SECRET = process.env.CSRF_SECRET || crypto.randomBytes(32).toString('hex');
 const STORAGE_SIGN_SECRET = process.env.STORAGE_SIGN_SECRET || crypto.randomBytes(32).toString('hex');
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'etp.ctrl9x4k@easytoprint.in').trim().toLowerCase();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'K9#mP4$vX8!qL2@zR7&nW5';
 const envOrigins = (process.env.CORS_ALLOWED_ORIGINS || process.env.FRONTEND_URL || '')
   .split(',')
   .map((o) => o.trim())
@@ -279,39 +289,153 @@ interface RateLimitBucket {
   count: number;
   resetAt: number;
 }
+interface RateLimitOptions {
+  bucketKey?: string;
+  identifierExtractor?: (req: Request) => string | undefined;
+  identifierMaxRequests?: number;
+  message?: string;
+  skip?: (req: Request) => boolean;
+}
+const MAX_RATE_LIMIT_BUCKETS = 50_000;
 const ipRateLimits = new Map<string, RateLimitBucket>();
 
-function createRateLimiter(maxRequests: number, windowMs = 60000) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
-    const now = Date.now();
-    const key = `${req.path}:${ip}`;
+function getClientIp(req: Request): string {
+  // Relies on Express trust proxy setting (hop=1) instead of trusting raw client X-Forwarded-For headers
+  const rawIp = req.ip || req.socket.remoteAddress || 'unknown';
+  return rawIp.startsWith('::ffff:') ? rawIp.slice(7) : rawIp;
+}
 
-    let bucket = ipRateLimits.get(key);
-    if (!bucket || now > bucket.resetAt) {
-      bucket = { count: 1, resetAt: now + windowMs };
-      ipRateLimits.set(key, bucket);
-    } else {
-      bucket.count++;
-      if (bucket.count > maxRequests) {
-        return res.status(429).json({
-          success: false,
-          error: 'Too many requests. Please try again after 1 minute.',
-          retryAfterMs: bucket.resetAt - now
-        });
+function normalizeRateLimitPath(path: string): string {
+  const cleaned = path.replace(/\/+$/, '');
+  return cleaned || '/';
+}
+
+function formatRetryWindowMessage(windowMs: number, customMessage?: string): string {
+  if (customMessage) return customMessage;
+  const totalSeconds = Math.max(1, Math.ceil(windowMs / 1000));
+  if (totalSeconds >= 60) {
+    const mins = Math.ceil(totalSeconds / 60);
+    return `Too many requests. Please try again after ${mins} minute${mins === 1 ? '' : 's'}.`;
+  }
+  return `Too many requests. Please try again after ${totalSeconds} seconds.`;
+}
+
+function consumeRateLimitBucket(
+  key: string,
+  maxRequests: number,
+  windowMs: number,
+  now: number
+): { allowed: boolean; remaining: number; resetAt: number; count: number } {
+  let bucket = ipRateLimits.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    if (ipRateLimits.size >= MAX_RATE_LIMIT_BUCKETS) {
+      for (const [k, b] of ipRateLimits.entries()) {
+        if (now >= b.resetAt) ipRateLimits.delete(k);
+        if (ipRateLimits.size < MAX_RATE_LIMIT_BUCKETS) break;
+      }
+      if (ipRateLimits.size >= MAX_RATE_LIMIT_BUCKETS) {
+        const oldestKey = ipRateLimits.keys().next().value;
+        if (oldestKey) ipRateLimits.delete(oldestKey);
       }
     }
+    bucket = { count: 1, resetAt: now + windowMs };
+    ipRateLimits.set(key, bucket);
+    return {
+      allowed: true,
+      remaining: Math.max(0, maxRequests - 1),
+      resetAt: bucket.resetAt,
+      count: 1
+    };
+  }
+
+  bucket.count += 1;
+  return {
+    allowed: bucket.count <= maxRequests,
+    remaining: Math.max(0, maxRequests - bucket.count),
+    resetAt: bucket.resetAt,
+    count: bucket.count
+  };
+}
+
+function createRateLimiter(maxRequests: number, windowMs = 60_000, options: RateLimitOptions = {}) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (options.skip?.(req)) {
+      return next();
+    }
+
+    const ip = getClientIp(req);
+    const now = Date.now();
+    const bucketName = options.bucketKey || normalizeRateLimitPath(req.path);
+    const ipKey = `rl:ip:${bucketName}:${ip}`;
+    const ipResult = consumeRateLimitBucket(ipKey, maxRequests, windowMs, now);
+
+    let effectiveLimit = maxRequests;
+    let effectiveRemaining = ipResult.remaining;
+    let effectiveResetAt = ipResult.resetAt;
+    let blocked = !ipResult.allowed;
+
+    if (options.identifierExtractor) {
+      const rawIdentifier = options.identifierExtractor(req);
+      const cleanIdentifier = typeof rawIdentifier === 'string' ? rawIdentifier.trim().toLowerCase() : '';
+      if (cleanIdentifier) {
+        const idLimit = options.identifierMaxRequests ?? maxRequests;
+        const idKey = `rl:id:${bucketName}:${cleanIdentifier}`;
+        const idResult = consumeRateLimitBucket(idKey, idLimit, windowMs, now);
+        if (!idResult.allowed) {
+          blocked = true;
+          effectiveLimit = idLimit;
+          effectiveRemaining = 0;
+          effectiveResetAt = Math.max(effectiveResetAt, idResult.resetAt);
+        } else if (idResult.remaining < effectiveRemaining) {
+          effectiveRemaining = idResult.remaining;
+        }
+      }
+    }
+
+    const retryAfterMs = Math.max(1000, effectiveResetAt - now);
+    const retryAfterSeconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+    res.setHeader('X-RateLimit-Limit', String(effectiveLimit));
+    res.setHeader('X-RateLimit-Remaining', String(blocked ? 0 : effectiveRemaining));
+    res.setHeader('X-RateLimit-Reset', String(Math.ceil(effectiveResetAt / 1000)));
+
+    if (blocked) {
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      logger.warn('Rate limit exceeded', {
+        bucket: bucketName,
+        ip,
+        method: req.method,
+        path: req.path,
+        retryAfterSeconds
+      });
+      return res.status(429).json({
+        success: false,
+        error: formatRetryWindowMessage(windowMs, options.message),
+        retryAfterMs,
+        retryAfterSeconds
+      });
+    }
+
     next();
   };
 }
+
+// Baseline volumetric protection across all /api routes (exempting health probes and payment webhooks)
+app.use('/api', createRateLimiter(300, 60_000, {
+  bucketKey: 'api-global',
+  skip: (req) => {
+    const p = normalizeRateLimitPath(req.path);
+    return p === '/health' || p === '/payment/webhook' || p === '/payments/webhook' || p === '/webhooks/razorpay';
+  }
+}));
+app.use('/api/admin', createRateLimiter(120, 60_000, { bucketKey: 'admin-api-general' }));
 
 // Clean up stale rate limits every 5 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [key, b] of ipRateLimits.entries()) {
-    if (now > b.resetAt) ipRateLimits.delete(key);
+    if (now >= b.resetAt) ipRateLimits.delete(key);
   }
-}, 300000);
+}, 300_000);
 
 /**
  * Computes milliseconds until the next 12:00 AM midnight India Standard Time (Asia/Kolkata).
@@ -423,7 +547,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // Endpoint to obtain a fresh CSRF token
-app.get('/api/csrf-token', (req: Request, res: Response) => {
+app.get('/api/csrf-token', createRateLimiter(60, 60_000, { bucketKey: 'csrf-token' }), (req: Request, res: Response) => {
   const sessionId = (req.headers['x-session-id'] as string) || 'default-session';
   const token = generateCsrfToken(sessionId, CSRF_SECRET);
   res.json({ success: true, csrfToken: token });
@@ -464,21 +588,6 @@ function authenticateUserSession(req: Request, _res: Response, next: NextFunctio
         lastActiveAt: Date.now()
       };
     }
-  }
-
-  // 3. Iframe development environment fallback
-  if (!verifiedUser && (req.headers['x-admin-dev-role'] === 'ADMIN' || req.headers['x-user-role'] === 'ADMIN')) {
-    verifiedUser = {
-      sessionId: 'sess_admin_master',
-      userId: 'usr_admin',
-      email: 'admin@easytoprint.io',
-      role: 'ADMIN',
-      shopId: 'platform_admin',
-      fullName: 'Platform Master Admin',
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 86400000,
-      lastActiveAt: Date.now()
-    };
   }
 
   (req as any).authenticatedUser = verifiedUser;
@@ -729,7 +838,7 @@ async function resolveAppStateScope(req: Request, res: Response): Promise<{
   }
 }
 
-app.get('/api/app-data', requireAdminOrOwnShop, async (req: Request, res: Response) => {
+app.get('/api/app-data', createRateLimiter(60, 60_000, { bucketKey: 'app-data-read' }), requireAdminOrOwnShop, async (req: Request, res: Response) => {
   const context = await resolveAppStateScope(req, res);
   if (!context) return;
   try {
@@ -784,7 +893,7 @@ app.get('/api/app-data', requireAdminOrOwnShop, async (req: Request, res: Respon
   }
 });
 
-app.put('/api/app-data/:key', requireAdminOrOwnShop, async (req: Request, res: Response) => {
+app.put('/api/app-data/:key', createRateLimiter(45, 60_000, { bucketKey: 'app-data-write' }), requireAdminOrOwnShop, async (req: Request, res: Response) => {
   const context = await resolveAppStateScope(req, res);
   if (!context) return;
   const key = req.params.key;
@@ -962,16 +1071,18 @@ const IN_MEMORY_AUTH_USERS = new Map<string, LocalAuthUser>([
     }
   ],
   [
-    'admin@printflow.io',
+    ADMIN_EMAIL,
     {
       id: 'usr_admin',
-      email: 'admin@printflow.io',
-      passwordHash: hashPassword('Admin@PrintFlow2026!'),
+      email: ADMIN_EMAIL,
+      passwordHash: hashPassword(ADMIN_PASSWORD),
       fullName: 'Platform Super Admin',
       phone: '9876543200',
       role: 'ADMIN',
       shopId: 'platform_admin',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      failedAttempts: 0,
+      lockoutUntil: 0
     }
   ],
   [
@@ -1003,7 +1114,7 @@ const IN_MEMORY_AUTH_USERS = new Map<string, LocalAuthUser>([
 ]);
 
 // POST /api/auth/check-availability: Checks if email or mobile number already exists
-app.post('/api/auth/check-availability', createRateLimiter(30), async (req: Request, res: Response) => {
+app.post('/api/auth/check-availability', createRateLimiter(20, 60_000, { bucketKey: 'auth-check-availability' }), async (req: Request, res: Response) => {
   const { email, phone } = req.body || {};
   const cleanEmail = email ? String(email).trim().toLowerCase() : '';
   const cleanPhone = phone ? String(phone).replace(/\D/g, '').slice(-10) : '';
@@ -1040,7 +1151,7 @@ app.post('/api/auth/check-availability', createRateLimiter(30), async (req: Requ
 });
 
 // POST /api/auth/register: Registers new shop & user, saves to Supabase DB, issues secure HttpOnly cookie
-app.post('/api/auth/register', createRateLimiter(10), async (req: Request, res: Response) => {
+app.post('/api/auth/register', createRateLimiter(8, 60_000, { bucketKey: 'auth-register', identifierExtractor: (req) => req.body?.email }), async (req: Request, res: Response) => {
   const { shopName, ownerName, email, phone, city, password, planId } = req.body || {};
   if (!shopName || !ownerName || !email || !password) {
     return res.status(400).json({ success: false, error: 'Shop name, owner name, email, and password are required' });
@@ -1061,6 +1172,13 @@ app.post('/api/auth/register', createRateLimiter(10), async (req: Request, res: 
 
   const cleanEmail = String(email).trim().toLowerCase();
   const cleanPhone = String(phone || '').replace(/\D/g, '').slice(-10);
+
+  if (cleanEmail === ADMIN_EMAIL || cleanEmail === 'admin@printflow.io' || cleanEmail === 'admin@easytoprint.io') {
+    return res.status(400).json({
+      success: false,
+      error: 'An account with this email address or mobile number already exists. Please sign in or recover your account.'
+    });
+  }
 
   try {
     let duplicateFound = false;
@@ -1210,12 +1328,14 @@ app.post('/api/auth/register', createRateLimiter(10), async (req: Request, res: 
     } catch {}
 
     const sent = await sendOtpEmailViaResend(cleanEmail, rawOtp);
+    if (!sent && process.env.NODE_ENV !== 'production') {
+      logger.info('[Auth] Verification OTP generated (email delivery unavailable in dev)', { email: cleanEmail });
+    }
 
     return res.status(201).json({
       success: true,
       requireEmailVerification: true,
       email: cleanEmail,
-      devOtp: process.env.NODE_ENV !== 'production' || !sent ? rawOtp : undefined,
       message: 'Registration successful. Please verify your email address using the 6-digit code sent to your inbox.'
     });
   } catch (error) {
@@ -1225,7 +1345,7 @@ app.post('/api/auth/register', createRateLimiter(10), async (req: Request, res: 
 });
 
 // POST /api/auth/verify-email-otp: Verifies 6-digit email OTP and activates shop account
-app.post('/api/auth/verify-email-otp', createRateLimiter(10), async (req: Request, res: Response) => {
+app.post('/api/auth/verify-email-otp', createRateLimiter(8, 60_000, { bucketKey: 'auth-verify-email-otp', identifierExtractor: (req) => req.body?.email }), async (req: Request, res: Response) => {
   const { email, otp } = req.body || {};
   if (!email || !otp) {
     return res.status(400).json({ success: false, error: 'Email and verification code are required.' });
@@ -1366,7 +1486,7 @@ app.post('/api/auth/verify-email-otp', createRateLimiter(10), async (req: Reques
 });
 
 // POST /api/auth/resend-email-otp: Resends email verification OTP with cooldown and rate limits
-app.post('/api/auth/resend-email-otp', createRateLimiter(5), async (req: Request, res: Response) => {
+app.post('/api/auth/resend-email-otp', createRateLimiter(5, 60_000, { bucketKey: 'auth-resend-email-otp', identifierExtractor: (req) => req.body?.email }), async (req: Request, res: Response) => {
   const { email } = req.body || {};
   if (!email) {
     return res.status(400).json({ success: false, error: 'Email address is required.' });
@@ -1442,11 +1562,13 @@ app.post('/api/auth/resend-email-otp', createRateLimiter(5), async (req: Request
     }
 
     const sent = await sendOtpEmailViaResend(cleanEmail, rawOtp);
+    if (!sent && process.env.NODE_ENV !== 'production') {
+      logger.info('[Auth] Resent verification OTP (email delivery unavailable in dev)', { email: cleanEmail });
+    }
 
     return res.json({
       success: true,
-      message: 'New verification code sent successfully.',
-      devOtp: process.env.NODE_ENV !== 'production' || !sent ? rawOtp : undefined
+      message: 'New verification code sent successfully.'
     });
   } catch (err) {
     logger.error('Resend OTP failed:', { error: deepRedact(err) });
@@ -1455,7 +1577,7 @@ app.post('/api/auth/resend-email-otp', createRateLimiter(5), async (req: Request
 });
 
 // POST /api/auth/login: Issues HttpOnly cookie, implements 5-attempt temporary lockout & anti-enumeration
-app.post('/api/auth/login', createRateLimiter(10), async (req: Request, res: Response) => {
+app.post('/api/auth/login', createRateLimiter(10, 60_000, { bucketKey: 'auth-login', identifierExtractor: (req) => req.body?.email }), async (req: Request, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ success: false, error: 'Email and password are required' });
@@ -1521,15 +1643,15 @@ app.post('/api/auth/login', createRateLimiter(10), async (req: Request, res: Res
     });
   }
 
-  if (!user) {
+  if (!user || user.role === 'ADMIN') {
     // Perform dummy timing-safe verification to prevent timing side-channel account enumeration
+    // and ensure ADMIN accounts cannot sign in through the public user login endpoint
     verifyPassword(String(password), '$pbkdf2-sha512$120000$000000000000000000000000$00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000');
-    logger.warn('Login failed: user not found', { email: cleanEmail });
+    logger.warn('Public login rejected', { email: cleanEmail });
     return res.status(401).json({ success: false, error: 'Invalid email/mobile or password. Please try again.' });
   }
 
-  const isSuperAdmin = cleanEmail === 'admin@printflow.io';
-  const isPasswordValid = verifyPassword(String(password), user.password) || (isSuperAdmin && ['Admin@PrintFlow2026!', '123456', 'admin', 'password'].includes(String(password)));
+  const isPasswordValid = verifyPassword(String(password), user.password);
 
   if (!isPasswordValid) {
     const nextFailedAttempts = (Number(user.failedAttempts) || 0) + 1;
@@ -1643,6 +1765,165 @@ app.post('/api/auth/login', createRateLimiter(10), async (req: Request, res: Res
   });
 });
 
+// Dedicated Hardened Admin Authentication Endpoint (Strict Rate Limit, 30-min Lockout, PBKDF2-SHA512)
+app.post(ADMIN_API_LOGIN_PATH, createRateLimiter(5, 15 * 60_000, { bucketKey: 'admin-gate-auth', identifierExtractor: (req) => req.body?.email }), async (req: Request, res: Response) => {
+  const { email, password } = req.body || {};
+  if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ success: false, error: 'Administrator email and password are required.' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  let user: any = null;
+
+  try {
+    if (isNeonDatabaseConfigured()) {
+      const pool = requirePostgresPool();
+      const dbUserRes = await pool.query(
+        `SELECT id, email, password_hash AS password, full_name AS "fullName",
+                phone, role, shop_id AS "shopId", failed_attempts AS "failedAttempts",
+                EXTRACT(EPOCH FROM lockout_until) * 1000 AS "lockoutUntilMs"
+         FROM public.printflow_users
+         WHERE LOWER(email) = $1 AND role = 'ADMIN'
+         LIMIT 1`,
+        [cleanEmail]
+      );
+      if (dbUserRes.rowCount === 1) {
+        user = dbUserRes.rows[0];
+      }
+    }
+  } catch (dbErr: any) {
+    if (!isDatabaseNetworkError(dbErr)) {
+      logger.warn('Admin login DB query error', { error: deepRedact(dbErr) });
+    }
+  }
+
+  if (!user && IN_MEMORY_AUTH_USERS.has(cleanEmail)) {
+    const memUser = IN_MEMORY_AUTH_USERS.get(cleanEmail)!;
+    if (memUser.role === 'ADMIN') {
+      user = {
+        id: memUser.id,
+        email: memUser.email,
+        password: memUser.passwordHash,
+        fullName: memUser.fullName,
+        phone: memUser.phone,
+        role: memUser.role,
+        shopId: memUser.shopId,
+        failedAttempts: memUser.failedAttempts || 0,
+        lockoutUntilMs: memUser.lockoutUntil || 0
+      };
+    }
+  }
+
+  const now = Date.now();
+  const lockoutUntil = user?.lockoutUntilMs ? Number(user.lockoutUntilMs) : 0;
+  if (user && lockoutUntil && now < lockoutUntil) {
+    logger.warn('Admin login blocked due to active security lockout', { email: cleanEmail });
+    return res.status(429).json({
+      success: false,
+      error: 'Too many failed attempts. Administrator access is temporarily locked for security.'
+    });
+  }
+
+  if (!user || user.role !== 'ADMIN') {
+    verifyPassword(password, '$pbkdf2-sha512$120000$000000000000000000000000$00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000');
+    logger.warn('Unauthorized admin login attempt', { email: cleanEmail });
+    return res.status(401).json({ success: false, error: 'Invalid administrator credentials. Access denied.' });
+  }
+
+  const isPasswordValid = verifyPassword(password, user.password);
+  if (!isPasswordValid) {
+    const nextFailedAttempts = (Number(user.failedAttempts) || 0) + 1;
+    let nextLockoutUntil: number | null = null;
+    let lockoutSqlVal: string | null = null;
+
+    if (nextFailedAttempts >= 5) {
+      nextLockoutUntil = now + 30 * 60 * 1000; // 30 minutes strict lockout
+      lockoutSqlVal = new Date(nextLockoutUntil).toISOString();
+    }
+
+    try {
+      if (isNeonDatabaseConfigured()) {
+        const pool = requirePostgresPool();
+        await pool.query(
+          `UPDATE public.printflow_users SET failed_attempts = $1, lockout_until = $2 WHERE id = $3`,
+          [nextFailedAttempts, lockoutSqlVal, user.id]
+        );
+      }
+    } catch {}
+
+    if (IN_MEMORY_AUTH_USERS.has(cleanEmail)) {
+      const mem = IN_MEMORY_AUTH_USERS.get(cleanEmail)!;
+      IN_MEMORY_AUTH_USERS.set(cleanEmail, {
+        ...mem,
+        failedAttempts: nextFailedAttempts,
+        lockoutUntil: nextLockoutUntil || 0
+      });
+    }
+
+    logger.warn('Admin login failed: invalid credentials', { email: cleanEmail, failedAttempts: nextFailedAttempts });
+    if (nextFailedAttempts >= 5) {
+      return res.status(429).json({
+        success: false,
+        error: 'Too many failed attempts. Administrator access is temporarily locked for 30 minutes.'
+      });
+    }
+    return res.status(401).json({ success: false, error: 'Invalid administrator credentials. Access denied.' });
+  }
+
+  try {
+    if (isNeonDatabaseConfigured()) {
+      const pool = requirePostgresPool();
+      await pool.query(
+        `UPDATE public.printflow_users SET failed_attempts = 0, lockout_until = NULL WHERE id = $1`,
+        [user.id]
+      );
+    }
+  } catch {}
+
+  if (IN_MEMORY_AUTH_USERS.has(cleanEmail)) {
+    const mem = IN_MEMORY_AUTH_USERS.get(cleanEmail)!;
+    IN_MEMORY_AUTH_USERS.set(cleanEmail, {
+      ...mem,
+      failedAttempts: 0,
+      lockoutUntil: 0
+    });
+  }
+
+  const adminSessionTtlMs = 8 * 60 * 60 * 1000; // 8 hours
+  const { signedCookie, session, cookieOptions } = createSecureSession({
+    id: user.id,
+    email: user.email,
+    role: 'ADMIN',
+    shopId: 'platform_admin',
+    fullName: user.fullName || 'Platform Super Admin'
+  }, adminSessionTtlMs);
+
+  const accessToken = createJwtAccessToken({
+    userId: session.userId,
+    email: session.email,
+    role: 'ADMIN',
+    shopId: session.shopId,
+    fullName: session.fullName,
+    secret: JWT_SECRET,
+    expiresInSec: 8 * 3600
+  });
+
+  res.cookie('printflow_session', signedCookie, cookieOptions);
+  logger.info('Platform Super Admin authenticated successfully', { email: session.email });
+
+  return res.json({
+    success: true,
+    accessToken,
+    user: {
+      id: session.userId,
+      email: session.email,
+      role: 'ADMIN',
+      shopId: session.shopId,
+      fullName: session.fullName
+    }
+  });
+});
+
 // Helper to normalize public.plans rows into standard frontend SaasPlan objects
 function formatPlanDbRow(row: any) {
   const limits = typeof row.limits === 'object' && row.limits !== null
@@ -1690,7 +1971,7 @@ function formatPlanDbRow(row: any) {
 }
 
 // GET /api/public/plans & /api/plans: Public catalog of active and public SaaS plans
-app.get(['/api/public/plans', '/api/plans', '/api/subscription/plans'], async (_req: Request, res: Response) => {
+app.get(['/api/public/plans', '/api/plans', '/api/subscription/plans'], createRateLimiter(90, 60_000, { bucketKey: 'public-plans-read' }), async (_req: Request, res: Response) => {
   try {
     if (isNeonDatabaseConfigured()) {
       const pool = requirePostgresPool();
@@ -1717,7 +1998,7 @@ app.get(['/api/public/plans', '/api/plans', '/api/subscription/plans'], async (_
 });
 
 // GET /api/admin/plans: Super Admin catalog of ALL plans (active, inactive, public, unlisted)
-app.get('/api/admin/plans', requireAdminRole, async (_req: Request, res: Response) => {
+app.get('/api/admin/plans', createRateLimiter(60, 60_000, { bucketKey: 'admin-plans-read' }), requireAdminRole, async (_req: Request, res: Response) => {
   try {
     if (isNeonDatabaseConfigured()) {
       const pool = requirePostgresPool();
@@ -1741,7 +2022,7 @@ app.get('/api/admin/plans', requireAdminRole, async (_req: Request, res: Respons
 });
 
 // POST /api/admin/plans: Create a new SaaS plan with authoritative server validation
-app.post(['/api/admin/plans', '/api/plans'], requireAdminRole, async (req: Request, res: Response) => {
+app.post(['/api/admin/plans', '/api/plans'], createRateLimiter(20, 60_000, { bucketKey: 'admin-plans-write' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const {
       name,
@@ -1831,7 +2112,7 @@ app.post(['/api/admin/plans', '/api/plans'], requireAdminRole, async (req: Reque
 });
 
 // PUT /api/admin/plans/:id: Update existing SaaS plan without altering grandfathered subscriptions
-app.put(['/api/admin/plans/:id', '/api/plans/:id'], requireAdminRole, async (req: Request, res: Response) => {
+app.put(['/api/admin/plans/:id', '/api/plans/:id'], createRateLimiter(20, 60_000, { bucketKey: 'admin-plans-write' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const {
@@ -1941,7 +2222,7 @@ app.put(['/api/admin/plans/:id', '/api/plans/:id'], requireAdminRole, async (req
 });
 
 // PATCH /api/admin/plans/:id/status: Activate or deactivate a plan
-app.patch(['/api/admin/plans/:id/status', '/api/plans/:id/status'], requireAdminRole, async (req: Request, res: Response) => {
+app.patch(['/api/admin/plans/:id/status', '/api/plans/:id/status'], createRateLimiter(20, 60_000, { bucketKey: 'admin-plans-write' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { isActive, status } = req.body;
@@ -1974,7 +2255,7 @@ app.patch(['/api/admin/plans/:id/status', '/api/plans/:id/status'], requireAdmin
 });
 
 // DELETE /api/admin/plans/:id: Deletes plan ONLY if no shops or subscriptions reference it
-app.delete(['/api/admin/plans/:id', '/api/plans/:id'], requireAdminRole, async (req: Request, res: Response) => {
+app.delete(['/api/admin/plans/:id', '/api/plans/:id'], createRateLimiter(15, 60_000, { bucketKey: 'admin-plans-delete' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -2052,7 +2333,7 @@ app.delete(['/api/admin/plans/:id', '/api/plans/:id'], requireAdminRole, async (
 });
 
 // GET /api/auth/session: Inspects HttpOnly cookie and validates session
-app.get('/api/auth/session', (req: Request, res: Response) => {
+app.get('/api/auth/session', createRateLimiter(60, 60_000, { bucketKey: 'auth-session' }), (req: Request, res: Response) => {
   const user = (req as any).authenticatedUser;
   if (!user) {
     return res.status(401).json({ success: false, error: 'No active session' });
@@ -2069,18 +2350,26 @@ app.get('/api/auth/session', (req: Request, res: Response) => {
   });
 });
 
-// POST /api/auth/logout: Revokes session on server and removes cookie
-app.post('/api/auth/logout', (req: Request, res: Response) => {
+// POST /api/auth/logout: Revokes session & JWT on server and removes cookie
+app.post('/api/auth/logout', createRateLimiter(30, 60_000, { bucketKey: 'auth-logout' }), (req: Request, res: Response) => {
   const sessionCookie = req.cookies?.printflow_session;
   if (sessionCookie) {
     destroySecureSession(sessionCookie);
+  }
+  const authHeader = req.headers['authorization'] as string | undefined;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7).trim();
+    const jwtResult = verifyJwtAccessToken(token, JWT_SECRET);
+    if (jwtResult.valid && jwtResult.payload?.jti) {
+      revokeJwtToken(jwtResult.payload.jti);
+    }
   }
   res.clearCookie('printflow_session', { path: '/' });
   return res.json({ success: true, message: 'Logged out successfully' });
 });
 
 // POST /api/auth/refresh: Extends session sliding window
-app.post('/api/auth/refresh', (req: Request, res: Response) => {
+app.post('/api/auth/refresh', createRateLimiter(20, 60_000, { bucketKey: 'auth-refresh' }), (req: Request, res: Response) => {
   const sessionCookie = req.cookies?.printflow_session;
   const validation = validateSecureSession(sessionCookie);
   if (!validation.valid || !validation.session) {
@@ -2285,7 +2574,7 @@ function maskEmailAddress(email: string): string {
 const STRICT_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // POST /api/auth/forgot-password: Requests secure password reset OTP exclusively via registered email address
-app.post('/api/auth/forgot-password', createRateLimiter(5), async (req: Request, res: Response) => {
+app.post('/api/auth/forgot-password', createRateLimiter(5, 15 * 60_000, { bucketKey: 'auth-forgot-password', identifierExtractor: (req) => req.body?.email }), async (req: Request, res: Response) => {
   const rawEmailInput = req.body?.email ?? req.body?.identifier;
   if (!rawEmailInput || typeof rawEmailInput !== 'string') {
     return res.status(400).json({ success: false, error: 'Registered email address is required.' });
@@ -2299,8 +2588,6 @@ app.post('/api/auth/forgot-password', createRateLimiter(5), async (req: Request,
     });
   }
 
-  let devOtpVal: string | undefined;
-
   try {
     let userRecord: any = null;
     let isDb = false;
@@ -2308,7 +2595,7 @@ app.post('/api/auth/forgot-password', createRateLimiter(5), async (req: Request,
     if (isNeonDatabaseConfigured()) {
       const pool = requirePostgresPool();
       const resUser = await pool.query(
-        `SELECT id, email FROM public.printflow_users WHERE LOWER(email) = $1 LIMIT 1`,
+        `SELECT id, email, role FROM public.printflow_users WHERE LOWER(email) = $1 LIMIT 1`,
         [cleanEmail]
       );
       if (resUser.rowCount === 1) {
@@ -2321,7 +2608,8 @@ app.post('/api/auth/forgot-password', createRateLimiter(5), async (req: Request,
       userRecord = IN_MEMORY_AUTH_USERS.get(cleanEmail)!;
     }
 
-    if (userRecord) {
+    // Never allow public forgot-password resets for ADMIN accounts
+    if (userRecord && userRecord.role !== 'ADMIN' && cleanEmail !== ADMIN_EMAIL) {
       const rawOtp = crypto.randomInt(100000, 999999).toString();
       const otpHash = crypto.createHash('sha256').update(rawOtp).digest('hex');
       const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
@@ -2332,45 +2620,48 @@ app.post('/api/auth/forgot-password', createRateLimiter(5), async (req: Request,
         await pool.query(
           `UPDATE public.printflow_users 
            SET reset_otp_hash = $1, reset_otp_expires_at = $2, reset_otp_attempts = 0, reset_otp_resend_count = 0, reset_otp_last_resent_at = NOW(), updated_at = NOW() 
-           WHERE LOWER(email) = $3`,
+           WHERE LOWER(email) = $3 AND role != 'ADMIN'`,
           [otpHash, otpExpiresAt, targetEmail]
         );
       }
 
       if (IN_MEMORY_AUTH_USERS.has(targetEmail)) {
         const mem = IN_MEMORY_AUTH_USERS.get(targetEmail)!;
-        IN_MEMORY_AUTH_USERS.set(targetEmail, {
-          ...mem,
-          resetOtpHash: otpHash,
-          resetOtpExpiresAt: otpExpiresAt.getTime(),
-          resetOtpAttempts: 0,
-          resetOtpResendCount: 0,
-          resetOtpLastResentAt: Date.now()
-        });
+        if (mem.role !== 'ADMIN') {
+          IN_MEMORY_AUTH_USERS.set(targetEmail, {
+            ...mem,
+            resetOtpHash: otpHash,
+            resetOtpExpiresAt: otpExpiresAt.getTime(),
+            resetOtpAttempts: 0,
+            resetOtpResendCount: 0,
+            resetOtpLastResentAt: Date.now()
+          });
+        }
       }
 
       const sent = await sendOtpEmailViaResend(targetEmail, rawOtp);
-      devOtpVal = process.env.NODE_ENV !== 'production' || !sent ? rawOtp : undefined;
-
-      logger.info(`[Auth] Password reset email OTP generated for ${targetEmail}`, { expiresAt: otpExpiresAt.toISOString() });
+      if (!sent && process.env.NODE_ENV !== 'production') {
+        logger.info(`[Auth] Password reset email OTP generated (dev delivery fallback)`, { email: targetEmail });
+      } else {
+        logger.info(`[Auth] Password reset email OTP generated for ${targetEmail}`, { expiresAt: otpExpiresAt.toISOString() });
+      }
     }
   } catch (err) {
     logger.error('[Auth] Error processing forgot password request:', { error: deepRedact(err) });
   }
 
   const masked = maskEmailAddress(cleanEmail);
-  // Always return generic anti-enumeration response so we never expose whether an email is registered
+  // Always return generic anti-enumeration response and never leak OTP in HTTP payload
   return res.json({
     success: true,
     message: 'If an account is registered with this email address, a 6-digit verification code has been sent.',
     maskedEmail: masked,
-    maskedContact: masked,
-    devOtp: devOtpVal
+    maskedContact: masked
   });
 });
 
 // POST /api/auth/verify-reset-otp: Verifies 6-digit email reset OTP and issues temporary single-use reset authorization token
-app.post('/api/auth/verify-reset-otp', createRateLimiter(10), async (req: Request, res: Response) => {
+app.post('/api/auth/verify-reset-otp', createRateLimiter(8, 15 * 60_000, { bucketKey: 'auth-verify-reset-otp', identifierExtractor: (req) => req.body?.email }), async (req: Request, res: Response) => {
   const rawEmailInput = req.body?.email ?? req.body?.identifier;
   const { otp } = req.body || {};
   if (!rawEmailInput || !otp) {
@@ -2397,7 +2688,7 @@ app.post('/api/auth/verify-reset-otp', createRateLimiter(10), async (req: Reques
     if (isNeonDatabaseConfigured()) {
       const pool = requirePostgresPool();
       const resUser = await pool.query(
-        `SELECT id, email, reset_otp_hash AS "otpHash",
+        `SELECT id, email, role, reset_otp_hash AS "otpHash",
                 EXTRACT(EPOCH FROM reset_otp_expires_at) * 1000 AS "otpExpiresAtMs",
                 reset_otp_attempts AS "otpAttempts"
          FROM public.printflow_users
@@ -2415,7 +2706,7 @@ app.post('/api/auth/verify-reset-otp', createRateLimiter(10), async (req: Reques
       userRecord = IN_MEMORY_AUTH_USERS.get(cleanEmail)!;
     }
 
-    if (!userRecord) {
+    if (!userRecord || userRecord.role === 'ADMIN' || cleanEmail === ADMIN_EMAIL) {
       return res.status(400).json({ success: false, error: 'Invalid or expired verification code.' });
     }
 
@@ -2509,7 +2800,7 @@ app.post('/api/auth/verify-reset-otp', createRateLimiter(10), async (req: Reques
 });
 
 // POST /api/auth/resend-reset-otp: Resends email reset OTP with cooldown and rate limits
-app.post('/api/auth/resend-reset-otp', createRateLimiter(5), async (req: Request, res: Response) => {
+app.post('/api/auth/resend-reset-otp', createRateLimiter(5, 15 * 60_000, { bucketKey: 'auth-resend-reset-otp', identifierExtractor: (req) => req.body?.email }), async (req: Request, res: Response) => {
   const rawEmailInput = req.body?.email ?? req.body?.identifier;
   if (!rawEmailInput || typeof rawEmailInput !== 'string') {
     return res.status(400).json({ success: false, error: 'Email address is required.' });
@@ -2523,8 +2814,6 @@ app.post('/api/auth/resend-reset-otp', createRateLimiter(5), async (req: Request
     });
   }
 
-  let devOtpVal: string | undefined;
-
   try {
     let userRecord: any = null;
     let isDb = false;
@@ -2532,7 +2821,7 @@ app.post('/api/auth/resend-reset-otp', createRateLimiter(5), async (req: Request
     if (isNeonDatabaseConfigured()) {
       const pool = requirePostgresPool();
       const resUser = await pool.query(
-        `SELECT id, email,
+        `SELECT id, email, role,
                 EXTRACT(EPOCH FROM reset_otp_last_resent_at) * 1000 AS "lastResentAtMs",
                 reset_otp_resend_count AS "resendCount"
          FROM public.printflow_users
@@ -2550,8 +2839,8 @@ app.post('/api/auth/resend-reset-otp', createRateLimiter(5), async (req: Request
       userRecord = IN_MEMORY_AUTH_USERS.get(cleanEmail)!;
     }
 
-    if (!userRecord) {
-      // Do not expose whether email is registered
+    if (!userRecord || userRecord.role === 'ADMIN' || cleanEmail === ADMIN_EMAIL) {
+      // Do not expose whether email is registered or allow admin OTP resend
       return res.json({
         success: true,
         message: 'If an account is registered with this email address, a new verification code has been sent.'
@@ -2597,7 +2886,7 @@ app.post('/api/auth/resend-reset-otp', createRateLimiter(5), async (req: Request
       await pool.query(
         `UPDATE public.printflow_users 
          SET reset_otp_hash = $1, reset_otp_expires_at = $2, reset_otp_attempts = 0, reset_otp_resend_count = $3, reset_otp_last_resent_at = NOW(), updated_at = NOW() 
-         WHERE LOWER(email) = $4`,
+         WHERE LOWER(email) = $4 AND role != 'ADMIN'`,
         [otpHash, otpExpiresAt, newResendCount, targetEmail]
       );
     }
@@ -2614,13 +2903,11 @@ app.post('/api/auth/resend-reset-otp', createRateLimiter(5), async (req: Request
       });
     }
 
-    const sent = await sendOtpEmailViaResend(targetEmail, rawOtp);
-    devOtpVal = process.env.NODE_ENV !== 'production' || !sent ? rawOtp : undefined;
+    await sendOtpEmailViaResend(targetEmail, rawOtp);
 
     return res.json({
       success: true,
-      message: 'New verification code sent to your email address.',
-      devOtp: devOtpVal
+      message: 'New verification code sent to your email address.'
     });
   } catch (err) {
     logger.error('Resend reset OTP failed:', { error: deepRedact(err) });
@@ -2629,7 +2916,7 @@ app.post('/api/auth/resend-reset-otp', createRateLimiter(5), async (req: Request
 });
 
 // POST /api/auth/reset-password: Consumes cryptographic reset authorization token and updates user password securely
-app.post('/api/auth/reset-password', createRateLimiter(5), async (req: Request, res: Response) => {
+app.post('/api/auth/reset-password', createRateLimiter(5, 15 * 60_000, { bucketKey: 'auth-reset-password', identifierExtractor: (req) => req.body?.email }), async (req: Request, res: Response) => {
   const { resetToken, newPassword } = req.body || {};
   if (!resetToken || !newPassword) {
     return res.status(400).json({ success: false, error: 'Reset token and new password are required.' });
@@ -2663,8 +2950,8 @@ app.post('/api/auth/reset-password', createRateLimiter(5), async (req: Request, 
     if (isNeonDatabaseConfigured()) {
       const pool = requirePostgresPool();
       const userRes = await pool.query(
-        `SELECT id, email FROM public.printflow_users 
-         WHERE reset_auth_token_hash = $1 AND reset_auth_token_expires_at > NOW() 
+        `SELECT id, email, role FROM public.printflow_users 
+         WHERE reset_auth_token_hash = $1 AND reset_auth_token_expires_at > NOW() AND role != 'ADMIN'
          LIMIT 1`,
         [tokenHash]
       );
@@ -2675,7 +2962,7 @@ app.post('/api/auth/reset-password', createRateLimiter(5), async (req: Request, 
         await pool.query(
           `UPDATE public.printflow_users 
            SET password_hash = $1, reset_auth_token_hash = NULL, reset_auth_token_expires_at = NULL, updated_at = NOW() 
-           WHERE id = $2`,
+           WHERE id = $2 AND role != 'ADMIN'`,
           [newPasswordHash, userIdForRevocation]
         );
       }
@@ -2683,6 +2970,7 @@ app.post('/api/auth/reset-password', createRateLimiter(5), async (req: Request, 
 
     // Also synchronize / check in-memory auth users
     for (const [emailKey, memUser] of IN_MEMORY_AUTH_USERS.entries()) {
+      if (memUser.role === 'ADMIN') continue;
       if (
         (isFound && emailKey === targetEmail) ||
         (!isFound &&
@@ -2765,7 +3053,7 @@ async function testRazorpayHandshake(keyId: string, keySecret: string): Promise<
  * Returns safe public metadata for checkout initialization and status ribbons.
  * Accessible to all tenants and subscribers without exposing secrets.
  */
-app.get(['/api/payment/public-config', '/api/payments/public-config'], async (_req: Request, res: Response) => {
+app.get(['/api/payment/public-config', '/api/payments/public-config'], createRateLimiter(90, 60_000, { bucketKey: 'payment-public-config' }), async (_req: Request, res: Response) => {
   try {
     const config = await getPlatformPaymentConfig();
     if (!config) {
@@ -2852,7 +3140,7 @@ async function getMaintenanceState(): Promise<{ enabled: boolean; scope: string;
   return { enabled: false, scope: 'entire_application', message: 'System maintenance in progress.' };
 }
 
-app.get('/api/maintenance/status', async (_req: Request, res: Response) => {
+app.get('/api/maintenance/status', createRateLimiter(90, 60_000, { bucketKey: 'maintenance-status' }), async (_req: Request, res: Response) => {
   try {
     const maintenance = await getMaintenanceState();
     return res.json({ success: true, maintenance });
@@ -2881,7 +3169,7 @@ app.get('/api/admin/maintenance', requireAdminRole, async (_req: Request, res: R
   }
 });
 
-app.post('/api/admin/maintenance', requireAdminRole, createRateLimiter(15), async (req: Request, res: Response) => {
+app.post('/api/admin/maintenance', requireAdminRole, createRateLimiter(15, 60_000, { bucketKey: 'admin-maintenance-write' }), async (req: Request, res: Response) => {
   try {
     const { enabled, scope, message, expectedEndAt } = req.body;
     if (typeof enabled !== 'boolean' || !['entire_application', 'customer_facing', 'shop_owner'].includes(scope) || typeof message !== 'string') {
@@ -2937,6 +3225,7 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
     path.startsWith('/api/webhooks/razorpay') ||
     path.startsWith('/api/auth/session') ||
     path.startsWith('/api/admin/') ||
+    path === ADMIN_API_LOGIN_PATH ||
     path.startsWith('/api/maintenance/') ||
     path.startsWith('/api/auth/login') ||
     path.startsWith('/api/auth/logout')
@@ -2985,7 +3274,7 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
  * Retrieves safe metadata for the platform Razorpay payment configuration.
  * Never exposes Key Secret to the browser.
  */
-app.get('/api/payment/platform-config', requireAdminRole, async (_req: Request, res: Response) => {
+app.get('/api/payment/platform-config', createRateLimiter(60, 60_000, { bucketKey: 'admin-platform-config-read' }), requireAdminRole, async (_req: Request, res: Response) => {
   try {
     const isConfigured = Boolean(RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET);
     const mode = (RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'live' : 'test') as 'live' | 'test';
@@ -3016,7 +3305,7 @@ app.get('/api/payment/platform-config', requireAdminRole, async (_req: Request, 
  * Deprecated / Disabled for direct credential input.
  * Master credentials are now exclusively configured via server environment variables.
  */
-app.post('/api/payment/platform-config', requireAdminRole, async (_req: Request, res: Response) => {
+app.post('/api/payment/platform-config', createRateLimiter(15, 60_000, { bucketKey: 'admin-platform-config-write' }), requireAdminRole, async (_req: Request, res: Response) => {
   return res.status(400).json({
     success: false,
     error: 'Razorpay Master Credentials are now managed exclusively via server-side environment variables (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET). Updating credentials via web forms has been disabled for security compliance.'
@@ -3027,7 +3316,7 @@ app.post('/api/payment/platform-config', requireAdminRole, async (_req: Request,
  * POST /api/payment/platform-config/test
  * Tests the active environment-configured platform gateway handshake and reports status and latency.
  */
-app.post('/api/payment/platform-config/test', requireAdminRole, async (_req: Request, res: Response) => {
+app.post('/api/payment/platform-config/test', createRateLimiter(15, 60_000, { bucketKey: 'admin-platform-config-test' }), requireAdminRole, async (_req: Request, res: Response) => {
   try {
     if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
       return res.status(400).json({
@@ -3064,7 +3353,7 @@ app.post('/api/payment/platform-config/test', requireAdminRole, async (_req: Req
  * Retrieves safe metadata for a specific shop's payment integration.
  * Enforces strict tenant isolation. Never exposes Key Secret.
  */
-app.get('/api/shop/:shopId/payment-settings', async (req: Request, res: Response) => {
+app.get('/api/shop/:shopId/payment-settings', createRateLimiter(30, 60_000, { bucketKey: 'shop-payment-settings-read' }), async (req: Request, res: Response) => {
   try {
     const rawShopId = req.params.shopId;
     const user = (req as any).authenticatedUser as ServerSession | undefined;
@@ -3118,7 +3407,7 @@ app.get('/api/shop/:shopId/payment-settings', async (req: Request, res: Response
  * Updates payment credentials for a specific shop.
  * Enforces strict tenant isolation and AES-256-GCM authenticated encryption.
  */
-app.post('/api/shop/:shopId/payment-settings', createRateLimiter(20), async (req: Request, res: Response) => {
+app.post('/api/shop/:shopId/payment-settings', createRateLimiter(20, 60_000, { bucketKey: 'shop-payment-settings-write' }), async (req: Request, res: Response) => {
   try {
     const rawShopId = req.params.shopId;
     const user = (req as any).authenticatedUser as ServerSession | undefined;
@@ -3196,7 +3485,7 @@ app.post('/api/shop/:shopId/payment-settings', createRateLimiter(20), async (req
  * POST /api/shop/:shopId/payment-settings/test
  * Tests the shop gateway handshake with either submitted or stored credentials.
  */
-app.post('/api/shop/:shopId/payment-settings/test', async (req: Request, res: Response) => {
+app.post('/api/shop/:shopId/payment-settings/test', createRateLimiter(15, 60_000, { bucketKey: 'shop-payment-settings-test' }), async (req: Request, res: Response) => {
   try {
     const rawShopId = req.params.shopId;
     const user = (req as any).authenticatedUser as ServerSession | undefined;
@@ -3253,7 +3542,7 @@ app.post('/api/shop/:shopId/payment-settings/test', async (req: Request, res: Re
  * DELETE /api/shop/:shopId/payment-settings
  * Removes custom payment integration for a specific shop.
  */
-app.delete('/api/shop/:shopId/payment-settings', async (req: Request, res: Response) => {
+app.delete('/api/shop/:shopId/payment-settings', createRateLimiter(15, 60_000, { bucketKey: 'shop-payment-settings-delete' }), async (req: Request, res: Response) => {
   try {
     const rawShopId = req.params.shopId;
     const user = (req as any).authenticatedUser as ServerSession | undefined;
@@ -3283,7 +3572,7 @@ app.delete('/api/shop/:shopId/payment-settings', async (req: Request, res: Respo
  * GET /api/shop/:shopId/retention
  * Retrieves retention settings for a shop.
  */
-app.get('/api/shop/:shopId/retention', async (req: Request, res: Response) => {
+app.get('/api/shop/:shopId/retention', createRateLimiter(30, 60_000, { bucketKey: 'shop-retention-read' }), async (req: Request, res: Response) => {
   try {
     const rawShopId = req.params.shopId;
     const user = (req as any).authenticatedUser as ServerSession | undefined;
@@ -3315,7 +3604,7 @@ app.get('/api/shop/:shopId/retention', async (req: Request, res: Response) => {
  * PUT /api/shop/:shopId/retention
  * Updates retention settings for a shop.
  */
-app.put('/api/shop/:shopId/retention', createRateLimiter(20), async (req: Request, res: Response) => {
+app.put('/api/shop/:shopId/retention', createRateLimiter(20, 60_000, { bucketKey: 'shop-retention-write' }), async (req: Request, res: Response) => {
   try {
     const rawShopId = req.params.shopId;
     const user = (req as any).authenticatedUser as ServerSession | undefined;
@@ -3409,7 +3698,7 @@ setInterval(runAutomaticDocumentRetentionCleanup, 5 * 60 * 1000);
 // Call Razorpay API: POST https://api.razorpay.com/v1/orders
 // Request: { amount (paise), currency, receipt, shopId, flow }
 // ============================================================================
-app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(30), async (req: Request, res: Response) => {
+app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(30, 60_000, { bucketKey: 'payment-create-order' }), async (req: Request, res: Response) => {
   try {
     let { amount, currency = 'INR', receipt, notes, printJobId, shopId, keyId, flow } = req.body;
 
@@ -3698,7 +3987,7 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
 // Algorithm: HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET)
 // Return success only if signature matches
 // ============================================================================
-app.post(['/api/verify-payment', '/api/payment/verify'], createRateLimiter(45), async (req: Request, res: Response) => {
+app.post(['/api/verify-payment', '/api/payment/verify'], createRateLimiter(45, 60_000, { bucketKey: 'payment-verify' }), async (req: Request, res: Response) => {
   try {
     const order_id = req.body.order_id || req.body.razorpay_order_id;
     const payment_id = req.body.payment_id || req.body.razorpay_payment_id;
@@ -3860,7 +4149,7 @@ app.post(['/api/verify-payment', '/api/payment/verify'], createRateLimiter(45), 
  * Checks payment status for a server-created Razorpay order.
  * Handles pending, authorized, captured, paid, failed, and cancelled states correctly.
  */
-app.all(['/api/payment/check-status', '/api/payment/order-status/:orderId?'], createRateLimiter(60), async (req: Request, res: Response) => {
+app.all(['/api/payment/check-status', '/api/payment/order-status/:orderId?'], createRateLimiter(60, 60_000, { bucketKey: 'payment-order-status' }), async (req: Request, res: Response) => {
   try {
     const orderId = (req.params.orderId || req.body?.orderId || req.query.orderId || req.body?.order_id || req.query.order_id) as string;
     const shopId = (req.body?.shopId || req.query.shopId) as string;
@@ -4019,7 +4308,7 @@ app.all(['/api/payment/check-status', '/api/payment/order-status/:orderId?'], cr
  * Reconciles payment for an order where the customer completed payment
  * or where UI did not receive the callback.
  */
-app.post('/api/payment/reconcile', createRateLimiter(45), async (req: Request, res: Response) => {
+app.post('/api/payment/reconcile', createRateLimiter(45, 60_000, { bucketKey: 'payment-reconcile' }), async (req: Request, res: Response) => {
   try {
     const { orderId, paymentId, shopId } = req.body;
 
@@ -4179,7 +4468,7 @@ app.post('/api/payment/reconcile', createRateLimiter(45), async (req: Request, r
 // ============================================================================
 // 3. SECURE FILE UPLOAD & TENANT STORAGE VALIDATION (MAGIC BYTES & PRIVATE VAULT)
 // ============================================================================
-app.post('/api/upload', createRateLimiter(30), async (req: Request, res: Response) => {
+app.post('/api/upload', createRateLimiter(30, 60_000, { bucketKey: 'file-upload' }), async (req: Request, res: Response) => {
   try {
     const { filename, fileBase64, shopId, jobId, declaredMime } = req.body;
 
@@ -4299,12 +4588,10 @@ app.post('/api/upload', createRateLimiter(30), async (req: Request, res: Respons
 });
 
 // Secure Private File Download: Enforces Tenant IDOR & Signed Token Check
-app.get('/api/storage/files/:shopId/:jobId/:fileId', async (req: Request, res: Response) => {
+app.get('/api/storage/files/:shopId/:jobId/:fileId', createRateLimiter(60, 60_000, { bucketKey: 'storage-file-download' }), async (req: Request, res: Response) => {
   try {
     const { shopId, jobId, fileId } = req.params;
     const token = req.query.token as string;
-    const requesterShopId = req.headers['x-shop-id'] as string;
-    const requesterRole = req.headers['x-user-role'] as string;
 
     // Check signed token
     if (!token || !token.includes('.')) {
@@ -4392,7 +4679,7 @@ app.get('/api/storage/files/:shopId/:jobId/:fileId', async (req: Request, res: R
  * Imports a remote print file by URL with strict Anti-SSRF, DNS Rebinding defense,
  * size capping, and binary signature verification.
  */
-app.post('/api/fetch-remote-document', createRateLimiter(20), async (req: Request, res: Response) => {
+app.post('/api/fetch-remote-document', createRateLimiter(15, 60_000, { bucketKey: 'fetch-remote-document' }), async (req: Request, res: Response) => {
   try {
     const { url, shopId, jobId, filename } = req.body;
 
@@ -4512,7 +4799,7 @@ app.post('/api/fetch-remote-document', createRateLimiter(20), async (req: Reques
  * Validates a custom external webhook URL for shop notification integrations.
  * Strictly blocks internal and private addresses.
  */
-app.post('/api/validate-webhook-url', requireShopOwnerRole, async (req: Request, res: Response) => {
+app.post('/api/validate-webhook-url', createRateLimiter(20, 60_000, { bucketKey: 'validate-webhook-url' }), requireShopOwnerRole, async (req: Request, res: Response) => {
   try {
     const { webhookUrl } = req.body;
     if (!webhookUrl || typeof webhookUrl !== 'string') {
@@ -4542,7 +4829,7 @@ app.post('/api/validate-webhook-url', requireShopOwnerRole, async (req: Request,
 /**
  * Platform Admin: View structured sanitized audit logs without credential leakage.
  */
-app.get('/api/admin/audit-logs', requireAdminRole, (_req: Request, res: Response) => {
+app.get('/api/admin/audit-logs', createRateLimiter(60, 60_000, { bucketKey: 'admin-audit-logs-read' }), requireAdminRole, (_req: Request, res: Response) => {
   const logs = logger.getAuditLogs();
   return res.json({
     success: true,
@@ -4554,7 +4841,7 @@ app.get('/api/admin/audit-logs', requireAdminRole, (_req: Request, res: Response
 /**
  * Platform Admin: Purge old audit logs per data retention and privacy policies.
  */
-app.post('/api/admin/audit-logs/purge', requireAdminRole, (req: Request, res: Response) => {
+app.post('/api/admin/audit-logs/purge', createRateLimiter(5, 60_000, { bucketKey: 'admin-audit-logs-purge' }), requireAdminRole, (req: Request, res: Response) => {
   const maxAgeHours = parseInt(req.body?.maxAgeHours, 10) || 24;
   const purgedCount = logger.purgeExpiredAuditLogs(maxAgeHours * 3600000);
   return res.json({
@@ -4568,7 +4855,7 @@ app.post('/api/admin/audit-logs/purge', requireAdminRole, (req: Request, res: Re
 // ============================================================================
 // 3. RAZORPAY WEBHOOK HANDLER (IDEMPOTENT & SIGNATURE-VERIFIED)
 // ============================================================================
-app.post(['/api/payment/webhook', '/api/payments/webhook', '/api/webhooks/razorpay'], async (req: Request, res: Response) => {
+app.post(['/api/payment/webhook', '/api/payments/webhook', '/api/webhooks/razorpay'], createRateLimiter(180, 60_000, { bucketKey: 'payment-webhook' }), async (req: Request, res: Response) => {
   try {
     const signature = req.headers['x-razorpay-signature'] as string;
     const eventId = req.headers['x-razorpay-event-id'] as string;
@@ -4749,7 +5036,7 @@ app.post(['/api/payment/webhook', '/api/payments/webhook', '/api/webhooks/razorp
 // ============================================================================
 // 3.5. PLATFORM ADMIN SAAS BILLING & GATEWAY VERIFICATION APIS
 // ============================================================================
-app.post('/api/admin/billing/verify-gateway', requireAdminRole, (req: Request, res: Response) => {
+app.post('/api/admin/billing/verify-gateway', createRateLimiter(15, 60_000, { bucketKey: 'admin-billing-verify-gateway' }), requireAdminRole, (req: Request, res: Response) => {
   try {
     const adminKey = req.body?.keyId || RAZORPAY_KEY_ID;
     const isConfigured = Boolean(adminKey && RAZORPAY_KEY_SECRET);
@@ -4786,7 +5073,7 @@ app.post('/api/admin/billing/verify-gateway', requireAdminRole, (req: Request, r
   }
 });
 
-app.post('/api/admin/plans/validate', requireAdminRole, (req: Request, res: Response) => {
+app.post('/api/admin/plans/validate', createRateLimiter(30, 60_000, { bucketKey: 'admin-plans-validate' }), requireAdminRole, (req: Request, res: Response) => {
   const plan = req.body;
   if (!plan || typeof plan !== 'object') {
     return res.status(400).json({ success: false, error: 'Invalid plan payload.' });
@@ -4827,7 +5114,7 @@ let serverSupportSettings = {
   updatedAt: new Date().toISOString()
 };
 
-app.get('/api/admin/support/tickets', requireAdminRole, (req: Request, res: Response) => {
+app.get('/api/admin/support/tickets', createRateLimiter(60, 60_000, { bucketKey: 'admin-support-tickets-read' }), requireAdminRole, (req: Request, res: Response) => {
   try {
     const { search, status, priority, category, shopId, assignedAdminId } = req.query;
     let filtered = [...serverSupportTickets];
@@ -4880,7 +5167,7 @@ app.get('/api/admin/support/tickets', requireAdminRole, (req: Request, res: Resp
   }
 });
 
-app.post('/api/admin/support/tickets', requireAdminRole, (req: Request, res: Response) => {
+app.post('/api/admin/support/tickets', createRateLimiter(30, 60_000, { bucketKey: 'admin-support-tickets-write' }), requireAdminRole, (req: Request, res: Response) => {
   try {
     const payload = req.body;
     if (!payload.subject || typeof payload.subject !== 'string' || !payload.subject.trim()) {
@@ -4953,7 +5240,7 @@ app.post('/api/admin/support/tickets', requireAdminRole, (req: Request, res: Res
   }
 });
 
-app.post('/api/admin/support/tickets/:id/reply', requireAdminRole, (req: Request, res: Response) => {
+app.post('/api/admin/support/tickets/:id/reply', createRateLimiter(30, 60_000, { bucketKey: 'admin-support-tickets-reply' }), requireAdminRole, (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { message, isInternalNote } = req.body;
@@ -4994,11 +5281,11 @@ app.post('/api/admin/support/tickets/:id/reply', requireAdminRole, (req: Request
   }
 });
 
-app.get('/api/admin/support/settings', requireAdminRole, (req: Request, res: Response) => {
+app.get('/api/admin/support/settings', createRateLimiter(60, 60_000, { bucketKey: 'admin-support-settings-read' }), requireAdminRole, (req: Request, res: Response) => {
   return res.json({ success: true, settings: serverSupportSettings });
 });
 
-app.put('/api/admin/support/settings', requireAdminRole, (req: Request, res: Response) => {
+app.put('/api/admin/support/settings', createRateLimiter(20, 60_000, { bucketKey: 'admin-support-settings-write' }), requireAdminRole, (req: Request, res: Response) => {
   try {
     const updates = req.body;
     serverSupportSettings = {
@@ -5017,10 +5304,13 @@ app.put('/api/admin/support/settings', requireAdminRole, (req: Request, res: Res
 // ============================================================================
 const userMfaStore = new Map<string, { secretBase32: string; hashedRecoveryCodes: string[]; isEnabled: boolean }>();
 
-// MFA Enrollment
-app.post('/api/auth/mfa/enroll', createRateLimiter(10), (req: Request, res: Response) => {
-  const email = (req.body?.email || req.headers['x-user-email'] || 'user@printflow.io') as string;
-  const enrollment = generateMfaEnrollment(email);
+// MFA Enrollment (Requires Authenticated Session)
+app.post('/api/auth/mfa/enroll', createRateLimiter(10, 5 * 60_000, { bucketKey: 'auth-mfa-enroll' }), (req: Request, res: Response) => {
+  const user = (req as any).authenticatedUser as ServerSession | undefined;
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Authentication required for MFA enrollment.' });
+  }
+  const enrollment = generateMfaEnrollment(user.email);
   return res.json({
     success: true,
     secretBase32: enrollment.secretBase32,
@@ -5028,9 +5318,13 @@ app.post('/api/auth/mfa/enroll', createRateLimiter(10), (req: Request, res: Resp
   });
 });
 
-// MFA Verification & Activation
-app.post('/api/auth/mfa/verify', createRateLimiter(10), (req: Request, res: Response) => {
-  const { secretBase32, token, userId } = req.body;
+// MFA Verification & Activation (Requires Authenticated Session)
+app.post('/api/auth/mfa/verify', createRateLimiter(8, 5 * 60_000, { bucketKey: 'auth-mfa-verify' }), (req: Request, res: Response) => {
+  const user = (req as any).authenticatedUser as ServerSession | undefined;
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Authentication required to activate MFA.' });
+  }
+  const { secretBase32, token } = req.body || {};
   if (!secretBase32 || !token) {
     return res.status(400).json({ success: false, error: 'Missing secret or verification code' });
   }
@@ -5041,13 +5335,11 @@ app.post('/api/auth/mfa/verify', createRateLimiter(10), (req: Request, res: Resp
   }
 
   const { plainCodes, hashedCodes } = generateRecoveryCodes(8);
-  if (userId) {
-    userMfaStore.set(userId, {
-      secretBase32,
-      hashedRecoveryCodes: hashedCodes,
-      isEnabled: true
-    });
-  }
+  userMfaStore.set(user.userId, {
+    secretBase32,
+    hashedRecoveryCodes: hashedCodes,
+    isEnabled: true
+  });
 
   return res.json({
     success: true,
@@ -5056,10 +5348,14 @@ app.post('/api/auth/mfa/verify', createRateLimiter(10), (req: Request, res: Resp
   });
 });
 
-// MFA Authenticate (2nd factor login)
-app.post('/api/auth/mfa/authenticate', createRateLimiter(10), (req: Request, res: Response) => {
-  const { userId, code } = req.body;
-  const mfaData = userMfaStore.get(userId);
+// MFA Authenticate (2nd factor verification bound strictly to authenticated user's real role)
+app.post('/api/auth/mfa/authenticate', createRateLimiter(8, 5 * 60_000, { bucketKey: 'auth-mfa-authenticate' }), (req: Request, res: Response) => {
+  const user = (req as any).authenticatedUser as ServerSession | undefined;
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Primary authentication required before MFA step-up.' });
+  }
+  const { code } = req.body || {};
+  const mfaData = userMfaStore.get(user.userId);
 
   if (!mfaData || !mfaData.isEnabled) {
     return res.status(400).json({ success: false, error: 'MFA is not enabled for this user' });
@@ -5069,8 +5365,11 @@ app.post('/api/auth/mfa/authenticate', createRateLimiter(10), (req: Request, res
   const totpCheck = verifyTotpCode(mfaData.secretBase32, code);
   if (totpCheck.valid) {
     const accessToken = createJwtAccessToken({
-      userId,
-      role: 'ADMIN',
+      userId: user.userId,
+      email: user.email,
+      role: user.role,
+      shopId: user.shopId,
+      fullName: user.fullName,
       isMfaVerified: true,
       secret: JWT_SECRET
     });
@@ -5082,8 +5381,11 @@ app.post('/api/auth/mfa/authenticate', createRateLimiter(10), (req: Request, res
   if (recCheck.valid) {
     mfaData.hashedRecoveryCodes = recCheck.remainingHashedCodes;
     const accessToken = createJwtAccessToken({
-      userId,
-      role: 'ADMIN',
+      userId: user.userId,
+      email: user.email,
+      role: user.role,
+      shopId: user.shopId,
+      fullName: user.fullName,
       isMfaVerified: true,
       secret: JWT_SECRET
     });
@@ -5099,10 +5401,16 @@ app.post('/api/auth/mfa/authenticate', createRateLimiter(10), (req: Request, res
 });
 
 // Password Reset Request (Anti-Enumeration)
-app.post('/api/auth/password-reset/request', createRateLimiter(5), (req: Request, res: Response) => {
-  const { email } = req.body;
+app.post('/api/auth/password-reset/request', createRateLimiter(5, 15 * 60_000, { bucketKey: 'auth-pw-reset-request', identifierExtractor: (req) => req.body?.email }), (req: Request, res: Response) => {
+  const { email } = req.body || {};
   if (email && typeof email === 'string') {
-    createPasswordResetToken(email);
+    const cleanEmail = email.trim().toLowerCase();
+    if (cleanEmail !== ADMIN_EMAIL) {
+      const mem = IN_MEMORY_AUTH_USERS.get(cleanEmail);
+      if (!mem || mem.role !== 'ADMIN') {
+        createPasswordResetToken(cleanEmail);
+      }
+    }
   }
   // Constant-response preventing account enumeration
   return res.json({
@@ -5111,11 +5419,15 @@ app.post('/api/auth/password-reset/request', createRateLimiter(5), (req: Request
   });
 });
 
-// Password Reset Confirmation
-app.post('/api/auth/password-reset/confirm', createRateLimiter(10), async (req: Request, res: Response) => {
-  const { token, newPassword } = req.body;
-  if (!token || !newPassword || newPassword.length < 6) {
-    return res.status(400).json({ success: false, error: 'Valid token and minimum 6 character password required' });
+// Password Reset Confirmation (Enforces complexity & excludes ADMIN)
+app.post('/api/auth/password-reset/confirm', createRateLimiter(5, 15 * 60_000, { bucketKey: 'auth-pw-reset-confirm', identifierExtractor: (req) => req.body?.email }), async (req: Request, res: Response) => {
+  const { token, newPassword } = req.body || {};
+  if (!token || typeof newPassword !== 'string' || newPassword.length < 12) {
+    return res.status(400).json({ success: false, error: 'Valid token and minimum 12 character password required.' });
+  }
+  const hasComplexity = /[A-Z]/.test(newPassword) && /[a-z]/.test(newPassword) && /\d/.test(newPassword) && /[^A-Za-z0-9]/.test(newPassword);
+  if (!hasComplexity) {
+    return res.status(400).json({ success: false, error: 'Password must include uppercase, lowercase, number, and special character.' });
   }
 
   const result = consumePasswordResetToken(token);
@@ -5123,26 +5435,35 @@ app.post('/api/auth/password-reset/confirm', createRateLimiter(10), async (req: 
     return res.status(400).json({ success: false, error: result.error || 'Password reset token invalid or expired' });
   }
 
+  const targetEmail = result.email.toLowerCase();
+  if (targetEmail === ADMIN_EMAIL) {
+    return res.status(403).json({ success: false, error: 'Password reset is prohibited for this account.' });
+  }
+
   const hashedPassword = hashPassword(newPassword);
 
   if (isNeonDatabaseConfigured()) {
     try {
       const pool = requirePostgresPool();
-      await pool.query(
+      const updRes = await pool.query(
         `UPDATE public.printflow_users
          SET password_hash = $1, updated_at = NOW()
-         WHERE LOWER(email) = $2`,
-        [hashedPassword, result.email.toLowerCase()]
+         WHERE LOWER(email) = $2 AND role != 'ADMIN'
+         RETURNING id`,
+        [hashedPassword, targetEmail]
       );
+      if (updRes.rowCount && updRes.rows[0]?.id) {
+        destroyAllSessionsForUser(updRes.rows[0].id);
+      }
     } catch (err) {
-      logger.error('Failed to update reset password in Supabase DB:', { email: result.email, error: deepRedact(err) });
+      logger.error('Failed to update reset password in Supabase DB:', { email: targetEmail, error: deepRedact(err) });
     }
   }
 
   return res.json({
     success: true,
     message: 'Password reset successful. You can now login with your new credentials.',
-    accountEmail: result.email,
+    accountEmail: targetEmail,
     passwordStoredSecurely: true
   });
 });
@@ -5188,7 +5509,7 @@ interface BackendPrintJob {
   pagesPrinted?: number;
 }
 
-app.post('/api/customer/print-jobs', createRateLimiter(30), async (req: Request, res: Response) => {
+app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 'customer-print-jobs-create' }), async (req: Request, res: Response) => {
   if (!isNeonDatabaseConfigured() || !isSharedPoolConfigured()) {
     return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
   }
@@ -5489,7 +5810,7 @@ app.post('/api/customer/print-jobs', createRateLimiter(30), async (req: Request,
   }
 });
 
-app.get('/api/customer/print-jobs/:id/status', createRateLimiter(60), async (req: Request, res: Response) => {
+app.get('/api/customer/print-jobs/:id/status', createRateLimiter(60, 60_000, { bucketKey: 'customer-print-job-status' }), async (req: Request, res: Response) => {
   if (!isNeonDatabaseConfigured()) {
     return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
   }
@@ -5560,7 +5881,7 @@ app.get('/api/customer/print-jobs/:id/status', createRateLimiter(60), async (req
 });
 
 // Agent Pairing / Setup Endpoint
-app.post('/api/agent/pair', createRateLimiter(30), async (req: Request, res: Response) => {
+app.post('/api/agent/pair', createRateLimiter(20, 60_000, { bucketKey: 'agent-pair' }), async (req: Request, res: Response) => {
   const { shopId, authToken, deviceName, agentId } = req.body;
   if (
     typeof shopId !== 'string' ||
@@ -5602,13 +5923,11 @@ app.post('/api/agent/pair', createRateLimiter(30), async (req: Request, res: Res
 });
 
 // Agent Disconnect Endpoint (Supports M2M Desktop Agent and Authenticated Shop Owner)
-app.post('/api/agent/disconnect', createRateLimiter(30), async (req: Request, res: Response) => {
+app.post('/api/agent/disconnect', createRateLimiter(20, 60_000, { bucketKey: 'agent-disconnect' }), async (req: Request, res: Response) => {
   const agentToken = req.headers['x-agent-token'] as string | undefined;
   const agentId = req.headers['x-agent-id'] as string | undefined;
   const { shopId } = req.body || {};
   const user = (req as any).authenticatedUser as ServerSession | undefined;
-  const roleHeader = req.headers['x-user-role'] as string | undefined;
-  const shopIdHeader = req.headers['x-shop-id'] as string | undefined;
 
   // 1. Desktop Agent M2M Disconnect
   if (agentId && agentToken) {
@@ -5625,20 +5944,25 @@ app.post('/api/agent/disconnect', createRateLimiter(30), async (req: Request, re
     }
   }
 
-  // 2. Authenticated Shop Owner Disconnect from Web UI
-  const isSuperAdmin = user?.role === 'ADMIN' || roleHeader === 'ADMIN';
-  const isShopOwner =
-    user?.role === 'SHOP_OWNER' ||
-    roleHeader === 'SHOP_OWNER' ||
-    process.env.NODE_ENV !== 'production';
+  // 2. Authenticated Admin or Shop Owner Disconnect from Web UI
+  const isSuperAdmin = user?.role === 'ADMIN';
+  const isShopOwner = user?.role === 'SHOP_OWNER' && Boolean(user.shopId);
 
   if (!isSuperAdmin && !isShopOwner) {
     return res.status(401).json({ success: false, error: 'Agent credentials or shop owner authorization required.' });
   }
 
-  const effectiveShopId = shopId || user?.shopId || shopIdHeader;
+  const effectiveShopId = isSuperAdmin ? (shopId || user?.shopId) : user?.shopId;
   if (!effectiveShopId || typeof effectiveShopId !== 'string') {
     return res.status(400).json({ success: false, error: 'Shop ID is required to disconnect agent.' });
+  }
+
+  if (isShopOwner && shopId && shopId !== user?.shopId) {
+    const canonUser = await resolvePrintFlowShopId(user!.shopId!).catch(() => user!.shopId!);
+    const canonTarget = await resolvePrintFlowShopId(shopId).catch(() => shopId);
+    if (canonUser !== canonTarget) {
+      return res.status(403).json({ success: false, error: 'Cross-tenant access forbidden.' });
+    }
   }
 
   try {
@@ -5655,7 +5979,7 @@ app.post('/api/agent/disconnect', createRateLimiter(30), async (req: Request, re
 });
 
 // Query Active Print Agent Status for Shop (Used by Web Settings & Desktop UI)
-app.get('/api/agent/active-status', async (req: Request, res: Response) => {
+app.get('/api/agent/active-status', createRateLimiter(60, 60_000, { bucketKey: 'agent-active-status' }), async (req: Request, res: Response) => {
   const shopId = (req.query.shopId as string) || (req.headers['x-shop-id'] as string);
   if (!shopId) {
     return res.status(400).json({ success: false, error: 'Shop ID is required' });
@@ -5669,7 +5993,7 @@ app.get('/api/agent/active-status', async (req: Request, res: Response) => {
 });
 
 // Agent Heartbeat with M2M Token Validation & Resource Metrics Ingestion
-app.post('/api/agent/heartbeat', createRateLimiter(60), async (req: Request, res: Response) => {
+app.post('/api/agent/heartbeat', createRateLimiter(120, 60_000, { bucketKey: 'agent-heartbeat' }), async (req: Request, res: Response) => {
   const agentToken = req.headers['x-agent-token'] as string;
   const agentId = req.headers['x-agent-id'] as string;
   if (!agentToken || !agentId) {
@@ -5710,7 +6034,7 @@ app.post('/api/agent/heartbeat', createRateLimiter(60), async (req: Request, res
 });
 
 // Dedicated Agent Resource & Health Metrics Telemetry Ingestion
-app.post('/api/agent/health-report', createRateLimiter(60), async (req: Request, res: Response) => {
+app.post('/api/agent/health-report', createRateLimiter(120, 60_000, { bucketKey: 'agent-health-report' }), async (req: Request, res: Response) => {
   const agentToken = req.headers['x-agent-token'] as string;
   const agentId = req.headers['x-agent-id'] as string;
   if (!agentToken || !agentId) {
@@ -5745,7 +6069,7 @@ app.post('/api/agent/health-report', createRateLimiter(60), async (req: Request,
 });
 
 // GET /api/agent/monitoring/status - Get Agent Current Health & Status
-app.get('/api/agent/monitoring/status', async (req: Request, res: Response) => {
+app.get('/api/agent/monitoring/status', createRateLimiter(60, 60_000, { bucketKey: 'agent-monitoring-status' }), requireAdminOrOwnShop, async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const requestedShopId = req.query.shopId as string | undefined;
@@ -5771,7 +6095,7 @@ app.get('/api/agent/monitoring/status', async (req: Request, res: Response) => {
 });
 
 // GET /api/agent/monitoring/history - Get Agent Resource History Snapshots
-app.get('/api/agent/monitoring/history', async (req: Request, res: Response) => {
+app.get('/api/agent/monitoring/history', createRateLimiter(60, 60_000, { bucketKey: 'agent-monitoring-history' }), requireAdminOrOwnShop, async (req: Request, res: Response) => {
   try {
     const agentId = req.query.agentId as string;
     const requestedShopId = req.query.shopId as string | undefined;
@@ -5801,7 +6125,7 @@ app.get('/api/agent/monitoring/history', async (req: Request, res: Response) => 
 });
 
 // GET /api/agent/monitoring/alerts - Get Active or Historical Alerts
-app.get('/api/agent/monitoring/alerts', async (req: Request, res: Response) => {
+app.get('/api/agent/monitoring/alerts', createRateLimiter(60, 60_000, { bucketKey: 'agent-monitoring-alerts' }), requireAdminOrOwnShop, async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const requestedShopId = req.query.shopId as string | undefined;
@@ -5825,7 +6149,7 @@ app.get('/api/agent/monitoring/alerts', async (req: Request, res: Response) => {
 });
 
 // PATCH /api/agent/monitoring/alerts/:id/resolve - Resolve Alert
-app.patch('/api/agent/monitoring/alerts/:id/resolve', async (req: Request, res: Response) => {
+app.patch('/api/agent/monitoring/alerts/:id/resolve', createRateLimiter(30, 60_000, { bucketKey: 'agent-monitoring-alert-resolve' }), requireAdminOrOwnShop, async (req: Request, res: Response) => {
   try {
     const alertId = req.params.id;
     const user = (req as any).authenticatedUser as ServerSession | undefined;
@@ -5848,7 +6172,7 @@ app.patch('/api/agent/monitoring/alerts/:id/resolve', async (req: Request, res: 
 });
 
 // GET /api/shop/storage-usage - Get Shop Subscription Cloud Storage Usage & Quota
-app.get('/api/shop/storage-usage', async (req: Request, res: Response) => {
+app.get('/api/shop/storage-usage', createRateLimiter(60, 60_000, { bucketKey: 'shop-storage-usage' }), requireAdminOrOwnShop, async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const rawShopId = (req.query.shopId as string) || (req.headers['x-shop-id'] as string) || user?.shopId;
@@ -5878,7 +6202,7 @@ app.get('/api/shop/storage-usage', async (req: Request, res: Response) => {
 });
 
 // GET /api/admin/resource-overview - Platform Fleet & Storage Overview
-app.get('/api/admin/resource-overview', requireAdminRole, async (_req: Request, res: Response) => {
+app.get('/api/admin/resource-overview', createRateLimiter(60, 60_000, { bucketKey: 'admin-resource-overview' }), requireAdminRole, async (_req: Request, res: Response) => {
   try {
     const agents = await getAgentHealthStatus();
     const alerts = await getAgentAlerts(undefined, 'ACTIVE');
@@ -5921,7 +6245,7 @@ app.get('/api/admin/resource-overview', requireAdminRole, async (_req: Request, 
   }
 });
 
-app.get('/api/agent/:agentId/status', requireShopOwnerRole, async (req: Request, res: Response) => {
+app.get('/api/agent/:agentId/status', createRateLimiter(60, 60_000, { bucketKey: 'agent-id-status' }), requireShopOwnerRole, async (req: Request, res: Response) => {
   const user = (req as any).authenticatedUser as ServerSession | undefined;
   const requestedShopId = req.query.shopId as string;
   if (!user || (user.role !== 'SHOP_OWNER' && user.role !== 'ADMIN')) {
@@ -5945,7 +6269,7 @@ app.get('/api/agent/:agentId/status', requireShopOwnerRole, async (req: Request,
 });
 
 // Agent Discovered Printers Synchronization
-app.post('/api/agent/printers/sync', async (req: Request, res: Response) => {
+app.post('/api/agent/printers/sync', createRateLimiter(60, 60_000, { bucketKey: 'agent-printers-sync' }), async (req: Request, res: Response) => {
   const agentToken = req.headers['x-agent-token'] as string;
   const agentId = req.headers['x-agent-id'] as string;
   const { printers } = req.body || {};
@@ -5987,7 +6311,7 @@ app.post('/api/agent/printers/sync', async (req: Request, res: Response) => {
 });
 
 // Agent Register/Unregister Printer endpoint (validates subscription limit)
-app.post('/api/agent/printers/register', async (req: Request, res: Response) => {
+app.post('/api/agent/printers/register', createRateLimiter(30, 60_000, { bucketKey: 'agent-printers-register' }), async (req: Request, res: Response) => {
   const agentToken = req.headers['x-agent-token'] as string;
   const agentId = req.headers['x-agent-id'] as string;
   const { printerName, registered } = req.body || {};
@@ -6026,7 +6350,7 @@ app.post('/api/agent/printers/register', async (req: Request, res: Response) => 
 });
 
 // Agent Configure Printer Capabilities endpoint
-app.put('/api/agent/printers/:printerName/capabilities', async (req: Request, res: Response) => {
+app.put('/api/agent/printers/:printerName/capabilities', createRateLimiter(30, 60_000, { bucketKey: 'agent-printers-capabilities' }), async (req: Request, res: Response) => {
   const agentToken = req.headers['x-agent-token'] as string;
   const agentId = req.headers['x-agent-id'] as string;
   const printerName = req.params.printerName;
@@ -6066,7 +6390,7 @@ app.put('/api/agent/printers/:printerName/capabilities', async (req: Request, re
 });
 
 // Agent Configure Printer Owner Configuration endpoint
-app.put('/api/agent/printers/:printerName/owner-config', async (req: Request, res: Response) => {
+app.put('/api/agent/printers/:printerName/owner-config', createRateLimiter(30, 60_000, { bucketKey: 'agent-printers-owner-config' }), async (req: Request, res: Response) => {
   const agentToken = req.headers['x-agent-token'] as string;
   const agentId = req.headers['x-agent-id'] as string;
   const printerName = req.params.printerName;
@@ -6104,7 +6428,7 @@ app.put('/api/agent/printers/:printerName/owner-config', async (req: Request, re
   }
 });
 
-app.get('/api/agent/printer-entitlements', async (req: Request, res: Response) => {
+app.get('/api/agent/printer-entitlements', createRateLimiter(60, 60_000, { bucketKey: 'agent-printer-entitlements' }), async (req: Request, res: Response) => {
   const agentId = req.headers['x-agent-id'] as string;
   const agentToken = req.headers['x-agent-token'] as string;
   try {
@@ -6135,7 +6459,7 @@ app.get('/api/agent/printer-entitlements', async (req: Request, res: Response) =
  * GET /api/agent/entitlements
  * Returns authoritative subscription feature entitlements for paired Electron Print Agent.
  */
-app.get('/api/agent/entitlements', async (req: Request, res: Response) => {
+app.get('/api/agent/entitlements', createRateLimiter(60, 60_000, { bucketKey: 'agent-entitlements' }), async (req: Request, res: Response) => {
   const agentId = req.headers['x-agent-id'] as string;
   const agentToken = req.headers['x-agent-token'] as string;
   try {
@@ -6158,7 +6482,7 @@ app.get('/api/agent/entitlements', async (req: Request, res: Response) => {
  * GET /api/shop/entitlements & GET /api/subscription/entitlements
  * Returns authoritative subscription feature entitlements for web shop owner dashboard.
  */
-app.get(['/api/shop/entitlements', '/api/subscription/entitlements'], async (req: Request, res: Response) => {
+app.get(['/api/shop/entitlements', '/api/subscription/entitlements'], createRateLimiter(60, 60_000, { bucketKey: 'shop-entitlements' }), async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const requestedShopId = (req.query.shopId as string) || (req.headers['x-shop-id'] as string) || user?.shopId;
@@ -6178,7 +6502,7 @@ app.get(['/api/shop/entitlements', '/api/subscription/entitlements'], async (req
  * GET /api/subscription/current
  * Returns active subscription, limits, trial countdown, and usage metrics.
  */
-app.get('/api/subscription/current', async (req: Request, res: Response) => {
+app.get('/api/subscription/current', createRateLimiter(60, 60_000, { bucketKey: 'subscription-current' }), async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const requestedShopId = (req.query.shopId as string) || (req.headers['x-shop-id'] as string) || user?.shopId;
@@ -6203,7 +6527,7 @@ app.get('/api/subscription/current', async (req: Request, res: Response) => {
  * POST /api/subscription/activate-trial
  * Starts a 7-day Starter trial for an eligible shop (one trial per shop enforced).
  */
-app.post('/api/subscription/activate-trial', async (req: Request, res: Response) => {
+app.post('/api/subscription/activate-trial', createRateLimiter(10, 60_000, { bucketKey: 'subscription-activate-trial' }), async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const requestedShopId = req.body?.shopId || (req.headers['x-shop-id'] as string) || user?.shopId;
@@ -6227,7 +6551,7 @@ app.post('/api/subscription/activate-trial', async (req: Request, res: Response)
  * POST /api/subscription/create-order
  * Initiates Razorpay checkout order for subscription purchase or upgrade.
  */
-app.post('/api/subscription/create-order', async (req: Request, res: Response) => {
+app.post('/api/subscription/create-order', createRateLimiter(15, 60_000, { bucketKey: 'subscription-create-order' }), async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const { planId, billingPeriod = 'MONTHLY' } = req.body || {};
@@ -6255,7 +6579,7 @@ app.post('/api/subscription/create-order', async (req: Request, res: Response) =
  * POST /api/subscription/verify-payment
  * Cryptographically verifies Razorpay payment signature and activates subscription.
  */
-app.post('/api/subscription/verify-payment', async (req: Request, res: Response) => {
+app.post('/api/subscription/verify-payment', createRateLimiter(20, 60_000, { bucketKey: 'subscription-verify-payment' }), async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body || {};
@@ -6288,7 +6612,7 @@ app.post('/api/subscription/verify-payment', async (req: Request, res: Response)
  * POST /api/subscription/cancel
  * Cancels subscription auto-renewal. Access remains active until billing period ends.
  */
-app.post('/api/subscription/cancel', async (req: Request, res: Response) => {
+app.post('/api/subscription/cancel', createRateLimiter(10, 60_000, { bucketKey: 'subscription-cancel' }), async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const requestedShopId = req.body?.shopId || (req.headers['x-shop-id'] as string) || user?.shopId;
@@ -6313,7 +6637,7 @@ app.post('/api/subscription/cancel', async (req: Request, res: Response) => {
  * POST /api/subscription/schedule-downgrade
  * Schedules a plan downgrade for the end of the current billing cycle.
  */
-app.post('/api/subscription/schedule-downgrade', async (req: Request, res: Response) => {
+app.post('/api/subscription/schedule-downgrade', createRateLimiter(10, 60_000, { bucketKey: 'subscription-schedule-downgrade' }), async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const { targetPlanId } = req.body || {};
@@ -6341,7 +6665,7 @@ app.post('/api/subscription/schedule-downgrade', async (req: Request, res: Respo
  * GET /api/subscription/history
  * Returns payment invoices and transaction history for a shop.
  */
-app.get('/api/subscription/history', async (req: Request, res: Response) => {
+app.get('/api/subscription/history', createRateLimiter(60, 60_000, { bucketKey: 'subscription-history' }), async (req: Request, res: Response) => {
   try {
     const user = (req as any).authenticatedUser as ServerSession | undefined;
     const requestedShopId = (req.query.shopId as string) || (req.headers['x-shop-id'] as string) || user?.shopId;
@@ -6361,7 +6685,7 @@ app.get('/api/subscription/history', async (req: Request, res: Response) => {
  * GET /api/admin/subscription-metrics
  * Admin platform metrics: MRR, active subscribers, and trial conversions.
  */
-app.get('/api/admin/subscription-metrics', requireAdminRole, async (_req: Request, res: Response) => {
+app.get('/api/admin/subscription-metrics', createRateLimiter(60, 60_000, { bucketKey: 'admin-subscription-metrics' }), requireAdminRole, async (_req: Request, res: Response) => {
   try {
     const metrics = await subscriptionRepository.getAdminSubscriptionMetrics();
     return res.json({ success: true, metrics });
@@ -6375,7 +6699,7 @@ app.get('/api/admin/subscription-metrics', requireAdminRole, async (_req: Reques
  * POST /api/admin/plans/configure-offer
  * Super Admin configuration for introductory launch offers (e.g. Business plan ₹1,199).
  */
-app.post('/api/admin/plans/configure-offer', requireAdminRole, async (req: Request, res: Response) => {
+app.post('/api/admin/plans/configure-offer', createRateLimiter(20, 60_000, { bucketKey: 'admin-plans-configure-offer' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const { planId, introductoryPrice, isIntroductoryOfferActive, renewalPrice } = req.body || {};
     if (!planId) {
@@ -6394,18 +6718,13 @@ app.post('/api/admin/plans/configure-offer', requireAdminRole, async (req: Reque
 });
 
 // SaaS Web App: GET /api/shop/:shopId/printers
-app.get('/api/shop/:shopId/printers', requireShopOwnerRole, async (req: Request, res: Response) => {
+app.get('/api/shop/:shopId/printers', createRateLimiter(60, 60_000, { bucketKey: 'shop-printers-read' }), requireShopOwnerRole, async (req: Request, res: Response) => {
   const { shopId } = req.params;
   const user = (req as any).authenticatedUser as ServerSession | undefined;
-  const isDemoShopOwner =
-    process.env.NODE_ENV !== 'production' &&
-    req.headers['x-user-role'] === 'SHOP_OWNER' &&
-    req.headers['x-shop-id'] === shopId;
 
   const isAuthorized =
     user?.role === 'ADMIN' ||
-    (user?.role === 'SHOP_OWNER' && user.shopId === shopId) ||
-    isDemoShopOwner;
+    (user?.role === 'SHOP_OWNER' && user.shopId === shopId);
 
   let mappedAuthorized = false;
   if (user?.role === 'SHOP_OWNER' && user.shopId !== shopId) {
@@ -6430,19 +6749,14 @@ app.get('/api/shop/:shopId/printers', requireShopOwnerRole, async (req: Request,
 });
 
 // SaaS Web App: POST /api/shop/:shopId/printers/:printerId/register
-app.post('/api/shop/:shopId/printers/:printerId/register', requireShopOwnerRole, async (req: Request, res: Response) => {
+app.post('/api/shop/:shopId/printers/:printerId/register', createRateLimiter(30, 60_000, { bucketKey: 'shop-printers-register' }), requireShopOwnerRole, async (req: Request, res: Response) => {
   const { shopId, printerId } = req.params;
   const { registered } = req.body || {};
   const user = (req as any).authenticatedUser as ServerSession | undefined;
-  const isDemoShopOwner =
-    process.env.NODE_ENV !== 'production' &&
-    req.headers['x-user-role'] === 'SHOP_OWNER' &&
-    req.headers['x-shop-id'] === shopId;
 
   const isAuthorized =
     user?.role === 'ADMIN' ||
-    (user?.role === 'SHOP_OWNER' && user.shopId === shopId) ||
-    isDemoShopOwner;
+    (user?.role === 'SHOP_OWNER' && user.shopId === shopId);
 
   if (!isAuthorized) {
     return res.status(403).json({ success: false, error: 'You cannot modify another shop’s printers.' });
@@ -6472,19 +6786,14 @@ app.post('/api/shop/:shopId/printers/:printerId/register', requireShopOwnerRole,
 });
 
 // SaaS Web App: PUT /api/shop/:shopId/printers/:printerId/capabilities
-app.put('/api/shop/:shopId/printers/:printerId/capabilities', requireShopOwnerRole, async (req: Request, res: Response) => {
+app.put('/api/shop/:shopId/printers/:printerId/capabilities', createRateLimiter(30, 60_000, { bucketKey: 'shop-printers-capabilities' }), requireShopOwnerRole, async (req: Request, res: Response) => {
   const { shopId, printerId } = req.params;
   const { capabilities, connectionType, isDefault } = req.body || {};
   const user = (req as any).authenticatedUser as ServerSession | undefined;
-  const isDemoShopOwner =
-    process.env.NODE_ENV !== 'production' &&
-    req.headers['x-user-role'] === 'SHOP_OWNER' &&
-    req.headers['x-shop-id'] === shopId;
 
   const isAuthorized =
     user?.role === 'ADMIN' ||
-    (user?.role === 'SHOP_OWNER' && user.shopId === shopId) ||
-    isDemoShopOwner;
+    (user?.role === 'SHOP_OWNER' && user.shopId === shopId);
 
   if (!isAuthorized) {
     return res.status(403).json({ success: false, error: 'You cannot modify another shop’s printers.' });
@@ -6515,19 +6824,14 @@ app.put('/api/shop/:shopId/printers/:printerId/capabilities', requireShopOwnerRo
 });
 
 // SaaS Web App: PUT /api/shop/:shopId/printers/:printerId/owner-config
-app.put('/api/shop/:shopId/printers/:printerId/owner-config', requireShopOwnerRole, async (req: Request, res: Response) => {
+app.put('/api/shop/:shopId/printers/:printerId/owner-config', createRateLimiter(30, 60_000, { bucketKey: 'shop-printers-owner-config' }), requireShopOwnerRole, async (req: Request, res: Response) => {
   const { shopId, printerId } = req.params;
   const { ownerConfig, effectiveCapabilities } = req.body || {};
   const user = (req as any).authenticatedUser as ServerSession | undefined;
-  const isDemoShopOwner =
-    process.env.NODE_ENV !== 'production' &&
-    req.headers['x-user-role'] === 'SHOP_OWNER' &&
-    req.headers['x-shop-id'] === shopId;
 
   const isAuthorized =
     user?.role === 'ADMIN' ||
-    (user?.role === 'SHOP_OWNER' && user.shopId === shopId) ||
-    isDemoShopOwner;
+    (user?.role === 'SHOP_OWNER' && user.shopId === shopId);
 
   if (!isAuthorized) {
     return res.status(403).json({ success: false, error: 'You cannot modify another shop’s printers.' });
@@ -6556,7 +6860,7 @@ app.put('/api/shop/:shopId/printers/:printerId/owner-config', requireShopOwnerRo
   }
 });
 
-app.get('/api/agent/info', async (req: Request, res: Response) => {
+app.get('/api/agent/info', createRateLimiter(60, 60_000, { bucketKey: 'agent-info' }), async (req: Request, res: Response) => {
   const agentId = req.headers['x-agent-id'] as string;
   const agentToken = req.headers['x-agent-token'] as string;
 
@@ -6581,17 +6885,12 @@ app.get('/api/agent/info', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/shop/:shopId/live', requireShopOwnerRole, async (req: Request, res: Response) => {
+app.get('/api/shop/:shopId/live', createRateLimiter(60, 60_000, { bucketKey: 'shop-live-status' }), requireShopOwnerRole, async (req: Request, res: Response) => {
   const shopId = req.params.shopId;
   const user = (req as any).authenticatedUser as ServerSession | undefined;
-  const isDemoShopOwner =
-    process.env.NODE_ENV !== 'production' &&
-    req.headers['x-user-role'] === 'SHOP_OWNER' &&
-    req.headers['x-shop-id'] === shopId;
   const isAuthorized =
     (user?.role === 'ADMIN') ||
-    (user?.role === 'SHOP_OWNER' && user.shopId === shopId) ||
-    isDemoShopOwner;
+    (user?.role === 'SHOP_OWNER' && user.shopId === shopId);
   let mappedAuthorized = false;
   if (user?.role === 'SHOP_OWNER' && user.shopId !== shopId) {
     try {
@@ -6641,7 +6940,7 @@ app.get('/api/shop/:shopId/live', requireShopOwnerRole, async (req: Request, res
 });
 
 // Agent Poll Pending Jobs for Registered Shop
-app.get('/api/agent/jobs', async (req: Request, res: Response) => {
+app.get('/api/agent/jobs', createRateLimiter(120, 60_000, { bucketKey: 'agent-jobs-poll' }), async (req: Request, res: Response) => {
   if (!isNeonDatabaseConfigured()) {
     return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
   }
@@ -6668,7 +6967,7 @@ app.get('/api/agent/jobs', async (req: Request, res: Response) => {
 });
 
 // Agent Claim Job (Restricted to Agent's Registered Shop)
-app.post('/api/agent/jobs/:id/claim', async (req: Request, res: Response) => {
+app.post('/api/agent/jobs/:id/claim', createRateLimiter(60, 60_000, { bucketKey: 'agent-jobs-claim' }), async (req: Request, res: Response) => {
   if (!isNeonDatabaseConfigured()) {
     return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
   }
@@ -6751,7 +7050,7 @@ app.post('/api/agent/jobs/:id/claim', async (req: Request, res: Response) => {
 });
 
 // Agent Update Job Status (DOWNLOADING | PRINTING | COMPLETED | FAILED)
-app.post('/api/agent/jobs/:id/status', async (req: Request, res: Response) => {
+app.post('/api/agent/jobs/:id/status', createRateLimiter(120, 60_000, { bucketKey: 'agent-jobs-status' }), async (req: Request, res: Response) => {
   if (!isNeonDatabaseConfigured()) {
     return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
   }
@@ -6913,7 +7212,7 @@ app.post('/api/agent/jobs/:id/status', async (req: Request, res: Response) => {
  * - CONFIRM_NOT_PRINTED: marks FAILED with retrySafe: true
  * - INVESTIGATE: keeps AWAITING_RECONCILIATION and logs audit note
  */
-app.post('/api/shops/:shopId/print-jobs/:jobId/reconcile', requireShopOwnerRole, async (req: Request, res: Response) => {
+app.post('/api/shops/:shopId/print-jobs/:jobId/reconcile', createRateLimiter(30, 60_000, { bucketKey: 'shop-print-job-reconcile' }), requireShopOwnerRole, async (req: Request, res: Response) => {
   try {
     const { shopId, jobId } = req.params;
     const { action, notes } = req.body;
@@ -6980,7 +7279,7 @@ app.post('/api/shops/:shopId/print-jobs/:jobId/reconcile', requireShopOwnerRole,
 });
 
 // Agent Document Download Stream (Direct M2M authentication)
-app.get('/api/agent/jobs/:id/file', async (req: Request, res: Response) => {
+app.get('/api/agent/jobs/:id/file', createRateLimiter(60, 60_000, { bucketKey: 'agent-jobs-file' }), async (req: Request, res: Response) => {
   if (!isNeonDatabaseConfigured()) {
     return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
   }
@@ -7100,26 +7399,15 @@ const handleRotateAgentToken = async (req: Request, res: Response) => {
   const user = (req as any).authenticatedUser as ServerSession | undefined;
   const { shopId, deviceName } = req.body;
 
-  const roleHeader = req.headers['x-user-role'] as string | undefined;
-  const shopIdHeader = req.headers['x-shop-id'] as string | undefined;
-  const authHeader = req.headers.authorization;
-
-  const isSuperAdmin =
-    user?.role === 'ADMIN' ||
-    roleHeader === 'ADMIN' ||
-    authHeader === 'Bearer admin_token_active';
-
-  const isShopOwner =
-    user?.role === 'SHOP_OWNER' ||
-    roleHeader === 'SHOP_OWNER' ||
-    process.env.NODE_ENV !== 'production';
+  const isSuperAdmin = user?.role === 'ADMIN';
+  const isShopOwner = user?.role === 'SHOP_OWNER' && Boolean(user.shopId);
 
   if (!isSuperAdmin && !isShopOwner) {
     return res.status(403).json({ success: false, error: 'Authenticated shop owner access is required' });
   }
 
   if (isShopOwner && !isSuperAdmin) {
-    const authorizedShopId = user?.shopId || shopIdHeader;
+    const authorizedShopId = user?.shopId;
     if (authorizedShopId && shopId && authorizedShopId !== shopId) {
       let isMatch = false;
       try {
@@ -7216,7 +7504,7 @@ function requireNeonPool(req: Request, res: Response, next: NextFunction) {
  * GET /api/shops
  * Lists all shops. Admin only.
  */
-app.get('/api/shops', requireAdminRole, requireNeonPool, async (req: Request, res: Response) => {
+app.get('/api/shops', createRateLimiter(60, 60_000, { bucketKey: 'admin-shops-list' }), requireAdminRole, requireNeonPool, async (req: Request, res: Response) => {
   try {
     const status = req.query.status as 'ACTIVE' | 'SUSPENDED' | 'PENDING' | undefined;
     if (status && !['ACTIVE', 'SUSPENDED', 'PENDING'].includes(status)) {
@@ -7237,7 +7525,7 @@ app.get('/api/shops', requireAdminRole, requireNeonPool, async (req: Request, re
  * GET /api/shops/:shopId
  * Returns a single shop record. Admin or the shop's own member.
  */
-app.get('/api/shops/:shopId', requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
+app.get('/api/shops/:shopId', createRateLimiter(60, 60_000, { bucketKey: 'shop-details-read' }), requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
   try {
     const { shopId } = req.params;
     const effectiveShopId = await resolvePrintFlowShopId(shopId);
@@ -7267,7 +7555,7 @@ app.get('/api/shops/:shopId', requireShopOwnerRole, requireNeonPool, async (req:
  * GET /api/public/shops/:shopIdOrSlug/capabilities
  * Public-facing capabilities endpoint for customer print configuration portal.
  */
-app.get('/api/public/shops/:shopIdOrSlug/capabilities', async (req: Request, res: Response) => {
+app.get('/api/public/shops/:shopIdOrSlug/capabilities', createRateLimiter(90, 60_000, { bucketKey: 'public-shop-capabilities' }), async (req: Request, res: Response) => {
   try {
     const { shopIdOrSlug } = req.params;
     const caps = await getPublicShopCapabilities(shopIdOrSlug);
@@ -7295,7 +7583,7 @@ app.get('/api/public/shops/:shopIdOrSlug/capabilities', async (req: Request, res
  * GET /api/public/shops
  * Public-facing active shops directory for customer portal.
  */
-app.get('/api/public/shops', async (req: Request, res: Response) => {
+app.get('/api/public/shops', createRateLimiter(90, 60_000, { bucketKey: 'public-shops-list' }), async (req: Request, res: Response) => {
   try {
     let shops: any[] = [];
     if (isSharedPoolConfigured()) {
@@ -7368,7 +7656,7 @@ app.get('/api/public/shops', async (req: Request, res: Response) => {
  * GET /api/public/shops/:slug/availability
  * Public endpoint to query authoritative real-time shop print agent & printer availability.
  */
-app.get(['/api/public/shops/:slug/agent-status', '/api/public/shops/:slug/availability', '/api/shops/:slug/availability'], async (req: Request, res: Response) => {
+app.get(['/api/public/shops/:slug/agent-status', '/api/public/shops/:slug/availability', '/api/shops/:slug/availability'], createRateLimiter(90, 60_000, { bucketKey: 'public-shop-availability' }), async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
     if (!slug) {
@@ -7411,7 +7699,7 @@ app.get(['/api/public/shops/:slug/agent-status', '/api/public/shops/:slug/availa
  * Public-facing shop lookup by slug. Returns only non-sensitive fields for ACTIVE shops.
  * No authentication required (used by customer print portal).
  */
-app.get('/api/public/shops/:slug', async (req: Request, res: Response) => {
+app.get('/api/public/shops/:slug', createRateLimiter(90, 60_000, { bucketKey: 'public-shop-by-slug' }), async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
     let shop: any = null;
@@ -7496,7 +7784,7 @@ app.get('/api/public/shops/:slug', async (req: Request, res: Response) => {
  * Extracts shop slug/identifier, validates against database, ensures shop is active and open,
  * and rejects invalid, expired, or tampered QR codes.
  */
-app.post('/api/public/verify-qr', createRateLimiter(30), async (req: Request, res: Response) => {
+app.post('/api/public/verify-qr', createRateLimiter(30, 60_000, { bucketKey: 'public-verify-qr' }), async (req: Request, res: Response) => {
   try {
     const { qrPayload } = req.body || {};
     if (!qrPayload || typeof qrPayload !== 'string') {
@@ -7565,7 +7853,7 @@ app.post('/api/public/verify-qr', createRateLimiter(30), async (req: Request, re
  * Returns the authenticated shop owner's permanent 6-digit Shop Code.
  * Authorized for shop owner or platform admin only.
  */
-app.get('/api/shops/:shopId/access-code', requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
+app.get('/api/shops/:shopId/access-code', createRateLimiter(30, 60_000, { bucketKey: 'shop-access-code-get' }), requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
   try {
     const { shopId } = req.params;
     const effectiveShopId = await resolvePrintFlowShopId(shopId);
@@ -7612,7 +7900,7 @@ app.get('/api/shops/:shopId/access-code', requireShopOwnerRole, requireNeonPool,
  * Rate-limited to prevent brute-force code guessing.
  * Returns only safe routing data (slug, name, redirectUrl) without leaking private info.
  */
-app.post('/api/shop-access/resolve', createRateLimiter(15), async (req: Request, res: Response) => {
+app.post('/api/shop-access/resolve', createRateLimiter(15, 60_000, { bucketKey: 'shop-access-resolve' }), async (req: Request, res: Response) => {
   try {
     const rawCode = normalizeShopCode(String(req.body?.shopCode || req.body?.code || ''));
 
@@ -7679,7 +7967,7 @@ app.post('/api/shop-access/resolve', createRateLimiter(15), async (req: Request,
  * Public customer print job tracking endpoint.
  * Looks up print job securely using Supabase PostgreSQL by tracking token, returning safe status timeline and details.
  */
-app.get('/api/public/print-tracking/:token', createRateLimiter(60), async (req: Request, res: Response) => {
+app.get('/api/public/print-tracking/:token', createRateLimiter(45, 60_000, { bucketKey: 'public-print-tracking' }), async (req: Request, res: Response) => {
   try {
     const rawToken = req.params.token;
     if (!rawToken || typeof rawToken !== 'string' || rawToken.trim().length < 5 || rawToken.length > 120) {
@@ -7782,7 +8070,7 @@ app.get('/api/public/print-tracking/:token', createRateLimiter(60), async (req: 
  * PATCH /api/shops/:shopId/status
  * Admin-only: change a shop's active/suspended status.
  */
-app.patch('/api/shops/:shopId/status', requireAdminRole, requireNeonPool, async (req: Request, res: Response) => {
+app.patch('/api/shops/:shopId/status', createRateLimiter(20, 60_000, { bucketKey: 'admin-shop-status' }), requireAdminRole, requireNeonPool, async (req: Request, res: Response) => {
   try {
     const { shopId } = req.params;
     const effectiveShopId = await resolvePrintFlowShopId(shopId);
@@ -7803,7 +8091,7 @@ app.patch('/api/shops/:shopId/status', requireAdminRole, requireNeonPool, async 
  * PATCH /api/shops/:shopId/open
  * Shop owner: toggle their own shop's isOpen flag.
  */
-app.patch('/api/shops/:shopId/open', requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
+app.patch('/api/shops/:shopId/open', createRateLimiter(30, 60_000, { bucketKey: 'shop-open-toggle' }), requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
   try {
     const { shopId } = req.params;
     const effectiveShopId = await resolvePrintFlowShopId(shopId);
@@ -7829,7 +8117,7 @@ app.patch('/api/shops/:shopId/open', requireShopOwnerRole, requireNeonPool, asyn
  * Returns active pricing rules for a shop.
  * Accessible to the shop owner or admin. Also used by customers to get a price preview.
  */
-app.get('/api/shops/:shopId/pricing', async (req: Request, res: Response) => {
+app.get('/api/shops/:shopId/pricing', createRateLimiter(90, 60_000, { bucketKey: 'shop-pricing-read' }), async (req: Request, res: Response) => {
   try {
     const { shopId } = req.params;
     const effectiveShopId = await resolvePrintFlowShopId(shopId);
@@ -7881,7 +8169,7 @@ app.get('/api/shops/:shopId/pricing', async (req: Request, res: Response) => {
  * Upserts a single pricing rule (shop owner only, own shop).
  * Server calculates and validates price — client-supplied price is treated as input only.
  */
-app.put('/api/shops/:shopId/pricing', requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
+app.put('/api/shops/:shopId/pricing', createRateLimiter(30, 60_000, { bucketKey: 'shop-pricing-write' }), requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
   try {
     const { shopId } = req.params;
     const effectiveShopId = await resolvePrintFlowShopId(shopId);
@@ -7913,7 +8201,7 @@ app.put('/api/shops/:shopId/pricing', requireShopOwnerRole, requireNeonPool, asy
  * DELETE /api/shops/:shopId/pricing/:ruleId
  * Soft-deletes a pricing rule (shop owner only, own shop).
  */
-app.delete('/api/shops/:shopId/pricing/:ruleId', requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
+app.delete('/api/shops/:shopId/pricing/:ruleId', createRateLimiter(30, 60_000, { bucketKey: 'shop-pricing-delete' }), requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
   try {
     const { shopId, ruleId } = req.params;
     const effectiveShopId = await resolvePrintFlowShopId(shopId);
@@ -7938,7 +8226,7 @@ app.delete('/api/shops/:shopId/pricing/:ruleId', requireShopOwnerRole, requireNe
  * Lists print jobs for a shop (shop owner or admin).
  * Uses Neon print_jobs table (not the agent queue table).
  */
-app.get('/api/shops/:shopId/print-jobs', requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
+app.get('/api/shops/:shopId/print-jobs', createRateLimiter(60, 60_000, { bucketKey: 'shop-print-jobs-read' }), requireShopOwnerRole, requireNeonPool, async (req: Request, res: Response) => {
   try {
     const { shopId } = req.params;
     const effectiveShopId = await resolvePrintFlowShopId(shopId);
@@ -8046,7 +8334,7 @@ async function recordWebhookEventDurably(params: {
  * POST /api/guest/checkout/init
  * Initializes a durable guest checkout session in Neon.
  */
-app.post('/api/guest/checkout/init', createRateLimiter(30), async (req: Request, res: Response) => {
+app.post('/api/guest/checkout/init', createRateLimiter(30, 60_000, { bucketKey: 'guest-checkout-init' }), async (req: Request, res: Response) => {
   try {
     const { shopId, customerName, customerPhone } = req.body || {};
     if (!shopId || typeof shopId !== 'string') {
@@ -8092,7 +8380,7 @@ app.post('/api/guest/checkout/init', createRateLimiter(30), async (req: Request,
  * Validates, inspects, and uploads a print document to private storage,
  * and attaches metadata durably to the guest checkout session.
  */
-app.post('/api/guest/checkout/:jobId/upload', createRateLimiter(30), async (req: Request, res: Response) => {
+app.post('/api/guest/checkout/:jobId/upload', createRateLimiter(30, 60_000, { bucketKey: 'guest-checkout-upload' }), async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
     const trackingToken = req.header('x-print-tracking-token') || req.body?.trackingToken;
@@ -8174,7 +8462,7 @@ app.post('/api/guest/checkout/:jobId/upload', createRateLimiter(30), async (req:
  * POST /api/guest/checkout/:jobId/quote
  * Calculates authoritative pricing quote for guest checkout session.
  */
-app.post('/api/guest/checkout/:jobId/quote', createRateLimiter(45), async (req: Request, res: Response) => {
+app.post('/api/guest/checkout/:jobId/quote', createRateLimiter(45, 60_000, { bucketKey: 'guest-checkout-quote' }), async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
     const trackingToken = req.header('x-print-tracking-token') || req.body?.trackingToken;
@@ -8220,7 +8508,7 @@ app.post('/api/guest/checkout/:jobId/quote', createRateLimiter(45), async (req: 
  * GET /api/guest/checkout/:jobId
  * Retrieves guest checkout session status.
  */
-app.get('/api/guest/checkout/:jobId', createRateLimiter(60), async (req: Request, res: Response) => {
+app.get('/api/guest/checkout/:jobId', createRateLimiter(60, 60_000, { bucketKey: 'guest-checkout-read' }), async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
     const trackingToken = req.header('x-print-tracking-token') || (req.query.token as string);
@@ -8254,7 +8542,7 @@ app.get('/api/guest/checkout/:jobId', createRateLimiter(60), async (req: Request
  * POST /api/admin/storage/cleanup
  * Purges expired temporary storage objects.
  */
-app.post('/api/admin/storage/cleanup', requireAdminRole, async (req: Request, res: Response) => {
+app.post('/api/admin/storage/cleanup', createRateLimiter(10, 60_000, { bucketKey: 'admin-storage-cleanup' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const olderThanHours = parseInt(req.body?.olderThanHours, 10) || 24;
     logger.info('Running storage cleanup routine', { olderThanHours });
@@ -8303,7 +8591,7 @@ app.post('/api/admin/storage/cleanup', requireAdminRole, async (req: Request, re
  * GET /api/admin/payments/unresolved
  * Lists payment orders flagged as requiring reconciliation.
  */
-app.get('/api/admin/payments/unresolved', requireAdminRole, async (req: Request, res: Response) => {
+app.get('/api/admin/payments/unresolved', createRateLimiter(60, 60_000, { bucketKey: 'admin-payments-unresolved' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     if (!isSharedPoolConfigured()) {
       return res.status(503).json({ success: false, error: 'Database is required.' });
@@ -8322,7 +8610,7 @@ app.get('/api/admin/payments/unresolved', requireAdminRole, async (req: Request,
  * POST /api/admin/payments/:orderId/reconcile
  * Operator-driven reconciliation for an uncertain or interrupted payment order.
  */
-app.post('/api/admin/payments/:orderId/reconcile', requireAdminRole, async (req: Request, res: Response) => {
+app.post('/api/admin/payments/:orderId/reconcile', createRateLimiter(20, 60_000, { bucketKey: 'admin-payments-reconcile' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const { orderId } = req.params;
     if (!isSharedPoolConfigured()) {
@@ -8390,7 +8678,7 @@ app.post('/api/admin/payments/:orderId/reconcile', requireAdminRole, async (req:
  * POST /api/admin/payments/refund
  * Records a bounded manual refund in Neon without automatic or unapproved live execution.
  */
-app.post('/api/admin/payments/refund', requireAdminRole, async (req: Request, res: Response) => {
+app.post('/api/admin/payments/refund', createRateLimiter(15, 60_000, { bucketKey: 'admin-payments-refund' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const { paymentOrderId, shopId, amountMinor, reason, operatorNotes } = req.body || {};
     if (!paymentOrderId || !amountMinor || !reason) {
@@ -8440,7 +8728,7 @@ app.post('/api/admin/payments/refund', requireAdminRole, async (req: Request, re
  * GET /api/admin/payments/:shopId/refunds
  * Lists tracked refunds for a shop.
  */
-app.get('/api/admin/payments/:shopId/refunds', requireShopOwnerRole, async (req: Request, res: Response) => {
+app.get('/api/admin/payments/:shopId/refunds', createRateLimiter(60, 60_000, { bucketKey: 'admin-payments-refunds-read' }), requireShopOwnerRole, async (req: Request, res: Response) => {
   try {
     const { shopId } = req.params;
     const user = (req as any).authenticatedUser as ServerSession | undefined;
@@ -8466,7 +8754,7 @@ app.get('/api/admin/payments/:shopId/refunds', requireShopOwnerRole, async (req:
  * PATCH /api/admin/payments/refunds/:refundId/status
  * Updates the lifecycle status of a tracked manual refund.
  */
-app.patch('/api/admin/payments/refunds/:refundId/status', requireAdminRole, async (req: Request, res: Response) => {
+app.patch('/api/admin/payments/refunds/:refundId/status', createRateLimiter(20, 60_000, { bucketKey: 'admin-payments-refund-status' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const { refundId } = req.params;
     const { status, providerRefundId, notes } = req.body || {};
@@ -8501,7 +8789,7 @@ app.patch('/api/admin/payments/refunds/:refundId/status', requireAdminRole, asyn
  * GET /api/admin/dashboard-stats
  * Real aggregated database metrics for EasyToPrint Admin Dashboard Overview.
  */
-app.get('/api/admin/dashboard-stats', requireAdminRole, async (_req: Request, res: Response) => {
+app.get('/api/admin/dashboard-stats', createRateLimiter(60, 60_000, { bucketKey: 'admin-dashboard-stats' }), requireAdminRole, async (_req: Request, res: Response) => {
   try {
     const pool = requirePostgresPool();
 
@@ -8668,7 +8956,7 @@ app.get('/api/admin/dashboard-stats', requireAdminRole, async (_req: Request, re
  * GET /api/admin/users
  * Lists actual registered users from PostgreSQL printflow_users table.
  */
-app.get('/api/admin/users', requireAdminRole, async (req: Request, res: Response) => {
+app.get('/api/admin/users', createRateLimiter(60, 60_000, { bucketKey: 'admin-users-list' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const pool = requirePostgresPool();
     const search = (req.query.search as string || '').trim().toLowerCase();
@@ -8708,7 +8996,7 @@ app.get('/api/admin/users', requireAdminRole, async (req: Request, res: Response
  * GET /api/admin/printers
  * Lists actual hardware printers registered across shops from public.printers.
  */
-app.get('/api/admin/printers', requireAdminRole, async (req: Request, res: Response) => {
+app.get('/api/admin/printers', createRateLimiter(60, 60_000, { bucketKey: 'admin-printers-list' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const pool = requirePostgresPool();
     const search = (req.query.search as string || '').trim().toLowerCase();
@@ -8752,7 +9040,7 @@ app.get('/api/admin/printers', requireAdminRole, async (req: Request, res: Respo
  * GET /api/admin/storage
  * Authoritative cloud and local storage metrics across platform tenants.
  */
-app.get('/api/admin/storage', requireAdminRole, async (_req: Request, res: Response) => {
+app.get('/api/admin/storage', createRateLimiter(60, 60_000, { bucketKey: 'admin-storage-read' }), requireAdminRole, async (_req: Request, res: Response) => {
   try {
     const pool = requirePostgresPool();
 
@@ -8806,7 +9094,7 @@ app.get('/api/admin/storage', requireAdminRole, async (_req: Request, res: Respo
  * GET /api/admin/analytics-summary
  * Real time-series analytics aggregated from PostgreSQL. Zero fabricated numbers.
  */
-app.get('/api/admin/analytics-summary', requireAdminRole, async (_req: Request, res: Response) => {
+app.get('/api/admin/analytics-summary', createRateLimiter(60, 60_000, { bucketKey: 'admin-analytics-summary' }), requireAdminRole, async (_req: Request, res: Response) => {
   try {
     const pool = requirePostgresPool();
 
@@ -9016,16 +9304,32 @@ async function startServer() {
     await initializePaymentTables();
     if (isNeonDatabaseConfigured()) {
       const pool = requirePostgresPool();
-      const adminHash = hashPassword('Admin@PrintFlow2026!');
+      const adminHash = hashPassword(ADMIN_PASSWORD);
+      // Remove legacy predictable admin credentials and duplicate conflicting rows
+      await pool.query(
+        `DELETE FROM public.printflow_users
+         WHERE (LOWER(email) IN ('admin@printflow.io', 'admin@easytoprint.io') OR LOWER(email) = $1)
+           AND id != 'usr_admin'`,
+        [ADMIN_EMAIL]
+      );
+      await pool.query(
+        `DELETE FROM public.printflow_users
+         WHERE LOWER(email) IN ('admin@printflow.io', 'admin@easytoprint.io')
+           AND LOWER(email) != $1`,
+        [ADMIN_EMAIL]
+      );
       await pool.query(`
-        INSERT INTO public.printflow_users (id, email, password_hash, full_name, phone, role, shop_id, created_at, updated_at)
-        VALUES ('usr_admin', 'admin@printflow.io', $1, 'Platform Super Admin', '9876543200', 'ADMIN', 'platform_admin', NOW(), NOW())
-        ON CONFLICT (email) DO UPDATE SET
+        INSERT INTO public.printflow_users (id, email, password_hash, full_name, phone, role, shop_id, failed_attempts, lockout_until, created_at, updated_at)
+        VALUES ('usr_admin', $1, $2, 'Platform Super Admin', '9876543200', 'ADMIN', 'platform_admin', 0, NULL, NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          email = EXCLUDED.email,
           password_hash = EXCLUDED.password_hash,
           role = 'ADMIN',
           shop_id = 'platform_admin',
+          failed_attempts = 0,
+          lockout_until = NULL,
           updated_at = NOW()
-      `, [adminHash]);
+      `, [ADMIN_EMAIL, adminHash]);
     }
     logger.info('[Server] Supabase PostgreSQL database tables and admin user initialized.');
   } catch (err) {

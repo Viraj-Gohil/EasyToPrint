@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '../../lib/store';
+import { adminPath } from '../../lib/adminConfig';
 import {
   Shield,
   LayoutDashboard,
@@ -102,13 +103,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
           id: 'dashboard',
           label: 'Dashboard',
           icon: LayoutDashboard,
-          path: '/admin/dashboard'
+          path: adminPath('dashboard')
         },
         {
           id: 'analytics',
           label: 'Analytics',
           icon: BarChart3,
-          path: '/admin/analytics'
+          path: adminPath('analytics')
         }
       ]
     },
@@ -119,19 +120,19 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
           id: 'shops',
           label: 'Shops Management',
           icon: Store,
-          path: '/admin/shops'
+          path: adminPath('shops')
         },
         {
           id: 'users',
           label: 'Users Management',
           icon: Users,
-          path: '/admin/users'
+          path: adminPath('users')
         },
         {
           id: 'printers',
           label: 'Printers',
           icon: Printer,
-          path: '/admin/printers'
+          path: adminPath('printers')
         }
       ]
     },
@@ -142,19 +143,19 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
           id: 'plans',
           label: 'Subscriptions & Plans',
           icon: Crown,
-          path: '/admin/plans'
+          path: adminPath('plans')
         },
         {
           id: 'payments',
           label: 'Payments & Revenue',
           icon: CreditCard,
-          path: '/admin/payments'
+          path: adminPath('payments')
         },
         {
           id: 'storage',
           label: 'Storage Management',
           icon: HardDrive,
-          path: '/admin/storage'
+          path: adminPath('storage')
         }
       ]
     },
@@ -165,7 +166,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
           id: 'support',
           label: 'Support Tickets',
           icon: LifeBuoy,
-          path: '/admin/support',
+          path: adminPath('support'),
           badge: openTicketsCount > 0 ? openTicketsCount : undefined,
           badgeColor: 'bg-emerald-50 text-[#00B52D] font-bold border border-emerald-200'
         },
@@ -173,13 +174,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
           id: 'audit-logs',
           label: 'Audit Logs',
           icon: ScrollText,
-          path: '/admin/audit-logs'
+          path: adminPath('audit-logs')
         },
         {
           id: 'health',
           label: 'System Health',
           icon: Activity,
-          path: '/admin/health'
+          path: adminPath('health')
         }
       ]
     },
@@ -190,7 +191,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
           id: 'platform-settings',
           label: 'Platform Settings',
           icon: Sliders,
-          path: '/admin/platform-settings'
+          path: adminPath('platform-settings')
         }
       ]
     }
@@ -427,7 +428,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
                     {currentUser?.fullName || 'Platform Admin'}
                   </span>
                   <span className="text-[10px] text-[#777777] font-mono block truncate">
-                    admin@easytoprint.io
+                    {currentUser?.email || 'Authorized Session'}
                   </span>
                 </div>
               )}

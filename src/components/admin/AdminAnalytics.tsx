@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../lib/store';
+import { adminPath } from '../../lib/adminConfig';
 import {
   BarChart3,
   TrendingUp,
@@ -427,7 +428,7 @@ export const AdminAnalytics: React.FC = () => {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate('/admin/shops')}
+            onClick={() => navigate(adminPath('shops'))}
           >
             <span>View All Tenants in Directory</span>
             <ChevronRight className="w-3.5 h-3.5 text-slate-400" />

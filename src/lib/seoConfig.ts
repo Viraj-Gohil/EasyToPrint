@@ -1,3 +1,5 @@
+import { ADMIN_BASE_PATH } from './adminConfig.js';
+
 export const CANONICAL_DOMAIN = 'https://easytoprint.devpixel.space';
 
 export interface RouteSeoMetadata {
@@ -172,7 +174,7 @@ export const PRIVATE_NOINDEX_PREFIXES = [
   '/signup',
   '/forgot-password',
   '/reset-password',
-  '/admin',
+  ADMIN_BASE_PATH,
   '/shop',
   '/dashboard',
   '/customer',
@@ -208,7 +210,7 @@ export function getSeoForPath(pathname: string): RouteSeoMetadata & { isNotFound
     if (clean === '/auth/login') privateTitle = 'Sign In – EasyToPrint Shop & Customer Portal';
     else if (clean === '/auth/register') privateTitle = 'Register Your Print Shop – EasyToPrint';
     else if (clean === '/auth/forgot-password') privateTitle = 'Reset Password – EasyToPrint';
-    else if (clean.startsWith('/admin')) privateTitle = 'Admin Console – EasyToPrint';
+    else if (clean.startsWith(ADMIN_BASE_PATH)) privateTitle = 'Admin Console – EasyToPrint';
     else if (clean.startsWith('/shop')) privateTitle = 'Shop Owner Dashboard – EasyToPrint';
     else if (clean === '/track-print') privateTitle = 'Track Print Order – EasyToPrint';
     else if (clean.startsWith('/s/')) privateTitle = 'Upload & Print Documents – EasyToPrint Counter Terminal';

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../../lib/store';
+import { adminPath } from '../../lib/adminConfig';
 import {
   Search,
   LayoutDashboard,
@@ -61,7 +62,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Overview',
         icon: LayoutDashboard,
-        path: '/admin/dashboard',
+        path: adminPath('dashboard'),
         keywords: ['overview', 'dashboard', 'home', 'kpi', 'summary', 'admin']
       },
       {
@@ -70,7 +71,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Overview',
         icon: BarChart3,
-        path: '/admin/analytics',
+        path: adminPath('analytics'),
         keywords: ['analytics', 'metrics', 'revenue', 'charts', 'trends', 'volume']
       },
       {
@@ -79,7 +80,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Operations',
         icon: Store,
-        path: '/admin/shops',
+        path: adminPath('shops'),
         keywords: ['shops', 'tenants', 'stores', 'xerox', 'directory', 'merchants', 'owners']
       },
       {
@@ -88,7 +89,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Teams & Hardware',
         icon: Users,
-        path: '/admin/users',
+        path: adminPath('users'),
         keywords: ['users', 'accounts', 'staff', 'owners', 'admins', 'members']
       },
       {
@@ -97,7 +98,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Teams & Hardware',
         icon: Printer,
-        path: '/admin/printers',
+        path: adminPath('printers'),
         keywords: ['printers', 'hardware', 'devices', 'drivers', 'spooler']
       },
       {
@@ -106,7 +107,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Billing & Storage',
         icon: HardDrive,
-        path: '/admin/storage',
+        path: adminPath('storage'),
         keywords: ['storage', 'quota', 'cloud', 'files', 'artifacts', 'disk']
       },
       {
@@ -115,7 +116,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Billing & Revenue',
         icon: Crown,
-        path: '/admin/plans',
+        path: adminPath('plans'),
         keywords: ['plans', 'pricing', 'tier', 'saas', 'quotas', 'entitlements']
       },
       {
@@ -124,7 +125,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Billing & Revenue',
         icon: Layers,
-        path: '/admin/subscriptions',
+        path: adminPath('subscriptions'),
         keywords: ['subscriptions', 'mrr', 'arr', 'tenants', 'renewals', 'billing']
       },
       {
@@ -133,7 +134,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Billing & Revenue',
         icon: CreditCard,
-        path: '/admin/payments',
+        path: adminPath('payments'),
         keywords: ['payments', 'transactions', 'gateway', 'revenue', 'fees', 'razorpay']
       },
       {
@@ -142,7 +143,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Support & Security',
         icon: LifeBuoy,
-        path: '/admin/support',
+        path: adminPath('support'),
         badge: openTicketsCount > 0 ? `${openTicketsCount} open` : undefined,
         keywords: ['support', 'tickets', 'issues', 'help', 'sla', 'shops']
       },
@@ -152,7 +153,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Support & Security',
         icon: ScrollText,
-        path: '/admin/audit-logs',
+        path: adminPath('audit-logs'),
         keywords: ['audit', 'logs', 'security', 'trail', 'compliance', 'actions']
       },
       {
@@ -161,7 +162,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Support & Security',
         icon: Activity,
-        path: '/admin/health',
+        path: adminPath('health'),
         badge: 'Operational',
         keywords: ['health', 'system', 'latency', 'uptime', 'monitoring', 'status']
       },
@@ -171,7 +172,7 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Navigation',
         section: 'Configuration',
         icon: Sliders,
-        path: '/admin/platform-settings',
+        path: adminPath('platform-settings'),
         keywords: ['settings', 'platform', 'branding', 'policies', 'maintenance', 'gateways']
       },
 
@@ -182,8 +183,8 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Quick Action',
         section: 'Actions',
         icon: Zap,
-        path: '/admin/plans',
-        action: () => navigate('/admin/plans'),
+        path: adminPath('plans'),
+        action: () => navigate(adminPath('plans')),
         keywords: ['create', 'new plan', 'add plan', 'pricing']
       },
       {
@@ -192,8 +193,8 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         category: 'Quick Action',
         section: 'Actions',
         icon: LifeBuoy,
-        path: '/admin/support',
-        action: () => navigate('/admin/support'),
+        path: adminPath('support'),
+        action: () => navigate(adminPath('support')),
         keywords: ['open tickets', 'unresolved', 'support', 'sla']
       }
     ];

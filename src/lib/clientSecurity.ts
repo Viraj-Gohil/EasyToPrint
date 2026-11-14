@@ -39,16 +39,10 @@ export function checkShopOwnership(user: UserProfile | null, targetShopId: strin
 export function verifyPassword(password: string, storedHash: string): boolean {
   if (!password || !storedHash) return false;
 
-  // Plaintext matches for mock seeds
-  if (password === storedHash) return true;
-  if (storedHash === 'shop' && password === 'shop') return true;
-  if (storedHash === 'admin' && password === 'admin') return true;
-
-  // If password was updated in client state
-  if (storedHash.startsWith('$pbkdf2-sha512$') || storedHash.startsWith('$client-hash$')) {
+  if (storedHash.startsWith('$client-hash$')) {
     const parts = storedHash.split('$');
     const expected = parts[parts.length - 1];
-    return hashPassword(password).endsWith(expected) || password === 'shop' || password === 'admin';
+    return hashPassword(password).endsWith(expected);
   }
 
   return false;

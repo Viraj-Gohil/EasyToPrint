@@ -64,7 +64,7 @@ const DEFAULT_SUPPORT_SETTINGS: SupportSettings = {
 };
 
 const SUPPORT_ADMIN_USERS = [
-  { id: 'usr_admin', name: 'Platform Super Admin', email: 'admin@easytoprint.io', role: 'ADMIN' as const }
+  { id: 'usr_admin', name: 'Platform Super Admin', email: 'platform-ops@easytoprint.in', role: 'ADMIN' as const }
 ];
 
 export const EMPTY_SHOP: Shop = {
@@ -190,7 +190,13 @@ import {
   generateRecoveryCodes,
   consumeRecoveryCode
 } from './clientSecurity';
-import { apiUrl } from './apiConfig';
+import { apiUrl, authenticatedFetch } from './apiConfig';
+import {
+  ADMIN_LOGIN_PATH,
+  ADMIN_DASHBOARD_PATH,
+  ADMIN_API_LOGIN_PATH,
+  isAdminRoutePath
+} from './adminConfig';
 
 export const getDeterministicAgentToken = (shopId: string): string => {
   if (shopId === 'shop_royal_cyber') {
@@ -223,7 +229,7 @@ interface AppContextType {
     city: string;
     password: string;
     planId?: string;
-  }) => Promise<{ success: boolean; message?: string; requireEmailVerification?: boolean; email?: string; devOtp?: string }> | { success: boolean; message?: string; requireEmailVerification?: boolean; email?: string; devOtp?: string };
+  }) => Promise<{ success: boolean; message?: string; requireEmailVerification?: boolean; email?: string }> | { success: boolean; message?: string; requireEmailVerification?: boolean; email?: string };
   login: (email: string, password: string) => Promise<{ success: boolean; message?: string; user?: UserProfile }>;
   adminLogin: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
   forgotPassword: (email: string) => Promise<{ success: boolean; message?: string; devResetLink?: string }>;
@@ -449,7 +455,6 @@ function resolveCurrentBrowserLocation(): string {
     rawHash &&
     (rawHash.startsWith('/') ||
       rawHash.startsWith('shop') ||
-      rawHash.startsWith('admin') ||
       rawHash.startsWith('auth') ||
       rawHash.startsWith('s/') ||
       rawHash.startsWith('track-print'))
@@ -468,7 +473,7 @@ function resolveCurrentBrowserLocation(): string {
 }
 
 function consumeIntendedReturnPath(role: Role): string {
-  const defaultDest = role === 'ADMIN' ? '/admin/dashboard' : '/shop/dashboard';
+  const defaultDest = role === 'ADMIN' ? ADMIN_DASHBOARD_PATH : '/shop/dashboard';
   if (typeof window === 'undefined') return defaultDest;
   try {
     const urlParams = new URLSearchParams(window.location.search);
@@ -478,10 +483,10 @@ function consumeIntendedReturnPath(role: Role): string {
     const candidate = normalizeRouteInput(fromQuery || fromSession || '');
     if (!candidate || candidate === '/') return defaultDest;
     if (role === 'ADMIN') {
-      if (candidate.startsWith('/admin') && !candidate.startsWith('/admin/login')) {
+      if (isAdminRoutePath(candidate) && !candidate.startsWith(ADMIN_LOGIN_PATH)) {
         return candidate;
       }
-      return '/admin/dashboard';
+      return ADMIN_DASHBOARD_PATH;
     }
     if (role === 'SHOP_OWNER') {
       if (candidate.startsWith('/shop')) {
@@ -529,7 +534,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (
         rawHash.startsWith('/') ||
         rawHash.startsWith('shop') ||
-        rawHash.startsWith('admin') ||
         rawHash.startsWith('auth') ||
         rawHash.startsWith('s/') ||
         rawHash.startsWith('track-print')
@@ -639,10 +643,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshPlans = async () => {
     try {
       const endpoint = currentUser?.role === 'ADMIN' ? '/api/admin/plans' : '/api/public/plans';
-      const res = await fetch(apiUrl(endpoint), {
-        credentials: 'same-origin',
-        headers: currentUser?.role === 'ADMIN' ? { 'X-User-Role': 'ADMIN' } : {}
-      });
+      const res = currentUser?.role === 'ADMIN'
+        ? await authenticatedFetch(endpoint)
+        : await fetch(apiUrl(endpoint), { credentials: 'same-origin' });
       if (res.ok) {
         const data = await res.json();
         if (data?.success && Array.isArray(data.plans)) {
@@ -683,7 +686,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     city: string;
     password: string;
     planId?: string;
-  }): Promise<{ success: boolean; message?: string; requireEmailVerification?: boolean; email?: string; devOtp?: string }> => {
+  }): Promise<{ success: boolean; message?: string; requireEmailVerification?: boolean; email?: string }> => {
     const trimmedEmail = data.email.trim().toLowerCase();
 
     // Check if email already registered locally in memory
@@ -727,7 +730,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { success: false, message: resData.error || 'Registration failed. Database is currently unavailable.' };
       }
       if (resData.requireEmailVerification) {
-        return { success: true, requireEmailVerification: true, email: resData.email, devOtp: resData.devOtp };
+        return { success: true, requireEmailVerification: true, email: resData.email };
       }
       if (resData.accessToken) {
         localStorage.setItem('printflow_access_token', resData.accessToken);
@@ -822,11 +825,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Authentication: Admin Dedicated Login (/admin/login)
+  // Authentication: Admin Dedicated Obscured Login Endpoint
   const adminLogin = async (email: string, password: string): Promise<{ success: boolean; message?: string }> => {
     const trimmedEmail = email.trim().toLowerCase();
     try {
-      const response = await fetch(apiUrl('/api/auth/login'), {
+      const response = await fetch(apiUrl(ADMIN_API_LOGIN_PATH), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -980,17 +983,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Logout
   const logout = () => {
+    // Revoke server-side session (cookie + Bearer JTI) before clearing local token
+    try {
+      authenticatedFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    } catch (e) {}
+
     setCurrentUser(null);
     setIsMfaStepUpVerified(false);
     try {
       window.localStorage.removeItem('printflow_access_token');
       window.sessionStorage.removeItem('easytoprint_return_to');
     } catch {}
-
-    // Revoke server-side session and clear HttpOnly cookie
-    try {
-      fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'same-origin' }).catch(() => {});
-    } catch (e) {}
 
     showToast('Signed Out', 'You have been logged out securely.', 'info', 3000);
     navigate('/');
@@ -1000,16 +1003,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const switchRole = (role: Role) => {
     if (role === 'ADMIN') {
       if (currentUser?.role === 'ADMIN') {
-        navigate('/admin/dashboard');
+        navigate(ADMIN_DASHBOARD_PATH);
       } else {
-        navigate('/admin/login');
+        navigate(ADMIN_LOGIN_PATH);
       }
     } else {
       if (currentUser?.role === 'SHOP_OWNER') {
         navigate('/shop/dashboard');
       } else if (currentUser?.role === 'ADMIN') {
         showToast('Access Denied', 'Super Admin accounts cannot directly access the Shop Portal.', 'error', 4000);
-        navigate('/admin/dashboard');
+        navigate(ADMIN_DASHBOARD_PATH);
       } else {
         navigate('/auth/login');
       }
@@ -1090,9 +1093,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setStoredItem('admin_razorpay', safeSettings);
 
     try {
-      const res = await fetch(apiUrl('/api/payment/platform-config'), {
+      const res = await authenticatedFetch('/api/payment/platform-config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           keyId: settings.keyId,
           keySecret: settings.keySecret || undefined,
@@ -1134,9 +1136,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     try {
-      const res = await fetch(apiUrl(`/api/shop/${shopId}/payment-settings`), {
+      const res = await authenticatedFetch(`/api/shop/${shopId}/payment-settings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           keyId: settings.keyId,
           keySecret: settings.keySecret || undefined,
@@ -1184,13 +1185,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     try {
-      const res = await fetch(apiUrl('/api/admin/plans'), {
+      const res = await authenticatedFetch('/api/admin/plans', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-Role': 'ADMIN'
-        },
-        credentials: 'same-origin',
         body: JSON.stringify({
           ...planData,
           slug,
@@ -1218,13 +1214,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let targetPlanName = '';
 
     try {
-      const res = await fetch(apiUrl(`/api/admin/plans/${encodeURIComponent(planId)}`), {
+      const res = await authenticatedFetch(`/api/admin/plans/${encodeURIComponent(planId)}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-User-Role': 'ADMIN'
-        },
-        credentials: 'same-origin',
         body: JSON.stringify(updates)
       });
       const data = await res.json();
@@ -1324,10 +1315,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Preserve historical records by soft-archiving instead of deleting
     try {
-      fetch(apiUrl(`/api/admin/plans/${encodeURIComponent(planId)}/status`), {
+      authenticatedFetch(`/api/admin/plans/${encodeURIComponent(planId)}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'X-User-Role': 'ADMIN' },
-        credentials: 'same-origin',
         body: JSON.stringify({ isActive: false, status: 'ARCHIVED' })
       }).catch(() => {});
     } catch {}
@@ -1364,10 +1353,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      const res = await fetch(apiUrl(`/api/admin/plans/${encodeURIComponent(effectiveId)}`), {
-        method: 'DELETE',
-        headers: { 'X-User-Role': 'ADMIN' },
-        credentials: 'same-origin'
+      const res = await authenticatedFetch(`/api/admin/plans/${encodeURIComponent(effectiveId)}`, {
+        method: 'DELETE'
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -1393,10 +1380,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const isActive = status === 'ACTIVE';
 
     try {
-      fetch(apiUrl(`/api/admin/plans/${encodeURIComponent(planId)}/status`), {
+      authenticatedFetch(`/api/admin/plans/${encodeURIComponent(planId)}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'X-User-Role': 'ADMIN' },
-        credentials: 'same-origin',
         body: JSON.stringify({ isActive, status })
       }).catch(() => {});
     } catch {}
@@ -1558,13 +1543,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const testGatewayConnection = async (): Promise<{ success: boolean; message: string; latencyMs: number }> => {
     try {
-      const res = await fetch(apiUrl('/api/payment/platform-config/test'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer admin_token_active',
-          'X-User-Role': 'ADMIN'
-        }
+      const res = await authenticatedFetch('/api/payment/platform-config/test', {
+        method: 'POST'
       });
 
       const contentType = res.headers.get('content-type') || '';
@@ -1808,10 +1788,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let cancelled = false;
     const syncShopLiveData = async () => {
       try {
-        const response = await fetch(apiUrl(`/api/shop/${encodeURIComponent(activeShop.id)}/live`), {
-          credentials: 'same-origin',
+        const response = await authenticatedFetch(`/api/shop/${encodeURIComponent(activeShop.id)}/live`, {
           headers: {
-            'x-user-role': currentUser.role,
             'x-shop-id': activeShop.id
           }
         });
@@ -2099,12 +2077,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetJob = printJobs.find((j) => j.id === jobId);
     const shopId = targetJob?.shopId || activeShop.id;
     try {
-      const response = await fetch(apiUrl(`/api/shops/${encodeURIComponent(shopId)}/print-jobs/${encodeURIComponent(jobId)}/reconcile`), {
+      const response = await authenticatedFetch(`/api/shops/${encodeURIComponent(shopId)}/print-jobs/${encodeURIComponent(jobId)}/reconcile`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-shop-id': shopId,
-          'x-user-role': currentUser?.role || 'SHOP_OWNER'
+          'x-shop-id': shopId
         },
         body: JSON.stringify({ action, notes })
       });
@@ -2678,22 +2654,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let cancelled = false;
     let cloudReady = false;
     const pendingWrites = new Map<string, Promise<void>>();
-    const accessToken = typeof window !== 'undefined' ? localStorage.getItem('printflow_access_token') : null;
-    const requestHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'x-user-role': currentUser.role,
-      'x-shop-id': activeShop.id,
-      ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
-    };
-
     const writeCloudState = (key: string, value: unknown) => {
       if (!cloudReady || !CLOUD_STATE_KEYS.has(key)) return;
       const previous = pendingWrites.get(key) || Promise.resolve();
       const next = previous.catch(() => undefined).then(async () => {
-        const response = await fetch(apiUrl(`/api/app-data/${encodeURIComponent(key)}`), {
+        const response = await authenticatedFetch(`/api/app-data/${encodeURIComponent(key)}`, {
           method: 'PUT',
-          credentials: 'same-origin',
-          headers: requestHeaders,
+          headers: { 'x-shop-id': activeShop.id },
           body: JSON.stringify({ value: cloudSafeValue(value) })
         });
         const text = await response.text();
@@ -2727,9 +2694,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } = {};
       try {
         for (let attempt = 0; attempt < 4; attempt++) {
-          response = await fetch(apiUrl(`/api/app-data?shopId=${encodeURIComponent(activeShop.id)}`), {
-            credentials: 'same-origin',
-            headers: requestHeaders
+          response = await authenticatedFetch(`/api/app-data?shopId=${encodeURIComponent(activeShop.id)}`, {
+            headers: { 'x-shop-id': activeShop.id }
           });
           const text = await response.text();
           try {

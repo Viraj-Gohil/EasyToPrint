@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useApp, getDeterministicAgentToken } from '../../lib/store';
+import { authenticatedFetch } from '../../lib/apiConfig';
 import {
   RotateCw,
   Copy,
@@ -100,7 +101,7 @@ export const ShopPrintAgent: React.FC = () => {
     if (manual) setIsRefreshing(true);
     const seq = ++requestSeqRef.current;
     try {
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `/api/agent/active-status?shopId=${encodeURIComponent(activeShop?.id || '')}`
       );
       const data = await response.json();
@@ -148,9 +149,8 @@ export const ShopPrintAgent: React.FC = () => {
   const handleDisconnectAgent = async () => {
     setIsDisconnecting(true);
     try {
-      const response = await fetch('/api/agent/disconnect', {
+      const response = await authenticatedFetch('/api/agent/disconnect', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ shopId: activeShop?.id })
       });
       const data = await response.json();

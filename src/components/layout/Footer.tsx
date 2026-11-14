@@ -19,10 +19,10 @@ export const Footer: React.FC = () => {
 
   return (
     <footer className="bg-white border-t border-[#E1E7E1] text-[#646B65] text-sm font-['Manrope',sans-serif]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-10 lg:gap-12">
-          {/* Brand & Purpose (2 cols on md) */}
-          <div className="md:col-span-2 space-y-4">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-x-6 gap-y-10 md:gap-10 lg:gap-12">
+          {/* Brand & Purpose (full width on mobile, 2 cols on md) */}
+          <div className="col-span-2 space-y-4">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-[#E8F8EC] text-[#00B32D] flex items-center justify-center shrink-0 border border-[#A7F3D0]/70">
                 <Printer className="w-4.5 h-4.5 text-[#00B32D]" />

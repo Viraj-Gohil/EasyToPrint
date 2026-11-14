@@ -981,8 +981,8 @@ export function verifyPassword(password: string, storedHash: string): boolean {
     return crypto.timingSafeEqual(Buffer.from(computedHash), Buffer.from(originalHash));
   }
 
-  // Backwards compatibility fallback for synthetic test seeds
-  return password === storedHash || (storedHash === 'shop' && password === 'shop') || (storedHash === 'admin' && password === 'admin');
+  // Reject any non-PBKDF2 hash (no plaintext fallbacks permitted)
+  return false;
 }
 
 // ============================================================================
@@ -1258,11 +1258,7 @@ let cachedSessionSigningSecret = (typeof process !== 'undefined' && process.env?
 
 function getSessionSigningSecret(): string {
   if (!cachedSessionSigningSecret) {
-    try {
-      cachedSessionSigningSecret = crypto.randomBytes(32).toString('hex');
-    } catch {
-      cachedSessionSigningSecret = 'printflow_default_secure_session_signing_secret_2026';
-    }
+    cachedSessionSigningSecret = crypto.randomBytes(32).toString('hex');
   }
   return cachedSessionSigningSecret;
 }

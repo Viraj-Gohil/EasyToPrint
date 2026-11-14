@@ -29,7 +29,7 @@ import {
   Loader2,
   X
 } from 'lucide-react';
-import { apiUrl } from '../../lib/apiConfig';
+import { authenticatedFetch } from '../../lib/apiConfig';
 import {
   validateShopName,
   validateEmail,
@@ -99,11 +99,9 @@ export const ShopSettings: React.FC = () => {
   // Load shop retention settings
   useEffect(() => {
     if (!activeShop?.id) return;
-    fetch(apiUrl(`/api/shop/${encodeURIComponent(activeShop.id)}/retention`), {
+    authenticatedFetch(`/api/shop/${encodeURIComponent(activeShop.id)}/retention`, {
       headers: {
-        'Authorization': 'Bearer admin_token_active',
-        'X-Shop-Id': activeShop.id,
-        'X-User-Role': 'SHOP_OWNER'
+        'X-Shop-Id': activeShop.id
       }
     })
       .then((r) => r.ok ? r.json() : null)
@@ -121,13 +119,10 @@ export const ShopSettings: React.FC = () => {
     setIsSavingRetention(true);
     setRetentionSaved(false);
     try {
-      const res = await fetch(apiUrl(`/api/shop/${encodeURIComponent(activeShop.id)}/retention`), {
+      const res = await authenticatedFetch(`/api/shop/${encodeURIComponent(activeShop.id)}/retention`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer admin_token_active',
-          'X-Shop-Id': activeShop.id,
-          'X-User-Role': 'SHOP_OWNER'
+          'X-Shop-Id': activeShop.id
         },
         body: JSON.stringify({ autoDeleteEnabled, retentionHours })
       });
@@ -149,11 +144,9 @@ export const ShopSettings: React.FC = () => {
   // Load shop payment integration from backend
   useEffect(() => {
     if (!activeShop?.id) return;
-    fetch(apiUrl(`/api/shop/${encodeURIComponent(activeShop.id)}/payment-settings`), {
+    authenticatedFetch(`/api/shop/${encodeURIComponent(activeShop.id)}/payment-settings`, {
       headers: {
-        'Authorization': 'Bearer admin_token_active',
-        'X-Shop-Id': activeShop.id,
-        'X-User-Role': 'SHOP_OWNER'
+        'X-Shop-Id': activeShop.id
       }
     })
       .then((r) => {
@@ -266,36 +259,16 @@ export const ShopSettings: React.FC = () => {
     }
 
     try {
-      // First attempt the shop-isolated test endpoint
-      let res = await fetch(apiUrl(`/api/shop/${encodeURIComponent(activeShop.id)}/payment-settings/test`), {
+      const res = await authenticatedFetch(`/api/shop/${encodeURIComponent(activeShop.id)}/payment-settings/test`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer admin_token_active',
-          'X-Shop-Id': activeShop.id,
-          'X-User-Role': 'SHOP_OWNER'
+          'X-Shop-Id': activeShop.id
         },
         body: JSON.stringify({
           keyId: key,
           keySecret: replaceSecret.trim() || undefined
         })
       });
-
-      // Fallback to platform test endpoint if shop test route is unavailable
-      if (res.status === 404) {
-        res = await fetch(apiUrl('/api/payment/platform-config/test'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer admin_token_active',
-            'X-User-Role': 'SHOP_OWNER'
-          },
-          body: JSON.stringify({
-            keyId: key,
-            keySecret: replaceSecret.trim() || undefined
-          })
-        });
-      }
 
       const contentType = res.headers.get('content-type') || '';
       let data: any = {};
@@ -346,13 +319,10 @@ export const ShopSettings: React.FC = () => {
 
     setIsSavingGateway(true);
     try {
-      const res = await fetch(apiUrl(`/api/shop/${encodeURIComponent(activeShop.id)}/payment-settings`), {
+      const res = await authenticatedFetch(`/api/shop/${encodeURIComponent(activeShop.id)}/payment-settings`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer admin_token_active',
-          'X-Shop-Id': activeShop.id,
-          'X-User-Role': 'SHOP_OWNER'
+          'X-Shop-Id': activeShop.id
         },
         body: JSON.stringify({
           keyId: key,

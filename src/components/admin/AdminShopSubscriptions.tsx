@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../lib/store';
+import { adminPath } from '../../lib/adminConfig';
 import {
   Layers,
   Crown,
@@ -150,7 +151,7 @@ export const AdminShopSubscriptions: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => navigate('/admin/plans')}
+            onClick={() => navigate(adminPath('plans'))}
             className="px-3.5 py-2 text-xs font-semibold text-[#008F25] bg-[#E8F8EC] hover:bg-emerald-100 border border-[#A7F3D0] rounded-xl shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Crown className="w-3.5 h-3.5 text-[#00B52D]" />

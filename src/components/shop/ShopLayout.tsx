@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApp, DEFAULT_FALLBACK_PLAN } from '../../lib/store';
 import { apiUrl } from '../../lib/apiConfig';
+import { ADMIN_DASHBOARD_PATH } from '../../lib/adminConfig';
 import {
   LayoutDashboard,
   Printer,
@@ -435,7 +436,7 @@ export const ShopLayout: React.FC<ShopLayoutProps> = ({ children, activeTab }) =
                       <button
                         type="button"
                         onClick={() => {
-                          navigate('/admin/dashboard');
+                          navigate(ADMIN_DASHBOARD_PATH);
                           setProfileDropdownOpen(false);
                         }}
                         className="w-full px-3.5 py-2 text-left text-purple-700 hover:bg-purple-50 flex items-center gap-2 cursor-pointer"

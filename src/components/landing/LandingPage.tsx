@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '../../lib/store';
 import { apiUrl } from '../../lib/apiConfig';
 import { FaqAccordion } from './FaqAccordion';
+import { CustomerHowItWorks } from './CustomerHowItWorks';
 import {
   Printer,
   QrCode,
@@ -222,8 +223,8 @@ export const LandingPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Right Column: Hero Visual Product Showcase */}
-              <div className="lg:col-span-5 relative">
+              {/* Right Column: Hero Visual Product Showcase (Desktop only) */}
+              <div className="hidden lg:block lg:col-span-5 relative">
                 {/* Floating Status Indicator Badges */}
                 <div className="relative mx-auto max-w-lg lg:max-w-none">
                   {/* Floating Indicator 1: Agent Connected */}
@@ -498,24 +499,40 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* ========================================================================= */}
-        {/* SECTION 3: HOW EASYTOPRINT WORKS (4 SIMPLE STEPS)                        */}
+        {/* SECTION 3: HOW EASYTOPRINT WORKS (CUSTOMER + SHOP OWNER FLOWS)            */}
         {/* ========================================================================= */}
         <section id="how-it-works" className="py-16 sm:py-24 border-b border-[#E1E7E1] bg-[#F7F8F7]">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center max-w-3xl mx-auto space-y-3 mb-16">
+            <div className="text-center max-w-3xl mx-auto space-y-3 mb-14">
               <span className="text-xs font-bold text-[#008F25] bg-[#E8F8EC] px-3 py-1 rounded-full border border-[#A7F3D0]">
-                Quick 10-Minute Setup
+                How EasyToPrint Works
               </span>
-              <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-[#111111] tracking-tight">
-                Get Your Printing Shop Running in 4 Simple Steps
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-[#111111] tracking-tight text-balance">
+                Simple for Customers. Automated for Print Shops.
               </h2>
               <p className="text-sm sm:text-base text-[#646B65]">
-                Start managing your printing business with a simple setup process. No complicated server setup or IT degree needed.
+                Customers scan, upload, customize, and pay in seconds — while shop owners automate printing with a quick 10-minute setup.
               </p>
             </div>
 
-            {/* 4 Connected Step Cards with Numbered Indicators */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative">
+            {/* Customer Side: 4 Visual Green Cards with Mobile Screens */}
+            <CustomerHowItWorks
+              onOpenQrScanner={() => setIsQrScannerOpen(true)}
+              onFindShop={() => setIsQrScannerOpen(true)}
+            />
+
+            {/* Shop Owner Side: 4 Connected Setup Step Cards */}
+            <div className="mt-16 pt-14 border-t border-[#E1E7E1]">
+              <div className="mb-8 space-y-1.5 text-left">
+                <p className="text-xs font-bold uppercase tracking-wider text-[#008F25]">
+                  For Print Shop Owners · Quick 10-Minute Setup
+                </p>
+                <h3 className="text-xl sm:text-2xl font-extrabold text-[#111111] tracking-tight">
+                  Get Your Printing Shop Running in 4 Simple Steps
+                </h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative">
               {/* Step 1 */}
               <div className="p-6 rounded-2xl bg-white border border-[#E1E7E1] shadow-xs flex flex-col justify-between space-y-4 hover:border-[#A7F3D0] transition-colors relative group">
                 <div className="space-y-3">
@@ -618,6 +635,7 @@ export const LandingPage: React.FC = () => {
                   </div>
                   <div className="text-xs">Ready for Customer Scans 🚀</div>
                 </div>
+              </div>
               </div>
             </div>
           </div>
@@ -1141,10 +1159,6 @@ export const LandingPage: React.FC = () => {
                             Billed annually at ₹{plan.priceYearly}
                           </span>
                         )}
-                        <div className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F7F8F7] border border-[#E1E7E1] text-xs font-semibold text-[#111111]">
-                          <Printer className="w-3.5 h-3.5 text-[#00B32D]" />
-                          <span>Supports up to {plan.maxPrinters || 1} Physical Printer{(plan.maxPrinters || 1) > 1 ? 's' : ''}</span>
-                        </div>
                       </div>
 
                       {/* Features List */}

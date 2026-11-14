@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '../../lib/store';
+import { ADMIN_DASHBOARD_PATH, isAdminRoutePath } from '../../lib/adminConfig';
 import {
   Printer,
   Shield,
@@ -343,7 +344,7 @@ export const Navbar: React.FC = () => {
                 <span>Shop</span>
               </span>
             )}
-            {currentPath.startsWith('/admin') && (
+            {isAdminRoutePath(currentPath) && currentUser?.role === 'ADMIN' && (
               <span className="hidden lg:inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-semibold text-purple-700 bg-purple-50 rounded-full border border-purple-200">
                 <Shield className="w-3 h-3 text-purple-600" />
                 <span>Admin</span>
@@ -492,7 +493,7 @@ export const Navbar: React.FC = () => {
                   <button
                     type="button"
                     onClick={() =>
-                      navigate(currentUser.role === 'ADMIN' ? '/admin/dashboard' : '/shop/dashboard')
+                      navigate(currentUser.role === 'ADMIN' ? ADMIN_DASHBOARD_PATH : '/shop/dashboard')
                     }
                     className="inline-flex items-center justify-center gap-1 px-3 py-1 text-xs font-bold text-white bg-[#00B32D] hover:bg-[#008F25] active:scale-[0.98] rounded-full transition-all shadow-xs cursor-pointer whitespace-nowrap"
                   >
@@ -665,7 +666,7 @@ export const Navbar: React.FC = () => {
                       onClick={() => {
                         setMobileMenuOpen(false);
                         navigate(
-                          currentUser.role === 'ADMIN' ? '/admin/dashboard' : '/shop/dashboard'
+                          currentUser.role === 'ADMIN' ? ADMIN_DASHBOARD_PATH : '/shop/dashboard'
                         );
                       }}
                       className="w-full py-2.5 px-4 bg-[#00B32D] hover:bg-[#008F25] text-white rounded-full text-sm font-semibold transition-colors text-center shadow-xs cursor-pointer"

@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { SaasPlan } from '../../types';
 import { RazorpayCheckoutButton } from '../payment/RazorpayCheckoutButton';
-import { apiUrl } from '../../lib/apiConfig';
+import { apiUrl, authenticatedFetch } from '../../lib/apiConfig';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 
@@ -141,13 +141,8 @@ export const ShopSubscription: React.FC = () => {
     setDeleteError(null);
 
     try {
-      const res = await fetch(apiUrl(`/api/plans/${encodeURIComponent(planToDelete.id)}`), {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer admin_token_active',
-          'X-User-Role': currentUser?.role || 'ADMIN'
-        }
+      const res = await authenticatedFetch(`/api/plans/${encodeURIComponent(planToDelete.id)}`, {
+        method: 'DELETE'
       });
 
       const data = await res.json().catch(() => ({ success: false, error: 'Failed to process server response.' }));

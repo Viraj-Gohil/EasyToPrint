@@ -616,14 +616,6 @@ export const INITIAL_AGENTS: ElectronAgent[] = [
 
 export const INITIAL_USERS = [
   {
-    id: 'usr_admin',
-    email: 'admin@printflow.io',
-    password: 'admin',
-    fullName: 'Platform Super Admin',
-    role: 'ADMIN' as const,
-    createdAt: '2026-01-01T00:00:00Z'
-  },
-  {
     id: 'usr_owner_2',
     email: 'vikram.royalcyber@gmail.com',
     password: 'shop',
@@ -921,10 +913,10 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
 ];
 
 export const SUPPORT_ADMIN_USERS = [
-  { id: 'usr_admin', name: 'Platform Super Admin', email: 'admin@printflow.io', role: 'ADMIN' as const },
-  { id: 'usr_admin_ops', name: 'Priya Nair (Operations)', email: 'priya.nair@printflow.io', role: 'ADMIN' as const },
-  { id: 'usr_admin_tech', name: 'Arjun Mehta (Hardware Eng)', email: 'arjun.mehta@printflow.io', role: 'ADMIN' as const },
-  { id: 'usr_admin_billing', name: 'Neha Sharma (Billing & Finance)', email: 'neha.sharma@printflow.io', role: 'ADMIN' as const }
+  { id: 'usr_admin', name: 'Platform Super Admin', email: 'platform-ops@easytoprint.in', role: 'ADMIN' as const },
+  { id: 'usr_admin_ops', name: 'Priya Nair (Operations)', email: 'priya.nair@easytoprint.in', role: 'ADMIN' as const },
+  { id: 'usr_admin_tech', name: 'Arjun Mehta (Hardware Eng)', email: 'arjun.mehta@easytoprint.in', role: 'ADMIN' as const },
+  { id: 'usr_admin_billing', name: 'Neha Sharma (Billing & Finance)', email: 'neha.sharma@easytoprint.in', role: 'ADMIN' as const }
 ];
 
 export const INITIAL_SUPPORT_SETTINGS: SupportSettings = {
@@ -1359,7 +1351,7 @@ export const INITIAL_SUPPORT_TICKETS: SupportTicket[] = [
     status: 'RESOLVED',
     assignedAdminId: 'usr_admin',
     assignedAdminName: 'Platform Super Admin',
-    assignedAdminEmail: 'admin@printflow.io',
+    assignedAdminEmail: 'platform-ops@easytoprint.in',
     tags: ['upload-timeout', 'large-files', 'pdf'],
     firstResponseAt: '2026-10-06T11:45:00Z',
     resolvedAt: '2026-10-06T15:30:00Z',

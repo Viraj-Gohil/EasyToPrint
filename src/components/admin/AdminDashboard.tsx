@@ -15,7 +15,8 @@ import {
   ExternalLink,
   DollarSign
 } from 'lucide-react';
-import { apiUrl } from '../../lib/apiConfig';
+import { authenticatedFetch } from '../../lib/apiConfig';
+import { adminPath } from '../../lib/adminConfig';
 import { Button } from '../ui/Button';
 
 interface DashboardStats {
@@ -87,18 +88,7 @@ export const AdminDashboard: React.FC = () => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const token = typeof window !== 'undefined'
-        ? localStorage.getItem('easytoprint_access_token') || localStorage.getItem('printflow_access_token')
-        : null;
-
-      const res = await fetch(apiUrl('/api/admin/dashboard-stats'), {
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-dev-role': 'ADMIN',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        credentials: 'same-origin'
-      });
+      const res = await authenticatedFetch('/api/admin/dashboard-stats');
 
       if (!res.ok) {
         throw new Error(`Failed to load dashboard metrics (HTTP ${res.status})`);
@@ -180,7 +170,7 @@ export const AdminDashboard: React.FC = () => {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Registered Shops */}
         <div
-          onClick={() => navigate('/admin/shops')}
+          onClick={() => navigate(adminPath('shops'))}
           className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs hover:border-[#00B52D]/50 hover:shadow-sm transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between text-slate-500 mb-2">
@@ -200,7 +190,7 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Total Registered Users */}
         <div
-          onClick={() => navigate('/admin/users')}
+          onClick={() => navigate(adminPath('users'))}
           className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs hover:border-[#00B52D]/50 hover:shadow-sm transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between text-slate-500 mb-2">
@@ -219,7 +209,7 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Gross Revenue (Successful Only) */}
         <div
-          onClick={() => navigate('/admin/payments')}
+          onClick={() => navigate(adminPath('payments'))}
           className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs hover:border-[#00B52D]/50 hover:shadow-sm transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between text-slate-500 mb-2">
@@ -238,7 +228,7 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Registered Hardware Printers */}
         <div
-          onClick={() => navigate('/admin/printers')}
+          onClick={() => navigate(adminPath('printers'))}
           className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs hover:border-[#00B52D]/50 hover:shadow-sm transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between text-slate-500 mb-2">
@@ -260,7 +250,7 @@ export const AdminDashboard: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Active Subscriptions */}
         <div
-          onClick={() => navigate('/admin/plans')}
+          onClick={() => navigate(adminPath('plans'))}
           className="bg-white p-4.5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between cursor-pointer hover:border-slate-300 transition-colors"
         >
           <div className="space-y-0.5">
@@ -277,7 +267,7 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Cloud Document Storage */}
         <div
-          onClick={() => navigate('/admin/storage')}
+          onClick={() => navigate(adminPath('storage'))}
           className="bg-white p-4.5 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between cursor-pointer hover:border-slate-300 transition-colors"
         >
           <div className="space-y-0.5">
@@ -317,7 +307,7 @@ export const AdminDashboard: React.FC = () => {
             <p className="text-xs text-[#777777]">Tenants operating on the EasyToPrint network with 6-digit shop codes</p>
           </div>
           <button
-            onClick={() => navigate('/admin/shops')}
+            onClick={() => navigate(adminPath('shops'))}
             className="text-xs font-bold text-[#00B52D] hover:underline flex items-center gap-1 cursor-pointer"
           >
             <span>View All Shops</span>
@@ -422,7 +412,7 @@ export const AdminDashboard: React.FC = () => {
             <p className="text-xs text-[#777777]">Actual payment orders processed through the integrated gateway</p>
           </div>
           <button
-            onClick={() => navigate('/admin/payments')}
+            onClick={() => navigate(adminPath('payments'))}
             className="text-xs font-bold text-[#00B52D] hover:underline flex items-center gap-1 cursor-pointer"
           >
             <span>View All Payments</span>

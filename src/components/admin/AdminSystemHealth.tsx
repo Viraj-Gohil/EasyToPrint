@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../lib/store';
+import { authenticatedFetch } from '../../lib/apiConfig';
 import {
   Activity,
   Cpu,
@@ -286,7 +287,7 @@ function AgentFleetMonitoringSection() {
 
   const fetchOverview = async () => {
     try {
-      const res = await fetch('/api/admin/resource-overview');
+      const res = await authenticatedFetch('/api/admin/resource-overview');
       const data = await res.json();
       if (data.success) {
         setFleetData(data);
@@ -307,7 +308,7 @@ function AgentFleetMonitoringSection() {
   const handleResolveAlert = async (alertId: string) => {
     setResolvingId(alertId);
     try {
-      const res = await fetch(`/api/agent/monitoring/alerts/${alertId}/resolve`, { method: 'PATCH' });
+      const res = await authenticatedFetch(`/api/agent/monitoring/alerts/${alertId}/resolve`, { method: 'PATCH' });
       const data = await res.json();
       if (data.success) {
         fetchOverview();

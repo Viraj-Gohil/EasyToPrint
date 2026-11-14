@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useApp } from '../../lib/store';
+import { adminPath } from '../../lib/adminConfig';
 import {
   Check,
   Zap,
@@ -145,7 +146,7 @@ export const PricingPage: React.FC = () => {
       navigate(`/shop/subscription?upgrade=${plan.id}&billing=${billingCycle}`);
     } else {
       showToast('Admin accounts manage subscriptions from the Admin Console.', 'info');
-      navigate('/admin/subscriptions');
+      navigate(adminPath('subscriptions'));
     }
   };
 

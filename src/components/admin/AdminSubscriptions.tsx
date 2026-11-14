@@ -53,7 +53,8 @@ import {
   PlanChangePolicy,
   PlanFeatureEntitlements
 } from '../../types';
-import { apiUrl } from '../../lib/apiConfig';
+import { authenticatedFetch } from '../../lib/apiConfig';
+import { adminPath, ADMIN_LOGIN_PATH } from '../../lib/adminConfig';
 
 export const AdminSubscriptions: React.FC = () => {
   const {
@@ -612,13 +613,8 @@ export const AdminSubscriptions: React.FC = () => {
 
     try {
       const mode = adminRazorpay.isTestMode ? 'test' : 'live';
-      const res = await fetch(apiUrl('/api/payment/platform-config'), {
+      const res = await authenticatedFetch('/api/payment/platform-config', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer admin_token_active',
-          'X-User-Role': 'ADMIN'
-        },
         body: JSON.stringify({
           keyId: adminRazorpay.keyId?.trim(),
           keySecret: replaceSecretKey.trim() || undefined,
@@ -690,7 +686,7 @@ export const AdminSubscriptions: React.FC = () => {
         </p>
         <div className="pt-2">
           <button
-            onClick={() => navigate('/auth')}
+            onClick={() => navigate(ADMIN_LOGIN_PATH)}
             className="px-4 py-2 bg-[#00B52D] hover:bg-[#009624] text-white text-xs font-semibold rounded-xl cursor-pointer"
           >
             Sign In As Platform Admin
@@ -716,7 +712,7 @@ export const AdminSubscriptions: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2.5">
           {/* View Active Tenant Subscriptions */}
           <button
-            onClick={() => navigate('/admin/subscriptions')}
+            onClick={() => navigate(adminPath('subscriptions'))}
             className="px-3.5 py-2 text-xs font-semibold text-[#00B52D] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Layers className="w-3.5 h-3.5 text-[#00B52D]" />

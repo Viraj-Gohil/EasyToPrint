@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../lib/store';
-import { apiUrl } from '../../lib/apiConfig';
+import { authenticatedFetch } from '../../lib/apiConfig';
 import {
   Sliders,
   Building2,
@@ -53,12 +53,7 @@ export const AdminPlatformSettings: React.FC = () => {
   const [isSavingPolicies, setIsSavingPolicies] = useState(false);
 
   useEffect(() => {
-    fetch(apiUrl('/api/admin/maintenance'), {
-      headers: {
-        'Authorization': 'Bearer admin_token_active',
-        'X-User-Role': 'ADMIN'
-      }
-    })
+    authenticatedFetch('/api/admin/maintenance')
       .then(res => res.json())
       .then(data => {
         if (data.success && data.maintenance) {
@@ -73,13 +68,8 @@ export const AdminPlatformSettings: React.FC = () => {
   const handleSaveMaintenance = async () => {
     setIsSavingMaintenance(true);
     try {
-      const res = await fetch(apiUrl('/api/admin/maintenance'), {
+      const res = await authenticatedFetch('/api/admin/maintenance', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer admin_token_active',
-          'X-User-Role': 'ADMIN'
-        },
         body: JSON.stringify({
           enabled: maintenanceMode,
           scope: maintenanceScope,

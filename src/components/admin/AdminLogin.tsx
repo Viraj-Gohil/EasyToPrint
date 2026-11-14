@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../../lib/store';
 import { Shield, Lock, Mail, ArrowRight, AlertCircle, CheckCircle2, ArrowLeft, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { validateEmail, validatePassword } from '../../lib/validation';
+import { ADMIN_DASHBOARD_PATH } from '../../lib/adminConfig';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 
@@ -32,7 +33,7 @@ export const AdminLogin: React.FC = () => {
             <Button
               variant="solid"
               size="md"
-              onClick={() => navigate('/admin/dashboard')}
+              onClick={() => navigate(ADMIN_DASHBOARD_PATH)}
               className="w-full bg-[#00B52D] hover:bg-[#008F25] focus-visible:ring-[#00B52D]"
             >
               Go to Admin Console
@@ -100,7 +101,7 @@ export const AdminLogin: React.FC = () => {
           </div>
           <div className="space-y-1">
             <span className="text-[10px] font-mono font-semibold uppercase tracking-wider text-[#008F25] bg-[#E8F8EC] px-2.5 py-0.5 rounded-full border border-[#A7F3D0] inline-block">
-              Fixed URL: /admin/login
+              Restricted Gateway • Authorized Access Only
             </span>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#080808] mt-1">
               Platform Master Admin
@@ -137,7 +138,7 @@ export const AdminLogin: React.FC = () => {
                   name="email"
                   type="email"
                   autoComplete="email"
-                  placeholder="admin@easytoprint.io"
+                  placeholder="Enter authorized administrator email"
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value);

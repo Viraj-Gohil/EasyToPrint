@@ -12,7 +12,7 @@ import {
   FileText,
   Loader2
 } from 'lucide-react';
-import { apiUrl } from '../../lib/apiConfig';
+import { authenticatedFetch } from '../../lib/apiConfig';
 import { generateStandPdf, generateStandPngDataUrl } from '../../lib/counterStandGenerator';
 
 export const ShopQrCodes: React.FC = () => {
@@ -47,11 +47,9 @@ export const ShopQrCodes: React.FC = () => {
 
     async function fetchAuthoritativeCode() {
       try {
-        const res = await fetch(apiUrl(`/api/shops/${encodeURIComponent(activeShop.id)}/access-code`), {
+        const res = await authenticatedFetch(`/api/shops/${encodeURIComponent(activeShop.id)}/access-code`, {
           headers: {
-            'Authorization': 'Bearer admin_token_active',
-            'X-Shop-Id': activeShop.id,
-            'X-User-Role': 'SHOP_OWNER'
+            'X-Shop-Id': activeShop.id
           }
         });
         if (!cancelled && res.ok) {

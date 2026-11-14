@@ -30,6 +30,7 @@ import {
 } from '../../lib/validation';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
+import { ADMIN_DASHBOARD_PATH } from '../../lib/adminConfig';
 
 interface AuthPagesProps {
   initialView?: 'login' | 'register' | 'forgot' | 'reset-password';
@@ -74,7 +75,6 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
   const [showConfirmResetPassword, setShowConfirmResetPassword] = useState(false);
   const [resetResendCountdown, setResetResendCountdown] = useState(60);
   const [resetCanResend, setResetCanResend] = useState(false);
-  const [devResetOtpHint, setDevResetOtpHint] = useState<string | null>(null);
 
   useEffect(() => {
     if (view === 'verify-reset-otp' && resetResendCountdown > 0) {
@@ -94,7 +94,6 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
   const [otpCode, setOtpCode] = useState('');
   const [resendCountdown, setResendCountdown] = useState(60);
   const [canResend, setCanResend] = useState(false);
-  const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
 
   useEffect(() => {
     if (view === 'verify-email' && resendCountdown > 0) {
@@ -130,7 +129,7 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
             <Button
               variant="solid"
               size="md"
-              onClick={() => navigate('/admin/dashboard')}
+              onClick={() => navigate(ADMIN_DASHBOARD_PATH)}
               className="w-full"
             >
               Go to Admin Dashboard
@@ -380,7 +379,6 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
         setErrorMessage(res.message || 'Registration failed. Please check your details and try again.');
       } else if (res.requireEmailVerification) {
         setVerificationEmail(res.email || registerEmail.trim());
-        if (res.devOtp) setDevOtpHint(res.devOtp);
         setResendCountdown(60);
         setCanResend(false);
         setView('verify-email');
@@ -431,7 +429,6 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
       const data = await res.json();
       setIsSubmitting(false);
       if (data.success) {
-        if (data.devOtp) setDevOtpHint(data.devOtp);
         setResendCountdown(60);
         setCanResend(false);
       } else {
@@ -468,7 +465,6 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
       setIsSubmitting(false);
       if (data.success) {
         setMaskedEmail(data.maskedEmail || data.maskedContact || maskEmail(cleanEmail));
-        if (data.devOtp) setDevResetOtpHint(data.devOtp);
         setResetResendCountdown(60);
         setResetCanResend(false);
         setView('verify-reset-otp');
@@ -521,7 +517,6 @@ export const AuthPages: React.FC<AuthPagesProps> = ({ initialView = 'login' }) =
       const data = await res.json();
       setIsSubmitting(false);
       if (data.success) {
-        if (data.devOtp) setDevResetOtpHint(data.devOtp);
         setResetResendCountdown(60);
         setResetCanResend(false);
       } else {

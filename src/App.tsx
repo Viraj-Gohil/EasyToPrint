@@ -24,6 +24,7 @@ import {
   NotFoundPage
 } from './components/public/PublicSeoPages';
 import { normalizePathname } from './lib/seoConfig';
+import { ADMIN_BASE_PATH, ADMIN_LOGIN_PATH, ADMIN_DASHBOARD_PATH, isAdminRoutePath } from './lib/adminConfig';
 import { ShieldAlert, Shield, LogOut, Loader2, LayoutDashboard, AlertCircle } from 'lucide-react';
 
 // Shop Owner Components & Layout
@@ -123,7 +124,8 @@ function resolveShopTab(cleanPath: string): string | null {
 }
 
 function resolveAdminTab(cleanPath: string): string | null {
-  const rawSub = cleanPath.replace(/^\/admin\/?/, '').split('/')[0].toLowerCase();
+  const escapedBase = ADMIN_BASE_PATH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rawSub = cleanPath.replace(new RegExp(`^${escapedBase}/?`), '').split('/')[0].toLowerCase();
   switch (rawSub) {
     case '':
     case 'dashboard':
@@ -209,8 +211,8 @@ const AppRouter: React.FC = () => {
   const cleanRaw = rawPath.startsWith('#') ? rawPath.slice(1) : rawPath;
   const path = normalizePathname(cleanRaw.startsWith('/') ? cleanRaw : `/${cleanRaw}`);
 
-  // Dedicated Fixed Admin Login URL: /admin/login
-  if (path === '/admin/login' || path.startsWith('/admin/login')) {
+  // Dedicated Obscured Admin Login URL
+  if (path === ADMIN_LOGIN_PATH || path.startsWith(`${ADMIN_LOGIN_PATH}/`)) {
     if (!isAuthRestored) {
       return <AuthInitializingScreen />;
     }
@@ -431,7 +433,7 @@ const AppRouter: React.FC = () => {
               <div className="pt-2 flex flex-col gap-2">
                 <button
                   type="button"
-                  onClick={() => navigate('/admin/dashboard')}
+                  onClick={() => navigate(ADMIN_DASHBOARD_PATH)}
                   className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs sm:text-sm bg-[#00B52D] text-white hover:bg-[#008F25] active:scale-[0.98] transition-all cursor-pointer shadow-sm"
                 >
                   <Shield className="w-4 h-4" />
@@ -525,8 +527,8 @@ const AppRouter: React.FC = () => {
     );
   }
 
-  // 5. Platform Admin Panel (/admin/*)
-  if (path.startsWith('/admin')) {
+  // 5. Platform Admin Panel (Obscured ADMIN_BASE_PATH/*; legacy /admin returns 404)
+  if (isAdminRoutePath(path)) {
     if (!isAuthRestored) {
       return <AuthInitializingScreen />;
     }
@@ -637,7 +639,7 @@ const AppRouter: React.FC = () => {
               <div className="pt-2">
                 <button
                   type="button"
-                  onClick={() => navigate('/admin/dashboard')}
+                  onClick={() => navigate(ADMIN_DASHBOARD_PATH)}
                   className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs sm:text-sm bg-[#00B52D] text-white hover:bg-[#008F25] transition-colors cursor-pointer shadow-xs"
                 >
                   <LayoutDashboard className="w-4 h-4" />
@@ -698,7 +700,7 @@ const AppContent: React.FC = () => {
   const { currentPath, currentUser, isQrScannerOpen, setIsQrScannerOpen, navigate } = useApp();
   const fallbackDashboardPath =
     currentUser?.role === 'ADMIN'
-      ? '/admin/dashboard'
+      ? ADMIN_DASHBOARD_PATH
       : currentUser?.role === 'SHOP_OWNER'
       ? '/shop/dashboard'
       : '/';

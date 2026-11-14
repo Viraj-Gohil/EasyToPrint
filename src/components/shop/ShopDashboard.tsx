@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp, DEFAULT_FALLBACK_PLAN } from '../../lib/store';
-import { apiUrl } from '../../lib/apiConfig';
+import { apiUrl, authenticatedFetch } from '../../lib/apiConfig';
 import QRCode from 'qrcode';
 import {
   Printer,
@@ -127,11 +127,9 @@ export const ShopDashboard: React.FC = () => {
 
     async function loadShopCode() {
       try {
-        const res = await fetch(apiUrl(`/api/shops/${encodeURIComponent(activeShop.id)}/access-code`), {
+        const res = await authenticatedFetch(`/api/shops/${encodeURIComponent(activeShop.id)}/access-code`, {
           headers: {
-            'Authorization': 'Bearer admin_token_active',
-            'X-Shop-Id': activeShop.id,
-            'X-User-Role': 'SHOP_OWNER'
+            'X-Shop-Id': activeShop.id
           }
         });
         if (!active) return;
