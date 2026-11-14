@@ -15,6 +15,7 @@ import {
 import jsQR from 'jsqr';
 import { apiUrl } from '../../lib/apiConfig';
 import { ShopCodeInput } from './ShopCodeInput';
+import { EasyToPrintLoader } from './EasyToPrintLoader';
 
 interface QrScannerModalProps {
   isOpen: boolean;
@@ -487,13 +488,11 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({ isOpen, onClose,
             </div>
           ) : isVerifying ? (
             /* Verifying State */
-            <div className="py-10 text-center space-y-3">
-              <div className="w-12 h-12 rounded-full border-3 border-[#00A61C] border-t-transparent animate-spin mx-auto" />
-              <div>
-                <h4 className="text-sm font-semibold text-[#111111]">Verifying Shop...</h4>
-                <p className="text-xs text-[#646B65] mt-1">Connecting to EasyToPrint verification server</p>
-              </div>
-            </div>
+            <EasyToPrintLoader
+              variant="inline"
+              title="Verifying Shop..."
+              subtitle="Connecting to EasyToPrint verification server"
+            />
           ) : activeTab === 'code' || useManual || cameraState === 'denied' || cameraState === 'unsupported' ? (
             /* 6-Digit Shop Code Entry View (User's Exact Component) */
             <div className="space-y-4">

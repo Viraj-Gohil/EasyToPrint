@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { AppProvider, useApp } from './lib/store';
 import { Navbar } from './components/layout/Navbar';
@@ -13,6 +13,7 @@ import { ToastContainer } from './components/common/ToastContainer';
 import { QrScannerModal } from './components/common/QrScannerModal';
 import { SEOHead } from './components/common/SEOHead';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { EasyToPrintLoader, TopRouteLoader } from './components/common/EasyToPrintLoader';
 import {
   FeaturesSeoPage,
   QrOrderingSeoPage,
@@ -25,7 +26,7 @@ import {
 } from './components/public/PublicSeoPages';
 import { normalizePathname } from './lib/seoConfig';
 import { ADMIN_BASE_PATH, ADMIN_LOGIN_PATH, ADMIN_DASHBOARD_PATH, isAdminRoutePath } from './lib/adminConfig';
-import { ShieldAlert, Shield, LogOut, Loader2, LayoutDashboard, AlertCircle } from 'lucide-react';
+import { ShieldAlert, Shield, LogOut, LayoutDashboard, AlertCircle } from 'lucide-react';
 
 // Shop Owner Components & Layout
 import { ShopLayout } from './components/shop/ShopLayout';
@@ -190,17 +191,11 @@ function resolveAdminTab(cleanPath: string): string | null {
 }
 
 const AuthInitializingScreen: React.FC = () => (
-  <div className="min-h-screen bg-[#F7F8F7] flex flex-col items-center justify-center p-4 font-['Manrope',sans-serif]">
-    <div className="bg-white px-7 py-6 rounded-2xl border border-[#E1E7E1] shadow-xs flex flex-col items-center gap-3 text-center max-w-xs w-full">
-      <div className="w-11 h-11 rounded-xl bg-[#E8F8EC] text-[#00B32D] flex items-center justify-center border border-[#A7F3D0]">
-        <Loader2 className="w-5 h-5 animate-spin" />
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm font-bold text-[#111111]">Loading EasyToPrint</p>
-        <p className="text-xs text-[#646B65]">Verifying your session and workspace...</p>
-      </div>
-    </div>
-  </div>
+  <EasyToPrintLoader
+    variant="fullscreen"
+    title="EasyToPrint"
+    subtitle="Verifying your session and workspace..."
+  />
 );
 
 const AppRouter: React.FC = () => {
@@ -697,7 +692,16 @@ const AppRouter: React.FC = () => {
 };
 
 const AppContent: React.FC = () => {
-  const { currentPath, currentUser, isQrScannerOpen, setIsQrScannerOpen, navigate } = useApp();
+  const { currentPath, currentUser, isQrScannerOpen, setIsQrScannerOpen, isLoadingData, navigate } = useApp();
+  const [showBootLoader, setShowBootLoader] = useState(true);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setShowBootLoader(false);
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const fallbackDashboardPath =
     currentUser?.role === 'ADMIN'
       ? ADMIN_DASHBOARD_PATH
@@ -712,6 +716,24 @@ const AppContent: React.FC = () => {
       fallbackDashboardPath={fallbackDashboardPath}
     >
       <SEOHead currentPath={currentPath} />
+      <TopRouteLoader active={isLoadingData} routeKey={currentPath} />
+      <AnimatePresence>
+        {showBootLoader && (
+          <motion.div
+            key="app-boot-loader"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
+            className="fixed inset-0 z-[100]"
+          >
+            <EasyToPrintLoader
+              variant="fullscreen"
+              title="EasyToPrint"
+              subtitle="Smart print automation, ready in a moment..."
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AppRouter />
       <QrScannerModal
         isOpen={isQrScannerOpen}

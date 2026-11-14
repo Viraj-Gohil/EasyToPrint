@@ -310,5 +310,86 @@
   .customer-page {
     animation: none !important;
   }
+  .etp-sheet-feed,
+  .etp-laser-beam,
+  .etp-progress-sweep,
+  .etp-line-reveal {
+    animation: none !important;
+  }
 }
+
+/* ==========================================================================
+   EASYTOPRINT CREATIVE & MODERN LOADER KEYFRAMES (GPU COMPOSITOR ONLY)
+   ========================================================================== */
+@keyframes etpSheetFeed {
+  0% {
+    transform: translate3d(0, -18px, 0);
+    opacity: 0;
+  }
+  18% {
+    transform: translate3d(0, -4px, 0);
+    opacity: 1;
+  }
+  75% {
+    transform: translate3d(0, 6px, 0);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(0, 18px, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes etpLaserSweep {
+  0%, 100% {
+    transform: translate3d(0, -6px, 0);
+    opacity: 0.35;
+  }
+  50% {
+    transform: translate3d(0, 22px, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes etpProgressSweep {
+  0% {
+    transform: translate3d(-100%, 0, 0);
+  }
+  100% {
+    transform: translate3d(260%, 0, 0);
+  }
+}
+
+@keyframes etpLineReveal {
+  0%, 15% {
+    transform: scaleX(0.35);
+    opacity: 0.4;
+  }
+  55%, 85% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(0.35);
+    opacity: 0.4;
+  }
+}
+
+.etp-sheet-feed {
+  animation: etpSheetFeed 1.9s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.etp-laser-beam {
+  animation: etpLaserSweep 1.9s ease-in-out infinite;
+}
+
+.etp-progress-sweep {
+  animation: etpProgressSweep 1.35s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.etp-line-reveal {
+  transform-origin: left center;
+  animation: etpLineReveal 1.9s ease-in-out infinite;
+}
+
 
