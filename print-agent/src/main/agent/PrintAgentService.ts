@@ -1,6 +1,7 @@
 import { BrowserWindow } from 'electron';
 import { AgentConfig, AgentConnectionStatus, DiscoveredPrinter, PrintJobItem, PlanEntitlements } from '../../renderer/types/agent.js';
 import { localVault } from '../storage/LocalDataVault.js';
+import { outboxManager } from '../storage/OutboxManager.js';
 import { ApiClient } from '../api/ApiClient.js';
 import { WindowsPrinterManager } from '../printer/WindowsPrinterManager.js';
 import { PrintSettingsAdapter } from '../printer/PrintSettingsAdapter.js';
@@ -232,9 +233,20 @@ export class PrintAgentService {
 
   public stop(): void {
     this.backgroundLoopsActive = false;
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    if (this.pollingTimer) clearTimeout(this.pollingTimer);
-    if (this.printerScanTimer) clearInterval(this.printerScanTimer);
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+    if (this.pollingTimer) {
+      clearTimeout(this.pollingTimer);
+      this.pollingTimer = undefined;
+    }
+    if (this.printerScanTimer) {
+      clearInterval(this.printerScanTimer);
+      this.printerScanTimer = undefined;
+    }
+    outboxManager.stopWorker();
+    this.mainWindow = null;
     this.setStatus('OFFLINE');
     logger.info('AGENT', 'EasyToPrint Agent service stopped.');
   }
@@ -251,8 +263,11 @@ export class PrintAgentService {
 
     // Heartbeat loop (every 10s)
     this.heartbeatTimer = setInterval(() => {
-      this.triggerHeartbeat();
+      if (this.backgroundLoopsActive) {
+        void this.triggerHeartbeat();
+      }
     }, 10000);
+    if (this.heartbeatTimer.unref) this.heartbeatTimer.unref();
 
     // Automatic background printer hardware status refresh (every 20s)
     this.printerScanTimer = setInterval(() => {
@@ -260,6 +275,7 @@ export class PrintAgentService {
         this.rescanPrinters(false).catch(() => {});
       }
     }, 20000);
+    if (this.printerScanTimer.unref) this.printerScanTimer.unref();
 
     // Job polling loop
     this.pollFailureCount = 0;

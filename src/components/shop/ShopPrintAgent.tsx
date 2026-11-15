@@ -26,6 +26,10 @@ import {
 import { Chip } from '../ui/Chip';
 import { Button } from '../ui/Button';
 
+const WINDOWS_AGENT_DOWNLOAD_URL =
+  'https://github.com/Viraj-Gohil/easytoprint-releases/releases/download/v1.4.2/print-agent-Setup-1.4.2.exe';
+const WINDOWS_AGENT_INSTALLER_FILENAME = 'print-agent-Setup-1.4.2.exe';
+
 export const ShopPrintAgent: React.FC = () => {
   const { activeShop, agents, regenerateAgentToken } = useApp();
 
@@ -297,6 +301,52 @@ export const ShopPrintAgent: React.FC = () => {
         </div>
       )}
 
+      {/* 2.2 WINDOWS PRINT AGENT DIRECT DOWNLOAD CARD */}
+      <section
+        aria-labelledby="windows-print-agent-heading"
+        className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-2xs"
+      >
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-[#E8F8EC] border border-[#A7F3D0] flex items-center justify-center text-[#008F25] shrink-0">
+              <Laptop className="w-5 h-5" />
+            </div>
+            <div className="space-y-1">
+              <h2
+                id="windows-print-agent-heading"
+                className="text-base font-bold tracking-tight text-slate-900"
+              >
+                Windows Print Agent
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed">
+                Install the desktop spooler client on your shop counter PC to automatically claim paid customer orders and route them directly to your local USB or network printers.
+              </p>
+              <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono tabular-nums pt-0.5 flex-wrap">
+                <span>Version 1.4.2</span>
+                <span aria-hidden="true">·</span>
+                <span>Direct NSIS Installer</span>
+                <span aria-hidden="true">·</span>
+                <span>{WINDOWS_AGENT_INSTALLER_FILENAME}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-stretch sm:items-end gap-1.5 shrink-0">
+            <a
+              href={WINDOWS_AGENT_DOWNLOAD_URL}
+              download={WINDOWS_AGENT_INSTALLER_FILENAME}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#00B52D] hover:bg-[#008F25] active:scale-[0.98] text-white font-semibold text-xs sm:text-sm rounded-xl shadow-2xs transition-all whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00B52D] focus-visible:ring-offset-1"
+            >
+              <Download className="w-4 h-4 shrink-0" />
+              <span>Download Print Agent</span>
+            </a>
+            <p className="text-[11px] text-slate-500 text-center sm:text-right">
+              Compatible with Windows 10 &amp; 11 (64-bit)
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* 2.5 CONNECTION STATUS & SINGLE-DEVICE CARD */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-3">
         {connectionStatus === 'ONLINE' && activeDeviceInfo ? (
@@ -357,24 +407,7 @@ export const ShopPrintAgent: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-              <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-between">
-                <div className="truncate mr-2">
-                  <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Server URL</span>
-                  <span className="text-xs font-mono font-bold text-slate-800 truncate block">
-                    {typeof window !== 'undefined' && window.location.origin.startsWith('http') ? window.location.origin : 'https://easytoprint.devpixel.space'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleCopyText(typeof window !== 'undefined' && window.location.origin.startsWith('http') ? window.location.origin : 'https://easytoprint.devpixel.space', 'Server URL')}
-                  className="p-1 hover:bg-slate-200 rounded text-slate-500 shrink-0 cursor-pointer"
-                  title="Copy Server URL"
-                >
-                  {copiedKey === 'Server URL' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Shop ID</span>
@@ -705,7 +738,7 @@ export const ShopPrintAgent: React.FC = () => {
               </h3>
               <ol className="list-decimal pl-5 space-y-2.5">
                 <li>
-                  Download the latest <code className="font-mono text-emerald-700 font-semibold">EasyToPrint-Agent-Setup.exe</code> installer for Windows 10/11.
+                  Download the latest <code className="font-mono text-emerald-700 font-semibold">{WINDOWS_AGENT_INSTALLER_FILENAME}</code> installer for Windows 10 &amp; 11 (64-bit).
                 </li>
                 <li>
                   Run the installer with Administrator privileges to enable auto-discovery of USB and network printers.
@@ -721,22 +754,17 @@ export const ShopPrintAgent: React.FC = () => {
                 </li>
               </ol>
 
-              <div className="pt-2 flex items-center gap-3">
-                <Button
-                  variant="solid"
-                  size="md"
-                  onClick={() => {
-                    const link = document.createElement('a');
-                    link.href = '#';
-                    link.setAttribute('download', 'EasyToPrint-Agent-Setup-v1.4.2.exe');
-                  }}
-                  className="gap-2 bg-[#00A61C] hover:bg-[#008f18] text-white"
+              <div className="pt-2 flex flex-col sm:flex-row sm:items-center gap-3">
+                <a
+                  href={WINDOWS_AGENT_DOWNLOAD_URL}
+                  download={WINDOWS_AGENT_INSTALLER_FILENAME}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#00B52D] hover:bg-[#008F25] text-white font-semibold text-xs rounded-xl shadow-2xs transition-all whitespace-nowrap shrink-0"
                 >
-                  <Download className="w-4 h-4" />
+                  <Download className="w-4 h-4 shrink-0" />
                   <span>Download Windows Installer (v1.4.2)</span>
-                </Button>
-                <span className="text-[11px] text-slate-400 font-mono">
-                  SHA-256 verified • NSIS installer
+                </a>
+                <span className="text-[11px] text-slate-500">
+                  Compatible with Windows 10 &amp; 11 (64-bit) · NSIS installer
                 </span>
               </div>
             </div>

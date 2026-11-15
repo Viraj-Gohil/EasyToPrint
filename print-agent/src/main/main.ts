@@ -16,6 +16,7 @@ loadBundledEnv();
 
 import { agentService } from './agent/PrintAgentService.js';
 import { localVault } from './storage/LocalDataVault.js';
+import { outboxManager } from './storage/OutboxManager.js';
 import { printerManager } from './printer/WindowsPrinterManager.js';
 import { logger } from './logger/AgentLogger.js';
 import { systemHealthManager } from './health/SystemHealthManager.js';
@@ -24,12 +25,36 @@ import { AgentConfig, AgentConnectionStatus } from '../renderer/types/agent.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const electronApp = app as typeof app & { isQuitting?: boolean };
+electronApp.isQuitting = false;
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+let hasShutdownServices = false;
 let lastNotifiedStatus: AgentConnectionStatus | null = null;
 const notifiedJobIds = new Set<string>();
 let hasShownFatalDialog = false;
+
+function shutdownBackgroundServices(): void {
+  electronApp.isQuitting = true;
+  isQuitting = true;
+  if (hasShutdownServices) return;
+  hasShutdownServices = true;
+
+  try {
+    agentService.stop();
+  } catch {}
+  try {
+    outboxManager.stopWorker();
+  } catch {}
+  try {
+    if (tray && !tray.isDestroyed()) {
+      tray.destroy();
+    }
+    tray = null;
+  } catch {}
+}
 
 // Global crash & unhandled rejection handlers: log to userData/error.log and show readable Windows dialog
 process.on('uncaughtException', (error: Error) => {
@@ -317,11 +342,16 @@ function createMainWindow() {
     mainWindow?.focus();
   });
 
-  mainWindow.on('close', (event) => {
-    if (!isQuitting) {
-      event.preventDefault();
-      mainWindow?.hide();
+  mainWindow.on('close', () => {
+    shutdownBackgroundServices();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.removeAllListeners('close');
     }
+    app.quit();
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
   });
 }
 
@@ -385,9 +415,11 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: 'Exit EasyToPrint Agent',
+      label: 'Quit Print Agent',
       click: () => {
+        electronApp.isQuitting = true;
         isQuitting = true;
+        shutdownBackgroundServices();
         app.quit();
       }
     }
@@ -674,17 +706,24 @@ ipcMain.on('window:minimize-to-tray', () => {
 });
 
 ipcMain.on('window:quit-app', () => {
+  electronApp.isQuitting = true;
   isQuitting = true;
+  shutdownBackgroundServices();
   app.quit();
 });
 
 app.on('before-quit', () => {
+  electronApp.isQuitting = true;
   isQuitting = true;
-  agentService.stop();
+  shutdownBackgroundServices();
+});
+
+app.on('will-quit', () => {
+  shutdownBackgroundServices();
+  app.exit(0);
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    // Keep agent running in background tray unless explicitly quit
-  }
+  shutdownBackgroundServices();
+  app.quit();
 });
