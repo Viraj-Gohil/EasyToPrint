@@ -5847,8 +5847,7 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
   }
 
   const printerMatch = await validateJobAgainstRegisteredPrinters(shopId, preparedFiles);
-  // TEMP TEST BYPASS: allow staging even when registered printers are offline for payment flow testing
-  if (!printerMatch.eligible && printerMatch.code !== 'PRINTERS_OFFLINE' && printerMatch.code !== 'NO_REGISTERED_PRINTERS') {
+  if (!printerMatch.eligible) {
     return res.status(422).json({
       success: false,
       code: printerMatch.code || 'INCOMPATIBLE_PRINTER',
@@ -6390,8 +6389,7 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
 
   // Validate print requirements against registered online printers in this shop
   const printerMatch = await validateJobAgainstRegisteredPrinters(shopId, preparedFiles);
-  // TEMP TEST BYPASS: allow queuing paid print jobs even when registered printers are offline for payment testing
-  if (!printerMatch.eligible && printerMatch.code !== 'PRINTERS_OFFLINE' && printerMatch.code !== 'NO_REGISTERED_PRINTERS') {
+  if (!printerMatch.eligible) {
     return res.status(422).json({
       success: false,
       code: printerMatch.code || 'INCOMPATIBLE_PRINTER',
