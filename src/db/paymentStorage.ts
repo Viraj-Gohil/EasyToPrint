@@ -115,8 +115,9 @@ export interface StoredPrintAgentJob {
     pagesToPrint?: string;
   }>;
   totalAmount: number;
-  paymentStatus: 'SUCCESS';
+  paymentStatus: 'SUCCESS' | 'PENDING';
   printStatus:
+    | 'STAGED'
     | 'CREATED'
     | 'RECEIVED'
     | 'VALIDATING'
@@ -1348,6 +1349,17 @@ export async function insertPrintAgentJob<T extends StoredPrintAgentJob>(
     );
     if (inserted.rowCount === 0) {
       await client.query('ROLLBACK');
+      // If a STAGED job was already created for this order, activate it now if paymentStatus is SUCCESS
+      if (normalizedJob.paymentStatus === 'SUCCESS') {
+        const activated = await activateStagedPrintAgentJob({
+          orderId: normalizedJob.orderId,
+          paymentId: normalizedJob.paymentId,
+          shopId: job.shopId
+        });
+        if (activated.job) {
+          return activated.job as T;
+        }
+      }
       const existing = await getPrintAgentJobByOrder(job.shopId, job.orderId);
       return existing as T | null;
     }
@@ -1367,6 +1379,349 @@ export async function insertPrintAgentJob<T extends StoredPrintAgentJob>(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Stages a customer print job and its files BEFORE Razorpay checkout opens,
+ * with print_status = 'STAGED' and paymentStatus = 'PENDING'.
+ * Staged jobs are invisible to the Windows Print Agent until payment is verified.
+ */
+export async function stagePrintAgentJob<T extends StoredPrintAgentJob>(
+  job: T,
+  files: PrintAgentJobFile[] = []
+): Promise<T | null> {
+  const canonicalShopId = await resolvePrintFlowShopId(job.shopId);
+  const now = new Date().toISOString();
+  const stagedJob: T = {
+    ...job,
+    shopId: canonicalShopId,
+    paymentStatus: 'PENDING',
+    printStatus: 'STAGED',
+    createdAt: (job as any).createdAt || now,
+    updatedAt: now
+  };
+
+  const client = await requirePostgresPool().connect();
+  try {
+    await client.query('BEGIN');
+
+    // Check if an already-paid/dispatched job exists for this orderId
+    const existingRes = await client.query(
+      `SELECT job_id, print_status, job_data FROM print_agent_jobs
+       WHERE shop_id = $1 AND order_id = $2
+       FOR UPDATE`,
+      [canonicalShopId, stagedJob.orderId]
+    );
+
+    if (existingRes.rowCount && existingRes.rowCount > 0) {
+      const existingRow = existingRes.rows[0];
+      const existingPaymentStatus = existingRow.job_data?.paymentStatus;
+      if (existingPaymentStatus === 'SUCCESS' && existingRow.print_status !== 'STAGED') {
+        await client.query('COMMIT');
+        return decodeStoredJob(existingRow) as T;
+      }
+
+      // Replace staged files for this job_id
+      await client.query(`DELETE FROM print_agent_job_files WHERE job_id = $1`, [existingRow.job_id]);
+      const updatedJob: T = {
+        ...stagedJob,
+        id: existingRow.job_id,
+        orderCode: existingRow.job_data?.orderCode || existingRow.job_id,
+        trackingToken: existingRow.job_data?.trackingToken || stagedJob.trackingToken
+      };
+      await client.query(
+        `UPDATE print_agent_jobs
+         SET print_status = 'STAGED',
+             job_data = $3::jsonb,
+             updated_at = $4
+         WHERE job_id = $1 AND shop_id = $2`,
+        [existingRow.job_id, canonicalShopId, JSON.stringify(updatedJob), now]
+      );
+      for (const file of files) {
+        await client.query(
+          `INSERT INTO print_agent_job_files (job_id, file_id, mime_type, filename, file_data)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [existingRow.job_id, file.id, file.mime, file.filename, file.buffer]
+        );
+      }
+      await client.query('COMMIT');
+      return updatedJob;
+    }
+
+    await client.query(
+      `INSERT INTO print_agent_jobs
+         (job_id, order_id, shop_id, print_status, claimed_by, claimed_at, job_data, created_at, updated_at)
+       VALUES ($1, $2, $3, 'STAGED', NULL, NULL, $4::jsonb, $5, $6)`,
+      [
+        stagedJob.id,
+        stagedJob.orderId,
+        canonicalShopId,
+        JSON.stringify(stagedJob),
+        stagedJob.createdAt,
+        now
+      ]
+    );
+
+    for (const file of files) {
+      await client.query(
+        `INSERT INTO print_agent_job_files (job_id, file_id, mime_type, filename, file_data)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [stagedJob.id, file.id, file.mime, file.filename, file.buffer]
+      );
+    }
+
+    await client.query('COMMIT');
+    return stagedJob;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Atomically transitions a staged or pending print job to QUEUED (paymentStatus = 'SUCCESS')
+ * using a PostgreSQL row lock (FOR UPDATE) so concurrent verify/webhook/retry requests
+ * never duplicate print jobs.
+ */
+export async function activateStagedPrintAgentJob(params: {
+  orderId: string;
+  paymentId: string;
+  shopId?: string;
+}): Promise<{
+  dispatched: boolean;
+  alreadyDispatched: boolean;
+  job: StoredPrintAgentJob | null;
+}> {
+  if (!params.orderId) {
+    return { dispatched: false, alreadyDispatched: false, job: null };
+  }
+
+  const client = await requirePostgresPool().connect();
+  try {
+    await client.query('BEGIN');
+
+    let queryRes;
+    if (params.shopId) {
+      const candidateShopIds = await getCandidateShopIds(params.shopId);
+      queryRes = await client.query(
+        `SELECT job_id, shop_id, order_id, print_status, claimed_by, claimed_at, job_data, updated_at
+         FROM print_agent_jobs
+         WHERE order_id = $1 AND (shop_id = ANY($2::text[]))
+         FOR UPDATE`,
+        [params.orderId, candidateShopIds]
+      );
+    }
+    if (!queryRes || queryRes.rowCount === 0) {
+      queryRes = await client.query(
+        `SELECT job_id, shop_id, order_id, print_status, claimed_by, claimed_at, job_data, updated_at
+         FROM print_agent_jobs
+         WHERE order_id = $1
+         FOR UPDATE`,
+        [params.orderId]
+      );
+    }
+
+    if (!queryRes || queryRes.rowCount === 0) {
+      await client.query('COMMIT');
+      return { dispatched: false, alreadyDispatched: false, job: null };
+    }
+
+    const row = queryRes.rows[0];
+    const currentJob = decodeStoredJob(row);
+    const activeStatuses = ['QUEUED', 'ASSIGNED', 'DOWNLOADING', 'PRINTING', 'SUBMITTED_TO_SPOOLER', 'COMPLETED'];
+
+    if (
+      currentJob.paymentStatus === 'SUCCESS' &&
+      activeStatuses.includes(currentJob.printStatus)
+    ) {
+      await client.query('COMMIT');
+      return {
+        dispatched: true,
+        alreadyDispatched: true,
+        job: currentJob
+      };
+    }
+
+    const now = new Date().toISOString();
+    const updatedJob: StoredPrintAgentJob = {
+      ...currentJob,
+      paymentId: params.paymentId || currentJob.paymentId || 'pay_verified',
+      paymentStatus: 'SUCCESS',
+      printStatus: 'QUEUED',
+      updatedAt: now
+    };
+
+    await client.query(
+      `UPDATE print_agent_jobs
+       SET print_status = 'QUEUED',
+           job_data = $2::jsonb,
+           updated_at = $3
+       WHERE job_id = $1`,
+      [row.job_id, JSON.stringify(updatedJob), now]
+    );
+
+    // Mirror to public.print_jobs for dashboard visibility
+    try {
+      const effectiveShopUuid = await resolvePrintFlowShopId(row.shop_id);
+      const expiresAtIso = new Date(Date.now() + 24 * 3600000).toISOString();
+      await client.query(
+        `INSERT INTO public.print_jobs
+           (order_code, tracking_token, shop_id, customer_name, customer_phone, files,
+            total_amount, file_status, payment_status, print_status, payment_method, payment_id, expires_at)
+         VALUES ($1, $2, $3::uuid, $4, $5, $6::jsonb, $7, 'VERIFIED', 'SUCCESS', 'QUEUED', 'RAZORPAY', $8, $9::timestamptz)
+         ON CONFLICT (order_code) DO UPDATE SET
+           payment_status = 'SUCCESS',
+           print_status = CASE WHEN public.print_jobs.print_status IN ('STAGED', 'FAILED', 'CANCELLED') THEN 'QUEUED' ELSE public.print_jobs.print_status END,
+           payment_id = EXCLUDED.payment_id,
+           updated_at = NOW()`,
+        [
+          updatedJob.id,
+          updatedJob.trackingToken,
+          effectiveShopUuid,
+          updatedJob.customerName || 'Guest Customer',
+          updatedJob.customerPhone || '',
+          JSON.stringify(updatedJob.files || []),
+          updatedJob.totalAmount || 0,
+          updatedJob.paymentId,
+          expiresAtIso
+        ]
+      );
+    } catch {
+      // Non-fatal mirror
+    }
+
+    await client.query('COMMIT');
+    return {
+      dispatched: true,
+      alreadyDispatched: false,
+      job: updatedJob
+    };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Looks up a recent customer print order by orderId, paymentId, or customerPhone
+ * for the "Already Paid / Check Payment" recovery flow.
+ */
+export async function findRecentOrderForRecovery(params: {
+  orderId?: string;
+  paymentId?: string;
+  customerPhone?: string;
+  shopId?: string;
+}): Promise<{
+  orderId?: string;
+  paymentId?: string;
+  shopId?: string;
+  job?: StoredPrintAgentJob | null;
+}> {
+  const pool = requirePostgresPool();
+  const cleanOrderId = params.orderId?.trim();
+  const cleanPaymentId = params.paymentId?.trim();
+  const cleanPhone = params.customerPhone?.replace(/\D/g, '').slice(-10);
+  const candidateShopIds = params.shopId ? await getCandidateShopIds(params.shopId) : null;
+
+  // 1. Direct lookup in print_agent_jobs by orderId, paymentId, or job_id
+  if (cleanOrderId || cleanPaymentId) {
+    const res = await pool.query(
+      `SELECT job_data, print_status, claimed_by, claimed_at, updated_at, order_id, shop_id
+       FROM print_agent_jobs
+       WHERE ($1::text IS NOT NULL AND (order_id = $1 OR job_id = $1))
+          OR ($2::text IS NOT NULL AND job_data->>'paymentId' = $2)
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [cleanOrderId || null, cleanPaymentId || null]
+    );
+    if (res.rowCount && res.rowCount > 0) {
+      const row = res.rows[0];
+      const job = decodeStoredJob(row);
+      return {
+        orderId: row.order_id || job.orderId,
+        paymentId: cleanPaymentId || job.paymentId || undefined,
+        shopId: row.shop_id || job.shopId,
+        job
+      };
+    }
+  }
+
+  // 2. Lookup by customerPhone in print_agent_jobs (most recent within 24h)
+  if (cleanPhone && cleanPhone.length === 10) {
+    const res = await pool.query(
+      `SELECT job_data, print_status, claimed_by, claimed_at, updated_at, order_id, shop_id
+       FROM print_agent_jobs
+       WHERE RIGHT(REGEXP_REPLACE(COALESCE(job_data->>'customerPhone', ''), '\\D', '', 'g'), 10) = $1
+         AND ($2::text[] IS NULL OR shop_id = ANY($2::text[]))
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [cleanPhone, candidateShopIds]
+    );
+    if (res.rowCount && res.rowCount > 0) {
+      const row = res.rows[0];
+      const job = decodeStoredJob(row);
+      return {
+        orderId: row.order_id || job.orderId,
+        paymentId: cleanPaymentId || job.paymentId || undefined,
+        shopId: row.shop_id || job.shopId,
+        job
+      };
+    }
+  }
+
+  // 3. Lookup in payment_transactions / payment_orders by paymentId or orderId
+  if (cleanPaymentId) {
+    const txRes = await pool.query(
+      `SELECT po.provider_order_id, po.shop_id::text AS shop_id, pt.provider_payment_id
+       FROM public.payment_transactions pt
+       JOIN public.payment_orders po ON po.id = pt.payment_order_id
+       WHERE pt.provider_payment_id = $1
+       ORDER BY pt.verified_at DESC NULLS LAST
+       LIMIT 1`,
+      [cleanPaymentId]
+    );
+    if (txRes.rowCount && txRes.rowCount > 0) {
+      const txRow = txRes.rows[0];
+      const job = await getPrintAgentJobByOrder(txRow.shop_id, txRow.provider_order_id).catch(() => null);
+      return {
+        orderId: txRow.provider_order_id,
+        paymentId: txRow.provider_payment_id,
+        shopId: txRow.shop_id,
+        job
+      };
+    }
+  }
+
+  if (cleanOrderId) {
+    const poRes = await pool.query(
+      `SELECT po.provider_order_id, po.shop_id::text AS shop_id,
+              (SELECT pt.provider_payment_id FROM public.payment_transactions pt WHERE pt.payment_order_id = po.id LIMIT 1) AS payment_id
+       FROM public.payment_orders po
+       WHERE po.provider_order_id = $1
+       LIMIT 1`,
+      [cleanOrderId]
+    );
+    if (poRes.rowCount && poRes.rowCount > 0) {
+      const poRow = poRes.rows[0];
+      const job = await getPrintAgentJobByOrder(poRow.shop_id, poRow.provider_order_id).catch(() => null);
+      return {
+        orderId: poRow.provider_order_id,
+        paymentId: cleanPaymentId || poRow.payment_id || undefined,
+        shopId: poRow.shop_id,
+        job
+      };
+    }
+  }
+
+  return {
+    orderId: cleanOrderId,
+    paymentId: cleanPaymentId,
+    shopId: params.shopId
+  };
 }
 
 export async function getPrintAgentJob(jobId: string): Promise<StoredPrintAgentJob | null> {

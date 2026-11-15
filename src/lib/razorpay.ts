@@ -3,12 +3,26 @@
  * Provides reliable, real-working payment collection for print shops.
  */
 
-import { apiUrl } from './apiConfig';
+import { apiUrl, fetchWithRetry } from './apiConfig';
 
 export interface RazorpaySuccessResponse {
   razorpay_payment_id: string;
   razorpay_order_id?: string;
   razorpay_signature?: string;
+}
+
+export interface DispatchedPrintJobSummary {
+  id: string;
+  trackingToken?: string;
+  pickupCode?: string;
+  shopId?: string;
+  orderId?: string;
+  paymentId?: string;
+  paymentStatus?: string;
+  printStatus?: string;
+  totalAmount?: number;
+  statusMessage?: string;
+  alreadyDispatched?: boolean;
 }
 
 export interface RazorpayOptions {
@@ -168,14 +182,11 @@ export const createRazorpayOrder = async (params: {
       ? Math.round(params.amountInPaise)
       : Math.round(params.amount * 100);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-    try {
-      const res = await fetch(apiUrl('/api/create-order'), {
+    const res = await fetchWithRetry(
+      '/api/create-order',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
         body: JSON.stringify({
           amount: paise,
           currency: params.currency || 'INR',
@@ -184,39 +195,109 @@ export const createRazorpayOrder = async (params: {
           shopId: params.shopId,
           notes: params.notes
         })
-      });
-      clearTimeout(timeoutId);
+      },
+      { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
+    );
 
-      const data = await res.json();
-      if (res.ok && (data.order_id || data.orderId || data.id)) {
-        const orderId = data.order_id || data.orderId || data.id;
-        return {
-          success: true,
-          order_id: orderId,
-          orderId,
-          amount: data.amount,
-          currency: data.currency,
-          key_id: data.key_id
-        };
-      }
-      return { success: false, error: data.error || 'Failed to create Razorpay order' };
-    } finally {
-      clearTimeout(timeoutId);
+    const data = await res.json();
+    if (res.ok && (data.order_id || data.orderId || data.id)) {
+      const orderId = data.order_id || data.orderId || data.id;
+      return {
+        success: true,
+        order_id: orderId,
+        orderId,
+        amount: data.amount,
+        currency: data.currency,
+        key_id: data.key_id
+      };
     }
+    return { success: false, error: data.error || 'Failed to create Razorpay order' };
   } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      return { success: false, error: 'Payment server request timed out after 10s. Please retry.' };
-    }
-    return { success: false, error: err?.message || 'Payment server unreachable. Please check your network connection.' };
+    return {
+      success: false,
+      error: err?.message || 'Payment server unreachable. Please check your network connection.'
+    };
   }
 };
 
 /**
- * STEP 3: Calls backend to verify Razorpay payment HMAC SHA-256 signature.
+ * STEP 2: Stages customer print files on the backend before opening Razorpay Checkout.
+ * Ensures that as soon as payment is verified on the server, the print job can be
+ * atomically dispatched without requiring a second file upload after payment.
+ */
+export const stageCustomerPrintOrder = async (params: {
+  orderId: string;
+  shopId: string;
+  customerName?: string;
+  customerPhone?: string;
+  totalAmount?: number;
+  files: Array<{
+    fileName: string;
+    fileType: string;
+    fileBase64: string;
+    pageCount: number;
+    copies: number;
+    colorMode: string;
+    paperSize: string;
+    duplex: boolean;
+    pagesToPrint?: string;
+  }>;
+}): Promise<{
+  success: boolean;
+  staged?: boolean;
+  pickupCode?: string;
+  trackingToken?: string;
+  job?: DispatchedPrintJobSummary;
+  error?: string;
+  code?: string;
+  title?: string;
+  message?: string;
+  filename?: string;
+  detectedType?: string;
+  supportedFormats?: string[];
+}> => {
+  try {
+    const res = await fetchWithRetry(
+      '/api/customer/stage-order',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+      },
+      { maxAttempts: 3, timeoutMs: 25000, backoffDelaysMs: [1000, 2000, 4000] }
+    );
+    const data = await res.json();
+    if (res.ok && data.success) {
+      return {
+        success: true,
+        staged: Boolean(data.staged),
+        pickupCode: data.pickupCode || data.job?.id,
+        trackingToken: data.trackingToken || data.job?.trackingToken,
+        job: data.job
+      };
+    }
+    return {
+      success: false,
+      error: data.error || data.message || 'Could not stage print files before payment.',
+      code: data.code,
+      title: data.title,
+      message: data.message,
+      filename: data.filename,
+      detectedType: data.detectedType,
+      supportedFormats: data.supportedFormats
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Could not stage print files. Please check your connection and try again.'
+    };
+  }
+};
+
+/**
+ * STEP 3: Calls backend to verify Razorpay payment HMAC SHA-256 signature
+ * AND atomically trigger server-side print job dispatch within the same request.
  * Endpoint: POST /api/verify-payment
- * Algorithm: HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET)
- * Compare generated signature with razorpay_signature
- * Return success only if signatures match
  */
 export const verifyRazorpayPayment = async (params: {
   razorpay_order_id?: string;
@@ -227,20 +308,26 @@ export const verifyRazorpayPayment = async (params: {
   signature?: string;
   printJobId?: string;
   shopId?: string;
-}): Promise<{ success: boolean; message?: string; error?: string }> => {
+}): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+  dispatched?: boolean;
+  alreadyDispatched?: boolean;
+  pickupCode?: string;
+  trackingToken?: string;
+  job?: DispatchedPrintJobSummary;
+}> => {
   try {
     const order_id = params.razorpay_order_id || params.order_id || '';
     const payment_id = params.razorpay_payment_id || params.payment_id || '';
     const razorpay_signature = params.razorpay_signature || params.signature || '';
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-    try {
-      const res = await fetch(apiUrl('/api/verify-payment'), {
+    const res = await fetchWithRetry(
+      '/api/verify-payment',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
         body: JSON.stringify({
           order_id,
           payment_id,
@@ -251,22 +338,28 @@ export const verifyRazorpayPayment = async (params: {
           printJobId: params.printJobId,
           shopId: params.shopId
         })
-      });
-      clearTimeout(timeoutId);
+      },
+      { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
+    );
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        return { success: true, message: data.message || 'Payment verified successfully' };
-      }
-      return { success: false, error: data.error || data.message || 'Payment verification failed' };
-    } finally {
-      clearTimeout(timeoutId);
+    const data = await res.json();
+    if (res.ok && data.success) {
+      return {
+        success: true,
+        message: data.message || 'Payment verified successfully',
+        dispatched: Boolean(data.dispatched),
+        alreadyDispatched: Boolean(data.alreadyDispatched),
+        pickupCode: data.pickupCode || data.job?.id,
+        trackingToken: data.trackingToken || data.job?.trackingToken,
+        job: data.job
+      };
     }
+    return { success: false, error: data.error || data.message || 'Payment verification failed' };
   } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      return { success: false, error: 'Signature verification timed out after 10s.' };
-    }
-    return { success: false, error: 'Failed to verify payment with server. Please contact support.' };
+    return {
+      success: false,
+      error: err?.message || 'Failed to verify payment with server. Please tap Check Payment below.'
+    };
   }
 };
 
@@ -279,6 +372,11 @@ export interface RazorpayOrderStatusResult {
   message?: string;
   canRetry?: boolean;
   error?: string;
+  dispatched?: boolean;
+  alreadyDispatched?: boolean;
+  pickupCode?: string;
+  trackingToken?: string;
+  job?: DispatchedPrintJobSummary;
 }
 
 /**
@@ -291,46 +389,46 @@ export const checkRazorpayOrderStatus = async (
   shopId?: string
 ): Promise<RazorpayOrderStatusResult> => {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-    try {
-      const res = await fetch(apiUrl('/api/payment/check-status'), {
+    const res = await fetchWithRetry(
+      '/api/payment/check-status',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
         body: JSON.stringify({ orderId, shopId })
-      });
-      clearTimeout(timeoutId);
+      },
+      { maxAttempts: 2, timeoutMs: 10000, backoffDelaysMs: [1000, 2000] }
+    );
 
-      const data = await res.json();
-      if (res.ok && data.status) {
-        return {
-          success: data.status === 'PAID',
-          status: data.status,
-          orderId: data.orderId || orderId,
-          paymentId: data.paymentId,
-          verified: Boolean(data.verified),
-          message: data.message,
-          canRetry: Boolean(data.canRetry)
-        };
-      }
+    const data = await res.json();
+    if (res.ok && data.status) {
       return {
-        success: false,
-        status: (data.status as any) || 'PENDING',
-        orderId,
-        message: data.message || data.error || 'Payment status pending verification.',
-        canRetry: Boolean(data.canRetry)
+        success: data.status === 'PAID',
+        status: data.status,
+        orderId: data.orderId || orderId,
+        paymentId: data.paymentId,
+        verified: Boolean(data.verified),
+        message: data.message,
+        canRetry: Boolean(data.canRetry),
+        dispatched: Boolean(data.dispatched),
+        alreadyDispatched: Boolean(data.alreadyDispatched),
+        pickupCode: data.pickupCode || data.job?.id,
+        trackingToken: data.trackingToken || data.job?.trackingToken,
+        job: data.job
       };
-    } finally {
-      clearTimeout(timeoutId);
     }
+    return {
+      success: false,
+      status: (data.status as any) || 'PENDING',
+      orderId,
+      message: data.message || data.error || 'Payment status pending verification.',
+      canRetry: Boolean(data.canRetry)
+    };
   } catch (err: any) {
     return {
       success: false,
       status: 'PENDING',
       orderId,
-      message: 'Status check temporary network pause. Retrying...'
+      message: err?.message || 'Status check temporary network pause. Retrying...'
     };
   }
 };
@@ -346,47 +444,129 @@ export const reconcileRazorpayPayment = async (params: {
   shopId?: string;
 }): Promise<RazorpayOrderStatusResult> => {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-    try {
-      const res = await fetch(apiUrl('/api/payment/reconcile'), {
+    const res = await fetchWithRetry(
+      '/api/payment/reconcile',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
         body: JSON.stringify(params)
-      });
-      clearTimeout(timeoutId);
+      },
+      { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
+    );
 
-      const data = await res.json();
-      if (res.ok && data.status === 'PAID') {
-        return {
-          success: true,
-          status: 'PAID',
-          orderId: data.orderId || params.orderId,
-          paymentId: data.paymentId || params.paymentId,
-          verified: true,
-          message: data.message || 'Payment reconciled and verified.'
-        };
-      }
+    const data = await res.json();
+    if (res.ok && data.status === 'PAID') {
       return {
-        success: false,
-        status: (data.status as any) || 'FAILED',
-        orderId: params.orderId,
-        paymentId: params.paymentId,
-        message: data.message || 'No captured payment found yet.',
-        canRetry: Boolean(data.canRetry)
+        success: true,
+        status: 'PAID',
+        orderId: data.orderId || params.orderId,
+        paymentId: data.paymentId || params.paymentId,
+        verified: true,
+        message: data.message || 'Payment reconciled and verified.',
+        dispatched: Boolean(data.dispatched),
+        alreadyDispatched: Boolean(data.alreadyDispatched),
+        pickupCode: data.pickupCode || data.job?.id,
+        trackingToken: data.trackingToken || data.job?.trackingToken,
+        job: data.job
       };
-    } finally {
-      clearTimeout(timeoutId);
     }
+    return {
+      success: false,
+      status: (data.status as any) || 'FAILED',
+      orderId: params.orderId,
+      paymentId: params.paymentId,
+      message: data.message || data.error || 'No captured payment found yet.',
+      canRetry: Boolean(data.canRetry)
+    };
   } catch (err: any) {
     return {
       success: false,
       status: 'PENDING',
       orderId: params.orderId,
-      message: 'Reconciliation service unreachable. Please retry.'
+      message: err?.message || 'Reconciliation service unreachable. Please retry.'
     };
   }
 };
+
+export interface RecoverOrRetryOrderResult {
+  success: boolean;
+  status: 'PAID' | 'PENDING' | 'FAILED' | 'NOT_FOUND';
+  dispatched?: boolean;
+  alreadyDispatched?: boolean;
+  needsFileUpload?: boolean;
+  pickupCode?: string;
+  trackingToken?: string;
+  orderId?: string;
+  paymentId?: string;
+  message?: string;
+  error?: string;
+  job?: DispatchedPrintJobSummary;
+}
+
+/**
+ * STEP 5: Unified "Already Paid / Check Payment" & "Retry Dispatch" recovery endpoint.
+ * Accepts orderId / razorpay_order_id, paymentId / razorpay_payment_id, or customerPhone.
+ * Queries DB and Razorpay Orders/Payments API directly, acquires an idempotency lock,
+ * and dispatches the staged print job without re-uploading files or double-printing.
+ * Endpoint: POST /api/orders/recover-or-retry
+ */
+export const recoverOrRetryPrintOrder = async (params: {
+  orderId?: string;
+  razorpay_order_id?: string;
+  paymentId?: string;
+  razorpay_payment_id?: string;
+  customerPhone?: string;
+  phone?: string;
+  shopId?: string;
+}): Promise<RecoverOrRetryOrderResult> => {
+  try {
+    const res = await fetchWithRetry(
+      '/api/orders/recover-or-retry',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+      },
+      { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
+    );
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      return {
+        success: true,
+        status: data.status || 'PAID',
+        dispatched: Boolean(data.dispatched),
+        alreadyDispatched: Boolean(data.alreadyDispatched),
+        needsFileUpload: Boolean(data.needsFileUpload),
+        pickupCode: data.pickupCode || data.job?.id,
+        trackingToken: data.trackingToken || data.job?.trackingToken,
+        orderId: data.order?.orderId || data.job?.orderId || params.orderId || params.razorpay_order_id,
+        paymentId: data.order?.paymentId || data.job?.paymentId || params.paymentId || params.razorpay_payment_id,
+        message: data.message,
+        job: data.job
+      };
+    }
+
+    return {
+      success: false,
+      status: (data.status as any) || (res.status === 404 ? 'NOT_FOUND' : 'PENDING'),
+      dispatched: Boolean(data.dispatched),
+      needsFileUpload: Boolean(data.needsFileUpload),
+      orderId: data.orderId || params.orderId || params.razorpay_order_id,
+      paymentId: data.paymentId || params.paymentId || params.razorpay_payment_id,
+      message: data.message || data.error || 'Could not recover or dispatch this order yet.',
+      error: data.error || data.message
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      status: 'PENDING',
+      orderId: params.orderId || params.razorpay_order_id,
+      paymentId: params.paymentId || params.razorpay_payment_id,
+      message: err?.message || 'Unable to reach the server to verify payment. Please check your internet connection and try again.',
+      error: err?.message
+    };
+  }
+};
+
 

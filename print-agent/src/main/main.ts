@@ -3,6 +3,17 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import {
+  loadBundledEnv,
+  resolvePackagedAsset,
+  writeCrashErrorLog,
+  getErrorLogPath
+} from './storage/AppPaths.js';
+
+// Load bundled .env from process.resourcesPath (when packaged) or project root (in dev)
+// with safe fallbacks so missing .env variables never crash the installed Windows .exe.
+loadBundledEnv();
+
 import { agentService } from './agent/PrintAgentService.js';
 import { localVault } from './storage/LocalDataVault.js';
 import { printerManager } from './printer/WindowsPrinterManager.js';
@@ -18,33 +29,49 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let lastNotifiedStatus: AgentConnectionStatus | null = null;
 const notifiedJobIds = new Set<string>();
+let hasShownFatalDialog = false;
 
-// Configure Windows desktop application identity while preserving upgrade appId compatibility
+// Global crash & unhandled rejection handlers: log to userData/error.log and show readable Windows dialog
+process.on('uncaughtException', (error: Error) => {
+  const logFile = writeCrashErrorLog('uncaughtException', error);
+  try {
+    logger.error('AGENT', `Uncaught Exception: ${error?.message || String(error)}`, {
+      stack: error?.stack,
+      errorLogPath: logFile
+    });
+  } catch {}
+
+  if (!hasShownFatalDialog && app.isReady()) {
+    hasShownFatalDialog = true;
+    try {
+      dialog.showErrorBox(
+        'Print Agent Error',
+        `An unexpected error occurred in Print Agent:\n\n${error?.message || String(error)}\n\nDetails have been written to:\n${logFile || getErrorLogPath()}`
+      );
+    } catch {}
+  }
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  const logFile = writeCrashErrorLog('unhandledRejection', reason);
+  const message = reason instanceof Error ? reason.message : String(reason);
+  try {
+    logger.error('AGENT', `Unhandled Promise Rejection: ${message}`, {
+      errorLogPath: logFile
+    });
+  } catch {}
+});
+
+// Configure Windows desktop application identity
 try {
-  app.setName('EasyToPrint Agent');
+  app.setName('Print Agent');
   if (process.platform === 'win32') {
-    app.setAppUserModelId('com.printflow.agent');
+    app.setAppUserModelId('com.printagent.app');
   }
 } catch {}
 
 function resolveAssetPath(...relativeCandidates: string[]): string | undefined {
-  const searchRoots = [
-    path.resolve(__dirname, '../..'),
-    path.resolve(__dirname, '../../..'),
-    process.cwd(),
-    typeof process.resourcesPath === 'string' ? process.resourcesPath : '',
-    typeof process.resourcesPath === 'string' ? path.join(process.resourcesPath, 'app.asar') : ''
-  ].filter(Boolean);
-
-  for (const root of searchRoots) {
-    for (const rel of relativeCandidates) {
-      const candidate = path.join(root, rel);
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return undefined;
+  return resolvePackagedAsset(...relativeCandidates);
 }
 
 function getAppWindowIcon(): Electron.NativeImage | string | undefined {
@@ -81,7 +108,7 @@ function showAgentNotification(title: string, body: string) {
   } catch {}
 }
 
-// 1. Single Instance Lock
+// 1. Single Instance Lock — prevent multiple instances of Print Agent from running simultaneously
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
@@ -95,71 +122,113 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(async () => {
-    localVault.reloadConfig();
-    createMainWindow();
-    createSystemTray();
-    app.setLoginItemSettings({ openAtLogin: localVault.getConfig().autoStartOnBoot });
+    try {
+      localVault.reloadConfig();
+      createMainWindow();
+      createSystemTray();
 
-    // Wire up logger broadcast to renderer
-    logger.setBroadcastListener((entry) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('event:log-added', entry);
-      }
-    });
-
-    // Wire up agent service listeners
-    agentService.setMainWindow(mainWindow);
-    agentService.setOnStatusChangeListener((status) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('event:status-changed', status);
-      }
-      updateTrayMenu();
-
-      if (status !== lastNotifiedStatus) {
-        if (status === 'ONLINE' || status === 'CONNECTED') {
-          showAgentNotification('EasyToPrint Agent – Connected', 'Your counter PC is online and ready to process print jobs.');
-        } else if (lastNotifiedStatus === 'ONLINE' && (status === 'ERROR' || status === 'OFFLINE' || status === 'DISCONNECTED')) {
-          showAgentNotification('EasyToPrint Agent – Disconnected', 'Connection to EasyToPrint Cloud was interrupted. Reconnecting in background...');
+      // Configure Windows startup auto-launch safely when packaged
+      try {
+        const shouldOpenAtLogin = localVault.getConfig().autoStartOnBoot ?? true;
+        if (process.platform === 'win32' && app.isPackaged) {
+          app.setLoginItemSettings({
+            openAtLogin: shouldOpenAtLogin,
+            path: process.execPath
+          });
+        } else {
+          app.setLoginItemSettings({ openAtLogin: shouldOpenAtLogin });
         }
-        lastNotifiedStatus = status;
+      } catch (loginErr: any) {
+        logger.warn('AGENT', `Could not set Windows login item settings: ${loginErr?.message || loginErr}`);
       }
-    });
 
-    agentService.setOnJobUpdateListener((job) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('event:job-updated', job);
-      }
-      if (job.printStatus === 'COMPLETED' && !notifiedJobIds.has(`${job.id}:COMPLETED`)) {
-        notifiedJobIds.add(`${job.id}:COMPLETED`);
-        showAgentNotification(
-          'EasyToPrint Agent – Print Job Completed',
-          `Order ${job.id} (${job.files?.[0]?.fileName || 'Document'}) printed on ${job.printerName || 'default printer'}.`
-        );
-      } else if (
-        (job.printStatus === 'FAILED' || job.printStatus === 'MANUAL_ATTENTION' || job.printStatus === 'REQUIRES_ATTENTION') &&
-        !notifiedJobIds.has(`${job.id}:ERROR`)
-      ) {
-        notifiedJobIds.add(`${job.id}:ERROR`);
-        showAgentNotification(
-          'EasyToPrint Agent – Printer Attention Required',
-          job.errorMessage || `Order ${job.id} requires operator review.`
-        );
-      }
-    });
+      // Wire up logger broadcast to renderer
+      logger.setBroadcastListener((entry) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('event:log-added', entry);
+        }
+      });
 
-    agentService.setOnQueueStateChangeListener((queues) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('event:queue-state-changed', queues);
-      }
-    });
+      // Wire up agent service listeners
+      agentService.setMainWindow(mainWindow);
+      agentService.setOnStatusChangeListener((status) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('event:status-changed', status);
+        }
+        updateTrayMenu();
 
-    // Start background agent service
-    await agentService.start();
+        if (status !== lastNotifiedStatus) {
+          if (status === 'ONLINE' || status === 'CONNECTED') {
+            showAgentNotification('EasyToPrint Agent – Connected', 'Your counter PC is online and ready to process print jobs.');
+          } else if (lastNotifiedStatus === 'ONLINE' && (status === 'ERROR' || status === 'OFFLINE' || status === 'DISCONNECTED')) {
+            showAgentNotification('EasyToPrint Agent – Disconnected', 'Connection to EasyToPrint Cloud was interrupted. Reconnecting in background...');
+          }
+          lastNotifiedStatus = status;
+        }
+      });
+
+      agentService.setOnJobUpdateListener((job) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('event:job-updated', job);
+        }
+        if (job.printStatus === 'COMPLETED' && !notifiedJobIds.has(`${job.id}:COMPLETED`)) {
+          notifiedJobIds.add(`${job.id}:COMPLETED`);
+          showAgentNotification(
+            'EasyToPrint Agent – Print Job Completed',
+            `Order ${job.id} (${job.files?.[0]?.fileName || 'Document'}) printed on ${job.printerName || 'default printer'}.`
+          );
+        } else if (
+          (job.printStatus === 'FAILED' || job.printStatus === 'MANUAL_ATTENTION' || job.printStatus === 'REQUIRES_ATTENTION') &&
+          !notifiedJobIds.has(`${job.id}:ERROR`)
+        ) {
+          notifiedJobIds.add(`${job.id}:ERROR`);
+          showAgentNotification(
+            'EasyToPrint Agent – Printer Attention Required',
+            job.errorMessage || `Order ${job.id} requires operator review.`
+          );
+        }
+      });
+
+      agentService.setOnQueueStateChangeListener((queues) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('event:queue-state-changed', queues);
+        }
+      });
+
+      // Start background agent service
+      await agentService.start();
+    } catch (startupError: any) {
+      const logFile = writeCrashErrorLog('startupException', startupError);
+      dialog.showErrorBox(
+        'Print Agent Startup Error',
+        `Print Agent encountered an error during startup:\n\n${startupError?.message || String(startupError)}\n\nError log saved to:\n${logFile}`
+      );
+    }
   });
 }
 
 // Allow local ES module asset loading across file:// protocol
 app.commandLine.appendSwitch('allow-file-access-from-files');
+
+function resolvePreloadPath(): string {
+  const candidates = app.isPackaged
+    ? [
+        path.join(__dirname, 'preload.cjs'),
+        path.join(app.getAppPath(), 'dist', 'main', 'preload.cjs'),
+        path.join(process.resourcesPath, 'app.asar', 'dist', 'main', 'preload.cjs')
+      ]
+    : [
+        path.join(__dirname, 'preload.cjs'),
+        path.resolve(__dirname, '../../dist/main/preload.cjs')
+      ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return path.join(__dirname, 'preload.cjs');
+}
 
 function createMainWindow() {
   const windowIcon = getAppWindowIcon();
@@ -168,13 +237,13 @@ function createMainWindow() {
     height: 740,
     minWidth: 860,
     minHeight: 600,
-    title: 'EasyToPrint Agent',
+    title: 'Print Agent – EasyToPrint',
     icon: windowIcon,
     backgroundColor: '#F7F7F7',
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
+      preload: resolvePreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -185,18 +254,19 @@ function createMainWindow() {
 
   // Diagnostics: Wire renderer console and loading events to agent logger
   mainWindow.webContents.on('console-message', (event) => {
-    // Pipe all renderer errors and warnings directly into the logger
     if (event.level >= 2) {
-      logger.warn(`[RENDERER-CONSOLE] [Level ${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`);
+      logger.warn('AGENT', `[RENDERER-CONSOLE] [Level ${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})`);
     }
   });
 
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-    logger.error(`[WINDOW] Failed to load renderer: ${errorDescription} (${errorCode}) at ${validatedURL}`);
+    logger.error('AGENT', `[WINDOW] Failed to load renderer: ${errorDescription} (${errorCode}) at ${validatedURL}`);
   });
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    logger.error(`[RENDERER-CRASH] Renderer process gone: reason=${details.reason}, exitCode=${details.exitCode}`);
+    const errMsg = `Renderer process gone: reason=${details.reason}, exitCode=${details.exitCode}`;
+    logger.error('AGENT', `[RENDERER-CRASH] ${errMsg}`);
+    writeCrashErrorLog('render-process-gone', new Error(errMsg));
   });
 
   // Enable F12 and Ctrl+Shift+I to toggle DevTools for troubleshooting
@@ -209,26 +279,33 @@ function createMainWindow() {
   });
 
   const loadLocalBundle = () => {
-    const primaryBundlePath = path.join(__dirname, '../renderer/index.html');
-    const fallbackBundlePath = path.resolve(__dirname, '../../dist/renderer/index.html');
+    const bundleCandidates = app.isPackaged
+      ? [
+          path.join(__dirname, '../renderer/index.html'),
+          path.join(app.getAppPath(), 'dist', 'renderer', 'index.html'),
+          path.join(process.resourcesPath, 'app.asar', 'dist', 'renderer', 'index.html')
+        ]
+      : [
+          path.join(__dirname, '../renderer/index.html'),
+          path.resolve(__dirname, '../../dist/renderer/index.html')
+        ];
 
-    if (fs.existsSync(primaryBundlePath)) {
-      mainWindow?.loadFile(primaryBundlePath).catch((err) => {
-        logger.error(`[WINDOW] Failed to load primary bundle: ${err.message}`);
-      });
-    } else if (fs.existsSync(fallbackBundlePath)) {
-      mainWindow?.loadFile(fallbackBundlePath).catch((err) => {
-        logger.error(`[WINDOW] Failed to load fallback bundle: ${err.message}`);
+    const resolvedBundle = bundleCandidates.find((candidate) => fs.existsSync(candidate));
+    if (resolvedBundle) {
+      mainWindow?.loadFile(resolvedBundle).catch((err) => {
+        logger.error('AGENT', `[WINDOW] Failed to load renderer bundle (${resolvedBundle}): ${err.message}`);
       });
     } else {
-      logger.error(`[WINDOW] No built renderer bundle found at ${primaryBundlePath} or ${fallbackBundlePath}. Please run 'npm run build:renderer'.`);
+      const msg = `No built renderer bundle found. Searched: ${bundleCandidates.join(', ')}`;
+      logger.error('AGENT', `[WINDOW] ${msg}`);
+      writeCrashErrorLog('missingRendererBundle', new Error(msg));
     }
   };
 
-  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+  const isDev = !app.isPackaged && process.env.NODE_ENV === 'development';
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL).catch((err) => {
-      logger.warn(`[WINDOW] Could not connect to dev server (${process.env.VITE_DEV_SERVER_URL}): ${err.message}. Loading local bundle...`);
+      logger.warn('AGENT', `[WINDOW] Could not connect to dev server (${process.env.VITE_DEV_SERVER_URL}): ${err.message}. Loading local bundle...`);
       loadLocalBundle();
     });
   } else {

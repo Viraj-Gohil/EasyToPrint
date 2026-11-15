@@ -1,7 +1,12 @@
+import { createRequire } from 'module';
+import crypto from 'crypto';
+import os from 'os';
+import { logger } from '../logger/AgentLogger.js';
+
+const require = createRequire(import.meta.url);
 let safeStorage: any;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  safeStorage = require('electron').safeStorage;
+  safeStorage = require('electron')?.safeStorage;
 } catch {
   safeStorage = {
     isEncryptionAvailable: () => false,
@@ -9,9 +14,6 @@ try {
     decryptString: (b: Buffer) => b.toString()
   };
 }
-import crypto from 'crypto';
-import os from 'os';
-import { logger } from '../logger/AgentLogger.js';
 
 export class SafeStorageVault {
   private static instance: SafeStorageVault;

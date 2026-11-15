@@ -4,6 +4,7 @@ import os from 'os';
 import crypto from 'crypto';
 import { AgentConfig, DiscoveredPrinter, PrintJobItem, PlanEntitlements } from '../../renderer/types/agent.js';
 import { M2MCrypto } from '../security/M2MCrypto.js';
+import { getTempSpoolDir } from '../storage/AppPaths.js';
 import { logger } from '../logger/AgentLogger.js';
 
 export class ApiClient {
@@ -605,21 +606,13 @@ export class ApiClient {
         logger.warn('NETWORK', `Declared Content-Type (${contentType}) differed from binary payload signature (${detectedFormat}). Using verified binary payload.`);
       }
 
-      const osTemp = os.tmpdir();
-      const tempDir = path.join(osTemp, 'PrintFlow_Spool');
-      const existedBefore = fs.existsSync(tempDir);
-
-      if (!existedBefore) {
-        logger.info('NETWORK', `Spool directory does not exist yet. Creating: ${tempDir} (os.tmpdir: ${osTemp})`);
+      const tempDir = getTempSpoolDir();
+      if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true, mode: 0o700 });
       }
-
-      const existedAfter = fs.existsSync(tempDir);
       logger.info('NETWORK', `Spool directory status for ${jobId}:`, {
-        osTmpDir: osTemp,
         resolvedTempDir: tempDir,
-        existedBeforeCreation: existedBefore,
-        existsNow: existedAfter
+        existsNow: fs.existsSync(tempDir)
       });
 
       const filePath = path.join(

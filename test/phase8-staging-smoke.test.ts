@@ -169,12 +169,12 @@ async function runPhase8Tests() {
     assert.ok(signed.expiresAt.getTime() > Date.now());
   });
 
-  // 8. Migration Runner Integrity & Checksums (001 through 010)
-  await test('Migration runner loads migrations 001 through 010 in strict sequential order', async () => {
+  // 8. Migration Runner Integrity & Checksums (001 through 011)
+  await test('Migration runner loads migrations 001 through 011 in strict sequential order', async () => {
     const migrations = await loadMigrations();
-    assert.strictEqual(migrations.length, 10, 'Exactly 10 migrations must be registered');
+    assert.strictEqual(migrations.length, 11, 'Exactly 11 migrations must be registered');
 
-    const expectedIds = ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010'];
+    const expectedIds = ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011'];
     for (let i = 0; i < expectedIds.length; i++) {
       assert.strictEqual(migrations[i].id, expectedIds[i], `Migration at index ${i} must have id ${expectedIds[i]}`);
       assert.ok(migrations[i].sql.trim().length > 50, `Migration ${migrations[i].filename} SQL must not be empty`);
@@ -182,8 +182,8 @@ async function runPhase8Tests() {
     }
   });
 
-  // 9. Electron Windows Print Agent Staging Invariants
-  await test('Electron Windows Agent staging invariants: auth, lease recovery, spool defense, virtual queue filtering', () => {
+  // 9. Electron Windows Print Agent Staging & Packaging Invariants
+  await test('Electron Windows Agent staging invariants: auth, lease recovery, spool defense, virtual queue filtering, and NSIS x64 packaging', () => {
     // 1. Virtual printer filtering
     assert.strictEqual(PrintSettingsAdapter.isVirtualPrinter('Microsoft Print to PDF'), true);
     assert.strictEqual(PrintSettingsAdapter.isVirtualPrinter('OneNote (Desktop)'), true);
@@ -202,12 +202,27 @@ async function runPhase8Tests() {
 
     // 3. Ambiguous Spooler Outcome Protection
     const spoolSubmitted = true;
-    const spoolTimeout = true;
     const reportedStatus = spoolSubmitted ? 'REQUIRES_ATTENTION' : 'FAILED';
     const retrySafe = !spoolSubmitted;
 
     assert.strictEqual(reportedStatus, 'REQUIRES_ATTENTION');
     assert.strictEqual(retrySafe, false, 'Ambiguous physical spooler outcome must block automatic reprint');
+
+    // 4. electron-builder Windows NSIS x64 configuration invariants
+    const agentPkgPath = path.resolve(process.cwd(), 'print-agent', 'package.json');
+    const agentPkg = JSON.parse(fs.readFileSync(agentPkgPath, 'utf8'));
+    assert.strictEqual(agentPkg.name, 'print-agent');
+    assert.ok(agentPkg.devDependencies['electron-builder'], 'electron-builder must be in devDependencies');
+    assert.strictEqual(agentPkg.dependencies?.['electron-builder'], undefined, 'electron-builder must not be in dependencies');
+    assert.strictEqual(agentPkg.build.appId, 'com.printagent.app');
+    assert.strictEqual(agentPkg.build.productName, 'Print Agent');
+    assert.strictEqual(agentPkg.build.artifactName, 'print-agent-Setup-${version}.exe');
+    assert.strictEqual(agentPkg.build.asar, true);
+    assert.ok(Array.isArray(agentPkg.build.asarUnpack) && agentPkg.build.asarUnpack.length > 0);
+    assert.strictEqual(agentPkg.build.win.signAndEditExecutable, false);
+    assert.strictEqual(agentPkg.build.nsis.oneClick, false);
+    assert.strictEqual(agentPkg.build.nsis.allowToChangeInstallationDirectory, true);
+    assert.strictEqual(agentPkg.scripts['build:win'], 'electron-builder --win --x64');
   });
 
   // 10. Health & Readiness Probe Observability

@@ -1,23 +1,83 @@
 {
-  "name": "printflow-agent",
-  "productName": "EasyToPrint Agent",
+  "name": "print-agent",
+  "productName": "Print Agent",
   "version": "1.4.2",
   "type": "module",
-  "description": "EasyToPrint Agent - Windows Desktop Print Spooler & Printer Automation",
+  "description": "Print Agent - Windows Desktop Print Spooler & Printer Automation",
   "author": "EasyToPrint Cloud Technologies",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "vite",
+    "build:icons": "node scripts/generate-icons.mjs",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.node.json",
-    "build": "npm run build:renderer && npm run build:main",
+    "build": "npm run build:icons && npm run build:renderer && npm run build:main",
     "prestart": "npm run build",
     "start": "node scripts/ensure-electron.mjs && electron .",
     "verify:electron": "node scripts/ensure-electron.mjs",
     "fix:electron": "node scripts/fix-electron.mjs",
     "postinstall": "node scripts/ensure-electron.mjs",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "pack": "npm run build && electron-builder --dir",
+    "prebuild:win": "npm run build",
+    "build:win": "electron-builder --win --x64",
+    "dist": "npm run build && electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.printagent.app",
+    "productName": "Print Agent",
+    "artifactName": "print-agent-Setup-${version}.exe",
+    "copyright": "Copyright © 2026 EasyToPrint",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "public/assets/**/*"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/@napi-rs/**/*",
+      "**/node_modules/pdfjs-dist/**/*",
+      "**/node_modules/pdf-to-printer/**/*",
+      "**/node_modules/printer/**/*",
+      "**/node_modules/sharp/**/*",
+      "**/node_modules/sqlite3/**/*",
+      "**/node_modules/serialport/**/*",
+      "**/node_modules/puppeteer/**/*",
+      "**/*.{node,dll,exe}"
+    ],
+    "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      },
+      {
+        "from": "build",
+        "to": "build"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Print Agent",
+      "runAfterFinish": true
+    }
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.1.0",

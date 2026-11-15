@@ -3,18 +3,21 @@ import util from 'util';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-let BrowserWindow: any;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  BrowserWindow = require('electron').BrowserWindow;
-} catch {
-  BrowserWindow = undefined;
-}
+import { createRequire } from 'module';
 import { DiscoveredPrinter, PrintFileItem, TestPrintResult } from '../../renderer/types/agent.js';
 import { PrintSettingsAdapter } from './PrintSettingsAdapter.js';
 import { printerCapabilityDetector } from './engine/PrinterCapabilityDetector.js';
 import { localVault } from '../storage/LocalDataVault.js';
+import { getTempSpoolDir } from '../storage/AppPaths.js';
 import { logger } from '../logger/AgentLogger.js';
+
+const require = createRequire(import.meta.url);
+let BrowserWindow: any;
+try {
+  BrowserWindow = require('electron')?.BrowserWindow;
+} catch {
+  BrowserWindow = undefined;
+}
 
 const execAsync = util.promisify(exec);
 
@@ -383,7 +386,7 @@ export class WindowsPrinterManager {
       return { success: false, printerName: resolvedName, message: `Printer "${resolvedName}" is offline.` };
     }
 
-    const tempDir = os.tmpdir();
+    const tempDir = getTempSpoolDir();
     const testDocPath = path.join(tempDir, `printflow_test_${Date.now()}.pdf`);
     const testPdf = `%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj

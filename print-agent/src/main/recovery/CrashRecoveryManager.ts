@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { localVault } from '../storage/LocalDataVault.js';
+import { getTempSpoolDir } from '../storage/AppPaths.js';
 import { logger } from '../logger/AgentLogger.js';
 
 export class CrashRecoveryManager {
@@ -36,7 +36,7 @@ export class CrashRecoveryManager {
         logger.info('RECOVERY', `${pendingDownloadRecoveryCount} interrupted download(s) are waiting for backend queue recovery.`);
       }
       if (attentionCount > 0) {
-      logger.warn('RECOVERY', `${attentionCount} interrupted print job(s) require operator confirmation.`);
+        logger.warn('RECOVERY', `${attentionCount} interrupted print job(s) require operator confirmation.`);
       }
     }
 
@@ -46,7 +46,7 @@ export class CrashRecoveryManager {
 
   private static cleanStaleSpoolFiles(): void {
     try {
-      const spoolDir = path.join(os.tmpdir(), 'PrintFlow_Spool');
+      const spoolDir = getTempSpoolDir();
       if (fs.existsSync(spoolDir)) {
         const files = fs.readdirSync(spoolDir);
         const now = Date.now();
@@ -56,7 +56,11 @@ export class CrashRecoveryManager {
           const filePath = path.join(spoolDir, file);
           const stat = fs.statSync(filePath);
           if (now - stat.mtimeMs > maxAge) {
-            fs.unlinkSync(filePath);
+            if (stat.isDirectory()) {
+              fs.rmSync(filePath, { recursive: true, force: true });
+            } else {
+              fs.unlinkSync(filePath);
+            }
           }
         }
       }

@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import { printerManager } from '../printer/WindowsPrinterManager.js';
 import { PrintSettingsAdapter } from '../printer/PrintSettingsAdapter.js';
 import { localVault } from '../storage/LocalDataVault.js';
+import { getUserDataDir, getTempSpoolDir, getTempPdfCacheDir } from '../storage/AppPaths.js';
 import { logger } from '../logger/AgentLogger.js';
 
 const execAsync = promisify(exec);
@@ -182,14 +183,14 @@ class SystemHealthManager {
     const diskUsed = diskTotal - diskFree;
     const diskUsagePercent = diskTotal > 0 ? parseFloat(((diskUsed / diskTotal) * 100).toFixed(1)) : 45.0;
 
-    const appDataDir = appPath(); // helper or path
-    const spoolDir = path.join(appDataDir, 'spool');
-    const tempDir = path.join(appDataDir, 'temp');
-    const sqlitePath = path.join(appDataDir, 'vault.db');
+    const appDataDir = appPath();
+    const spoolDir = getTempSpoolDir();
+    const tempDir = getTempPdfCacheDir();
+    const sqlitePath = path.join(appDataDir, 'config.json');
 
     const spoolSize = this.getDirectorySizeMb(spoolDir);
     const tempSize = this.getDirectorySizeMb(tempDir);
-    const sqliteSize = fs.existsSync(sqlitePath) ? parseFloat((fs.statSync(sqlitePath).size / (1024 * 1024)).toFixed(2)) : 1.2;
+    const sqliteSize = fs.existsSync(sqlitePath) ? parseFloat((fs.statSync(sqlitePath).size / (1024 * 1024)).toFixed(2)) : 0.1;
 
     const memUsage = process.memoryUsage();
     const processMemMb = parseFloat((memUsage.rss / (1024 * 1024)).toFixed(1));
@@ -428,27 +429,30 @@ class SystemHealthManager {
 
   public runStorageCleanup(): { success: boolean; freedMb: number; message: string } {
     try {
-      const appDir = appPath();
-      const tempDir = path.join(appDir, 'temp');
+      const dirsToClean = [getTempSpoolDir(), getTempPdfCacheDir()];
       let freedBytes = 0;
       let cleanedCount = 0;
+      const now = Date.now();
+      const maxAgeMs = 24 * 60 * 60 * 1000; // 24 hours
 
-      if (fs.existsSync(tempDir)) {
-        const files = fs.readdirSync(tempDir);
-        const now = Date.now();
-        const maxAgeMs = 24 * 60 * 60 * 1000; // 24 hours
-
-        for (const file of files) {
-          const filePath = path.join(tempDir, file);
-          try {
-            const stats = fs.statSync(filePath);
-            // Protect active jobs or files modified within 24h
-            if (now - stats.mtimeMs > maxAgeMs && !file.includes('active')) {
-              freedBytes += stats.size;
-              fs.unlinkSync(filePath);
-              cleanedCount++;
-            }
-          } catch {}
+      for (const targetDir of dirsToClean) {
+        if (fs.existsSync(targetDir)) {
+          const files = fs.readdirSync(targetDir);
+          for (const file of files) {
+            const filePath = path.join(targetDir, file);
+            try {
+              const stats = fs.statSync(filePath);
+              if (now - stats.mtimeMs > maxAgeMs && !file.includes('active')) {
+                freedBytes += stats.size;
+                if (stats.isDirectory()) {
+                  fs.rmSync(filePath, { recursive: true, force: true });
+                } else {
+                  fs.unlinkSync(filePath);
+                }
+                cleanedCount++;
+              }
+            } catch {}
+          }
         }
       }
 
@@ -467,11 +471,7 @@ class SystemHealthManager {
 }
 
 function appPath(): string {
-  try {
-    return process.env.APPDATA || path.join(os.homedir(), '.printflow-agent');
-  } catch {
-    return path.join(os.homedir(), '.printflow-agent');
-  }
+  return getUserDataDir();
 }
 
 export const systemHealthManager = new SystemHealthManager();

@@ -5,13 +5,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-let app: any;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  app = require('electron').app;
-} catch {
-  app = undefined;
-}
+import { getUserDataDir } from './AppPaths.js';
 import {
   HardwareCapabilities,
   OwnerPrinterConfiguration,
@@ -25,7 +19,7 @@ import { AgentConfig, PrintJobItem, QueueMetrics, PlanEntitlements } from '../..
 import { safeVault } from './SafeStorageVault.js';
 import { logger } from '../logger/AgentLogger.js';
 
-const DEFAULT_SERVER_URL = 'https://easytoprint.devpixel.space';
+const DEFAULT_SERVER_URL = process.env.AGENT_DEFAULT_SERVER_URL || 'https://easytoprint.devpixel.space';
 
 function normalizeServerUrl(url: unknown): string {
   if (typeof url !== 'string' || !url.trim()) return DEFAULT_SERVER_URL;
@@ -55,12 +49,12 @@ const DEFAULT_CONFIG: AgentConfig = {
   agentId: '',
   authToken: '',
   deviceName: '',
-  pollIntervalMs: 5000,
-  autoStartOnBoot: false,
+  pollIntervalMs: Number(process.env.AGENT_POLL_INTERVAL_MS) || 5000,
+  autoStartOnBoot: process.env.AGENT_AUTO_START_ON_BOOT !== 'false',
   selectedPrinterName: undefined,
   disabledPrinterNames: [],
   allowColorFallback: true,
-  spoolerTimeoutMs: 30000,
+  spoolerTimeoutMs: Number(process.env.AGENT_SPOOLER_TIMEOUT_MS) || 30000,
   themePreference: 'system',
   loadBalancingEnabled: true,
   loadBalancingStrategy: 'CAPABILITY_LEAST_WORKLOAD'
@@ -81,28 +75,17 @@ export class LocalDataVault {
   private credentialStorageSecure = true;
 
   private constructor() {
-    let basePath: string;
-    try {
-      basePath = app ? app.getPath('userData') : path.join(process.cwd(), '.printflow_agent');
-    } catch {
-      basePath = path.join(process.cwd(), '.printflow_agent');
-    }
+    const basePath = getUserDataDir();
 
-    if (!fs.existsSync(basePath)) {
-      try {
-        fs.mkdirSync(basePath, { recursive: true });
-      } catch {
-        // Ignore
-      }
-    }
-
-    // Backward-compatible migration: if upgrading from "PrintFlow Agent" to "EasyToPrint Agent",
+    // Backward-compatible migration: if upgrading from "PrintFlow Agent" or "EasyToPrint Agent" to "Print Agent",
     // preserve existing config.json, agent_state.json, jobs_queue.json, and printer_configs.json.
     try {
       const targetConfig = path.join(basePath, 'config.json');
-      if (app && !fs.existsSync(targetConfig)) {
+      if (!fs.existsSync(targetConfig)) {
         const appDataParent = path.dirname(basePath);
         const legacyDirs = [
+          path.join(appDataParent, 'EasyToPrint Agent'),
+          path.join(appDataParent, 'easytoprint-agent'),
           path.join(appDataParent, 'PrintFlow Agent'),
           path.join(appDataParent, 'printflow-agent')
         ];

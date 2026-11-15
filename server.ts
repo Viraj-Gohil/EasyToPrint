@@ -74,6 +74,9 @@ import {
   getShopAgentDetails,
   isNeonDatabaseConfigured,
   insertPrintAgentJob,
+  stagePrintAgentJob,
+  activateStagedPrintAgentJob,
+  findRecentOrderForRecovery,
   getPrintAgentJob,
   getPrintAgentJobByOrder,
   listPrintAgentJobs,
@@ -169,12 +172,34 @@ const ALLOWED_ORIGINS = Array.from(new Set([
 app.use((req: Request, res: Response, next: NextFunction) => {
   const origin = req.headers.origin as string | undefined;
   const host = (req.headers['x-forwarded-host'] as string) || (req.headers.host as string | undefined);
+  const reqPath = req.path || '';
+  const isStatelessCustomerOrPaymentRoute =
+    reqPath === '/api/create-order' ||
+    reqPath === '/api/verify-payment' ||
+    reqPath.startsWith('/api/payment/') ||
+    reqPath.startsWith('/api/customer/') ||
+    reqPath.startsWith('/api/orders/') ||
+    reqPath.startsWith('/api/public/');
 
-  if (origin && isOriginAllowed(origin, host, ALLOWED_ORIGINS)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
+  if (origin && (isOriginAllowed(origin, host, ALLOWED_ORIGINS) || isStatelessCustomerOrPaymentRoute)) {
+    res.setHeader('Access-Control-Allow-Origin', origin === 'null' ? '*' : origin);
+    res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Session-Id, x-print-tracking-token, x-razorpay-signature, x-request-id');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Session-Id, x-print-tracking-token, x-razorpay-signature, x-request-id, Accept, Origin'
+    );
+    if (origin !== 'null') {
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    res.setHeader('Access-Control-Max-Age', '86400');
+  } else if (!origin && req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Session-Id, x-print-tracking-token, x-razorpay-signature, x-request-id, Accept, Origin'
+    );
     res.setHeader('Access-Control-Max-Age', '86400');
   }
 
@@ -191,7 +216,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://api.razorpay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.razorpay.com; connect-src 'self' https://api.razorpay.com https://*.razorpay.com; frame-src 'self' https://api.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self';"
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://api.razorpay.com https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.razorpay.com; connect-src 'self' https://*.devpixel.space https://*.run.app https://api.razorpay.com https://*.razorpay.com https://lumberjack.razorpay.com https://cdnjs.cloudflare.com; frame-src 'self' https://api.razorpay.com https://*.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self';"
   );
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -515,11 +540,16 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     return next();
   }
 
-  // Exempt webhook endpoints and M2M agent endpoints with token validation
+  // Exempt webhook endpoints, M2M agent endpoints, and stateless customer payment/recovery endpoints
   if (
     req.path === '/api/payment/webhook' ||
     req.path === '/api/payments/webhook' ||
     req.path === '/api/webhooks/razorpay' ||
+    req.path === '/api/create-order' ||
+    req.path === '/api/verify-payment' ||
+    req.path.startsWith('/api/payment/') ||
+    req.path.startsWith('/api/customer/') ||
+    req.path.startsWith('/api/orders/') ||
     req.path.startsWith('/api/agent/')
   ) {
     return next();
@@ -4110,22 +4140,50 @@ app.post(['/api/verify-payment', '/api/payment/verify'], createRateLimiter(45, 6
       });
     }
 
+    // IMMEDIATELY dispatch any staged print job on the backend within the same request lifecycle
+    let dispatchResult: { dispatched: boolean; alreadyDispatched: boolean; job: any } = {
+      dispatched: false,
+      alreadyDispatched: false,
+      job: null
+    };
+    try {
+      dispatchResult = await activateStagedPrintAgentJob({
+        orderId: order_id,
+        paymentId: payment_id,
+        shopId: dbOrder?.shopId || reqShopId
+      });
+    } catch (dispErr) {
+      logger.warn('Staged print job activation notice during /api/verify-payment', {
+        order_id,
+        payment_id,
+        error: deepRedact(dispErr)
+      });
+    }
+
     logger.info('Payment verified successfully', {
       paymentId: payment_id,
       orderId: order_id,
       flow: dbOrder?.purpose || flow || 'payment',
-      atomicUpdated: Boolean(atomicResult)
+      atomicUpdated: Boolean(atomicResult),
+      dispatchedOnVerify: Boolean(dispatchResult.job)
     });
 
     return res.json({
       success: true,
-      message: 'Payment verified successfully',
+      message: dispatchResult.job
+        ? 'Payment verified and print job dispatched to shop queue.'
+        : 'Payment verified successfully',
       verified: true,
       order_id,
       payment_id,
       status: 'PAID',
       verifiedAt: new Date().toISOString(),
-      jobQueued: atomicResult?.jobPrintStatus === 'QUEUED'
+      jobQueued: atomicResult?.jobPrintStatus === 'QUEUED' || Boolean(dispatchResult.job),
+      dispatched: Boolean(dispatchResult.job),
+      alreadyDispatched: Boolean(dispatchResult.alreadyDispatched),
+      pickupCode: dispatchResult.job?.orderCode || dispatchResult.job?.id,
+      trackingToken: dispatchResult.job?.trackingToken,
+      job: dispatchResult.job || undefined
     });
   } catch (error: any) {
     logger.error('Error verifying payment', {
@@ -4171,15 +4229,25 @@ app.all(['/api/payment/check-status', '/api/payment/order-status/:orderId?'], cr
     try {
       const dbOrder = await getPaymentRepository().getPaymentOrderByProviderId(orderId);
       if (dbOrder && dbOrder.status === 'PAID') {
+        const dispatchRes = await activateStagedPrintAgentJob({
+          orderId,
+          paymentId: 'pay_durable_verified',
+          shopId: dbOrder.shopId || shopId
+        }).catch(() => ({ dispatched: false, alreadyDispatched: false, job: null }));
+
         return res.json({
           success: true,
           status: 'PAID',
           orderId,
-          paymentId: 'pay_durable_verified',
+          paymentId: dispatchRes.job?.paymentId || 'pay_durable_verified',
           verified: true,
           amount: dbOrder.amountMinor,
           currency: dbOrder.currency,
-          verifiedAt: dbOrder.updatedAt
+          verifiedAt: dbOrder.updatedAt,
+          dispatched: Boolean(dispatchRes.job),
+          alreadyDispatched: Boolean(dispatchRes.alreadyDispatched),
+          pickupCode: dispatchRes.job?.orderCode || dispatchRes.job?.id,
+          job: dispatchRes.job || undefined
         });
       }
     } catch (err) {
@@ -4229,7 +4297,7 @@ app.all(['/api/payment/check-status', '/api/payment/order-status/:orderId?'], cr
       if (successfulPayment) {
         const sigHash = crypto.createHash('sha256').update(`check-status:${orderId}:${successfulPayment.id}`).digest('hex');
         if (isSharedPoolConfigured()) {
-          getPaymentRepository().executeAtomicPaymentVerification({
+          await getPaymentRepository().executeAtomicPaymentVerification({
             providerOrderId: orderId,
             providerPaymentId: successfulPayment.id,
             providerSignatureHash: sigHash,
@@ -4241,6 +4309,12 @@ app.all(['/api/payment/check-status', '/api/payment/order-status/:orderId?'], cr
           });
         }
 
+        const dispatchRes = await activateStagedPrintAgentJob({
+          orderId,
+          paymentId: successfulPayment.id,
+          shopId
+        }).catch(() => ({ dispatched: false, alreadyDispatched: false, job: null }));
+
         return res.json({
           success: true,
           status: 'PAID',
@@ -4249,6 +4323,10 @@ app.all(['/api/payment/check-status', '/api/payment/order-status/:orderId?'], cr
           method: successfulPayment.method,
           amount: successfulPayment.amount,
           verified: true,
+          dispatched: Boolean(dispatchRes.job),
+          alreadyDispatched: Boolean(dispatchRes.alreadyDispatched),
+          pickupCode: dispatchRes.job?.orderCode || dispatchRes.job?.id,
+          job: dispatchRes.job || undefined,
           message: 'Payment verified successfully.'
         });
       }
@@ -4332,12 +4410,22 @@ app.post('/api/payment/reconcile', createRateLimiter(45, 60_000, { bucketKey: 'p
       try {
         const dbOrder = await getPaymentRepository().getPaymentOrderByProviderId(effectiveOrderId);
         if (dbOrder && dbOrder.status === 'PAID') {
+          const dispatchRes = await activateStagedPrintAgentJob({
+            orderId: effectiveOrderId,
+            paymentId: paymentId || 'pay_durable_reconciled',
+            shopId: dbOrder.shopId || shopId
+          }).catch(() => ({ dispatched: false, alreadyDispatched: false, job: null }));
+
           return res.json({
             success: true,
             status: 'PAID',
             verified: true,
             orderId: effectiveOrderId,
-            paymentId: paymentId || 'pay_durable_reconciled',
+            paymentId: dispatchRes.job?.paymentId || paymentId || 'pay_durable_reconciled',
+            dispatched: Boolean(dispatchRes.job),
+            alreadyDispatched: Boolean(dispatchRes.alreadyDispatched),
+            pickupCode: dispatchRes.job?.orderCode || dispatchRes.job?.id,
+            job: dispatchRes.job || undefined,
             message: 'Payment already verified successfully in database.'
           });
         }
@@ -4378,7 +4466,7 @@ app.post('/api/payment/reconcile', createRateLimiter(45, 60_000, { bucketKey: 'p
           const rOrderId = payEntity.order_id || effectiveOrderId || 'unknown_order';
           const sigHash = crypto.createHash('sha256').update(`reconcile:${rOrderId}:${paymentId}`).digest('hex');
           if (isSharedPoolConfigured()) {
-            getPaymentRepository().executeAtomicPaymentVerification({
+            await getPaymentRepository().executeAtomicPaymentVerification({
               providerOrderId: rOrderId,
               providerPaymentId: paymentId,
               providerSignatureHash: sigHash,
@@ -4390,6 +4478,12 @@ app.post('/api/payment/reconcile', createRateLimiter(45, 60_000, { bucketKey: 'p
             });
           }
 
+          const dispatchRes = await activateStagedPrintAgentJob({
+            orderId: rOrderId,
+            paymentId,
+            shopId
+          }).catch(() => ({ dispatched: false, alreadyDispatched: false, job: null }));
+
           return res.json({
             success: true,
             status: 'PAID',
@@ -4397,6 +4491,10 @@ app.post('/api/payment/reconcile', createRateLimiter(45, 60_000, { bucketKey: 'p
             orderId: rOrderId,
             paymentId,
             amount: payEntity.amount,
+            dispatched: Boolean(dispatchRes.job),
+            alreadyDispatched: Boolean(dispatchRes.alreadyDispatched),
+            pickupCode: dispatchRes.job?.orderCode || dispatchRes.job?.id,
+            job: dispatchRes.job || undefined,
             message: 'Payment verified and captured via Razorpay reconciliation.'
           });
         }
@@ -4415,7 +4513,7 @@ app.post('/api/payment/reconcile', createRateLimiter(45, 60_000, { bucketKey: 'p
         if (success) {
           if (isSharedPoolConfigured()) {
             const sigHash = crypto.createHash('sha256').update(`reconcile:${effectiveOrderId}:${success.id}`).digest('hex');
-            getPaymentRepository().executeAtomicPaymentVerification({
+            await getPaymentRepository().executeAtomicPaymentVerification({
               providerOrderId: effectiveOrderId,
               providerPaymentId: success.id,
               providerSignatureHash: sigHash,
@@ -4427,6 +4525,12 @@ app.post('/api/payment/reconcile', createRateLimiter(45, 60_000, { bucketKey: 'p
             });
           }
 
+          const dispatchRes = await activateStagedPrintAgentJob({
+            orderId: effectiveOrderId,
+            paymentId: success.id,
+            shopId
+          }).catch(() => ({ dispatched: false, alreadyDispatched: false, job: null }));
+
           return res.json({
             success: true,
             status: 'PAID',
@@ -4434,6 +4538,10 @@ app.post('/api/payment/reconcile', createRateLimiter(45, 60_000, { bucketKey: 'p
             orderId: effectiveOrderId,
             paymentId: success.id,
             amount: success.amount,
+            dispatched: Boolean(dispatchRes.job),
+            alreadyDispatched: Boolean(dispatchRes.alreadyDispatched),
+            pickupCode: dispatchRes.job?.orderCode || dispatchRes.job?.id,
+            job: dispatchRes.job || undefined,
             message: 'Payment successfully reconciled and confirmed.'
           });
         }
@@ -4947,6 +5055,15 @@ app.post(['/api/payment/webhook', '/api/payments/webhook', '/api/webhooks/razorp
               currency: payment?.currency || 'INR'
             });
           }
+
+          // Immediately activate any staged print job on webhook payment confirmation
+          await activateStagedPrintAgentJob({
+            orderId: effectiveOrderId,
+            paymentId: effectivePaymentId,
+            shopId: payment?.notes?.shopId || order?.notes?.shopId
+          }).catch((err) => {
+            logger.warn('Webhook staged print job activation notice', { effectiveOrderId, error: deepRedact(err) });
+          });
         }
         break;
       }
@@ -5511,19 +5628,470 @@ interface BackendPrintJob {
   pagesPrinted?: number;
 }
 
+// ============================================================================
+// PRE-PAYMENT PRINT JOB STAGING (STORES FILES BEFORE RAZORPAY MODAL OPENS)
+// ============================================================================
+app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey: 'customer-stage-order' }), async (req: Request, res: Response) => {
+  if (!isNeonDatabaseConfigured() || !isSharedPoolConfigured()) {
+    return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
+  }
+  const { orderId, shopId, customerName, customerPhone, totalAmount, files } = req.body || {};
+  if (
+    typeof orderId !== 'string' ||
+    !orderId.trim() ||
+    typeof shopId !== 'string' ||
+    !shopId.trim() ||
+    !Array.isArray(files) ||
+    files.length === 0 ||
+    files.length > 20
+  ) {
+    return res.status(400).json({ success: false, error: 'A valid orderId, shopId, and 1–20 print files are required for staging.' });
+  }
+
+  const id = `PRT-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+  const preparedFiles: Array<{
+    id: string;
+    fileName: string;
+    fileUrl: string;
+    downloadUrl: string;
+    pageCount: number;
+    copies: number;
+    colorMode: 'BW' | 'COLOR';
+    paperSize: 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal';
+    duplex: boolean;
+    pagesToPrint?: string;
+    storageKey: string;
+    buffer: Buffer;
+    mime: string;
+    sanitizedFilename: string;
+  }> = [];
+  let totalBytes = 0;
+
+  for (const input of files) {
+    if (
+      !input ||
+      typeof input.fileName !== 'string' ||
+      typeof input.fileBase64 !== 'string' ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.fileBase64) ||
+      !Number.isInteger(input.copies) ||
+      input.copies < 1 ||
+      input.copies > 999 ||
+      !Number.isInteger(input.pageCount) ||
+      input.pageCount < 1 ||
+      input.pageCount > 10000 ||
+      !['BW', 'COLOR'].includes(input.colorMode) ||
+      !['A4', 'A3', 'A5', 'Letter', 'Legal'].includes(input.paperSize) ||
+      typeof input.duplex !== 'boolean' ||
+      (input.pagesToPrint !== undefined &&
+        (typeof input.pagesToPrint !== 'string' ||
+          input.pagesToPrint.length > 200 ||
+          !/^\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*$/.test(input.pagesToPrint)))
+    ) {
+      return res.status(400).json({ success: false, error: 'One or more print file settings are invalid.' });
+    }
+
+    const buffer = Buffer.from(input.fileBase64, 'base64');
+    totalBytes += buffer.length;
+    if (totalBytes > 50 * 1024 * 1024) {
+      return res.status(413).json({ success: false, error: 'The combined print files exceed the 50 MB limit.' });
+    }
+
+    const validation = validateUploadFile({
+      buffer,
+      filename: input.fileName,
+      declaredMime: typeof input.fileType === 'string' ? input.fileType : undefined,
+      shopId,
+      jobId: id
+    });
+    if (!validation.isValid || !validation.storageKey || !validation.detectedMime || !validation.sanitizedFilename) {
+      return res.status(400).json({
+        success: false,
+        code: validation.code || 'INVALID_FILE',
+        title: validation.userFacingTitle || 'Invalid Document',
+        message: validation.userFacingMessage || validation.error || 'A print file failed validation.',
+        error: validation.error || 'A print file failed validation.',
+        filename: input.fileName,
+        detectedType: validation.detectedType,
+        supportedFormats: validation.supportedFormats
+      });
+    }
+
+    const fileId = `file_${crypto.randomBytes(8).toString('hex')}`;
+    const downloadUrl = `/api/agent/jobs/${encodeURIComponent(id)}/file?fileId=${encodeURIComponent(fileId)}`;
+    preparedFiles.push({
+      id: fileId,
+      fileName: validation.sanitizedFilename,
+      fileUrl: downloadUrl,
+      downloadUrl,
+      pageCount: input.pageCount,
+      copies: input.copies,
+      colorMode: input.colorMode,
+      paperSize: input.paperSize,
+      duplex: input.duplex,
+      pagesToPrint: input.pagesToPrint,
+      storageKey: validation.storageKey,
+      buffer,
+      mime: validation.detectedMime,
+      sanitizedFilename: validation.sanitizedFilename
+    });
+  }
+
+  const printerMatch = await validateJobAgainstRegisteredPrinters(shopId, preparedFiles);
+  if (!printerMatch.eligible) {
+    return res.status(422).json({
+      success: false,
+      code: printerMatch.code || 'INCOMPATIBLE_PRINTER',
+      error: printerMatch.error
+    });
+  }
+
+  const now = new Date().toISOString();
+  const stagedPayload: any = {
+    id,
+    orderCode: id,
+    trackingToken: `tr_${crypto.randomBytes(8).toString('hex')}`,
+    orderId: orderId.trim(),
+    paymentId: '',
+    shopId,
+    customerName: typeof customerName === 'string' ? customerName.trim() || 'Guest Customer' : 'Guest Customer',
+    customerPhone: typeof customerPhone === 'string' ? customerPhone.trim() : '',
+    files: preparedFiles.map(({ storageKey, buffer, sanitizedFilename, ...file }) => file),
+    totalAmount: Number(totalAmount) || 0,
+    paymentStatus: 'PENDING',
+    printStatus: 'STAGED',
+    printerName: printerMatch.matchedPrinterName,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  try {
+    const stagedJob = await stagePrintAgentJob(
+      stagedPayload,
+      preparedFiles.map((file) => ({
+        id: file.id,
+        mime: file.mime,
+        filename: file.sanitizedFilename,
+        buffer: file.buffer
+      }))
+    );
+
+    if (!stagedJob) {
+      return res.status(503).json({ success: false, error: 'Could not stage print job.' });
+    }
+
+    // Also upload customer documents to Supabase Object Storage bucket if configured
+    const storageProvider = getStorageProvider();
+    if (storageProvider.isConfigured()) {
+      for (const file of preparedFiles) {
+        try {
+          const ext = path.extname(file.sanitizedFilename) || '.pdf';
+          await storageProvider.upload({
+            shopId,
+            jobId: stagedJob.id,
+            fileId: file.id,
+            extension: ext,
+            buffer: file.buffer,
+            contentType: file.mime
+          });
+        } catch {
+          // Non-fatal; BYTEA in print_agent_job_files is primary
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      staged: true,
+      jobId: stagedJob.id,
+      orderId: stagedJob.orderId,
+      trackingToken: stagedJob.trackingToken
+    });
+  } catch (err) {
+    logger.error('Failed to stage customer print order', { orderId, shopId, error: deepRedact(err) });
+    return res.status(503).json({ success: false, error: 'Could not stage print files before payment.' });
+  }
+});
+
+// In-memory lock set to prevent concurrent duplicate recovery/retry requests on rapid clicks
+const recoveringOrderLocks = new Set<string>();
+
+// ============================================================================
+// RECOVERY & RETRY ENDPOINT FOR PAID ORDERS ("Already Paid" & "Retry Dispatch")
+// Endpoint: POST /api/orders/recover-or-retry
+// ============================================================================
+app.post('/api/orders/recover-or-retry', createRateLimiter(45, 60_000, { bucketKey: 'orders-recover-or-retry' }), async (req: Request, res: Response) => {
+  if (!isNeonDatabaseConfigured() || !isSharedPoolConfigured()) {
+    return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
+  }
+
+  const rawOrderId = (req.body?.order_id || req.body?.orderId || req.body?.razorpay_order_id || '').trim();
+  const rawPaymentId = (req.body?.razorpay_payment_id || req.body?.paymentId || req.body?.payment_id || '').trim();
+  const rawPhone = (req.body?.phone || req.body?.customerPhone || '').trim();
+  const rawShopId = (req.body?.shopId || req.body?.shop_id || '').trim();
+
+  if (!rawOrderId && !rawPaymentId && !rawPhone) {
+    return res.status(400).json({
+      success: false,
+      error: 'Please provide an Order ID, Razorpay Payment ID, or your 10-digit Mobile Number to check and recover your order.'
+    });
+  }
+
+  const lockKey = rawOrderId || rawPaymentId || `${rawShopId}:${rawPhone}`;
+  if (recoveringOrderLocks.has(lockKey)) {
+    return res.status(429).json({
+      success: false,
+      status: 'PROCESSING',
+      error: 'Order verification and printer dispatch is already in progress. Please wait a moment.'
+    });
+  }
+
+  recoveringOrderLocks.add(lockKey);
+  try {
+    // 1. Locate order & staged/existing print job in database
+    const lookup = await findRecentOrderForRecovery({
+      orderId: rawOrderId || undefined,
+      paymentId: rawPaymentId || undefined,
+      customerPhone: rawPhone || undefined,
+      shopId: rawShopId || undefined
+    });
+
+    let effectiveOrderId = lookup.orderId || rawOrderId;
+    let effectivePaymentId = lookup.paymentId || rawPaymentId;
+    let effectiveShopId = lookup.shopId || rawShopId;
+
+    // 2. Check if order is already marked PAID in database
+    let isConfirmedPaid = false;
+    let dbOrder: PaymentOrderRecord | null = null;
+
+    if (effectiveOrderId) {
+      dbOrder = await getPaymentRepository().getPaymentOrderByProviderId(effectiveOrderId).catch(() => null);
+      if (dbOrder) {
+        if (!effectiveShopId) effectiveShopId = dbOrder.shopId;
+        if (dbOrder.status === 'PAID') {
+          isConfirmedPaid = true;
+        }
+      }
+    }
+
+    if (lookup.job && lookup.job.paymentStatus === 'SUCCESS') {
+      isConfirmedPaid = true;
+      if (!effectivePaymentId && lookup.job.paymentId) {
+        effectivePaymentId = lookup.job.paymentId;
+      }
+    }
+
+    // 3. If not yet marked PAID in DB, query Razorpay Orders/Payments API directly
+    if (!isConfirmedPaid) {
+      let targetKeyId = '';
+      let targetKeySecret = '';
+
+      if (effectiveShopId && effectiveShopId !== 'platform') {
+        const shopIntegration = await getShopPaymentIntegration(effectiveShopId);
+        if (shopIntegration?.isConfigured && shopIntegration?.isActive && shopIntegration.keyId && shopIntegration.keySecret) {
+          targetKeyId = shopIntegration.keyId;
+          targetKeySecret = shopIntegration.keySecret;
+        }
+      }
+      if (!targetKeyId || !targetKeySecret) {
+        targetKeyId = RAZORPAY_KEY_ID;
+        targetKeySecret = RAZORPAY_KEY_SECRET;
+      }
+
+      if (targetKeyId && targetKeySecret) {
+        const activeRzp = new Razorpay({
+          key_id: targetKeyId,
+          key_secret: targetKeySecret
+        });
+
+        // 3a. Direct payment lookup by razorpay_payment_id
+        if (effectivePaymentId && effectivePaymentId.startsWith('pay_')) {
+          try {
+            let payEntity: any = await activeRzp.payments.fetch(effectivePaymentId);
+            if (payEntity && payEntity.status === 'authorized') {
+              try {
+                payEntity = await activeRzp.payments.capture(effectivePaymentId, payEntity.amount, payEntity.currency || 'INR');
+              } catch {
+                // Keep authorized entity if already captured or auto-capturing
+              }
+            }
+            if (payEntity && (payEntity.status === 'captured' || payEntity.status === 'authorized')) {
+              isConfirmedPaid = true;
+              if (!effectiveOrderId && payEntity.order_id) {
+                effectiveOrderId = payEntity.order_id;
+              }
+              const sigHash = crypto.createHash('sha256').update(`recover:${effectiveOrderId}:${effectivePaymentId}`).digest('hex');
+              await getPaymentRepository().executeAtomicPaymentVerification({
+                providerOrderId: effectiveOrderId || 'order_recovered',
+                providerPaymentId: effectivePaymentId,
+                providerSignatureHash: sigHash,
+                amountMinor: payEntity.amount,
+                currency: payEntity.currency || 'INR',
+                paymentMethod: payEntity.method || 'upi'
+              }).catch(() => {});
+            }
+          } catch (payErr: any) {
+            logger.warn('Razorpay payments.fetch notice in recover-or-retry', { effectivePaymentId, error: payErr?.message });
+          }
+        }
+
+        // 3b. Order payments lookup by razorpay_order_id
+        if (!isConfirmedPaid && effectiveOrderId && effectiveOrderId.startsWith('order_')) {
+          try {
+            const paymentsResponse: any = await activeRzp.orders.fetchPayments(effectiveOrderId);
+            const items: any[] = paymentsResponse?.items || [];
+            let matchedPay = items.find((p: any) => p.status === 'captured') || items.find((p: any) => p.status === 'authorized');
+
+            if (matchedPay && matchedPay.status === 'authorized') {
+              try {
+                matchedPay = await activeRzp.payments.capture(matchedPay.id, matchedPay.amount, matchedPay.currency || 'INR');
+              } catch {
+                // Keep authorized if capture call not needed
+              }
+            }
+
+            if (matchedPay) {
+              isConfirmedPaid = true;
+              effectivePaymentId = matchedPay.id;
+              const sigHash = crypto.createHash('sha256').update(`recover:${effectiveOrderId}:${effectivePaymentId}`).digest('hex');
+              await getPaymentRepository().executeAtomicPaymentVerification({
+                providerOrderId: effectiveOrderId,
+                providerPaymentId: effectivePaymentId,
+                providerSignatureHash: sigHash,
+                amountMinor: matchedPay.amount,
+                currency: matchedPay.currency || 'INR',
+                paymentMethod: matchedPay.method || 'upi'
+              }).catch(() => {});
+            } else {
+              const pendingPay = items.find((p: any) => p.status === 'pending' || p.status === 'created');
+              if (pendingPay) {
+                return res.status(200).json({
+                  success: false,
+                  status: 'PENDING',
+                  orderId: effectiveOrderId,
+                  paymentId: pendingPay.id,
+                  message: 'Your payment is still being processed by the bank/UPI app. Please wait a few seconds and try again.'
+                });
+              }
+            }
+          } catch (ordErr: any) {
+            logger.warn('Razorpay orders.fetchPayments notice in recover-or-retry', { effectiveOrderId, error: ordErr?.message });
+          }
+        }
+      }
+    }
+
+    if (!isConfirmedPaid) {
+      return res.status(404).json({
+        success: false,
+        status: 'NOT_PAID',
+        orderId: effectiveOrderId || undefined,
+        error: effectiveOrderId
+          ? `No completed payment was found with Razorpay for order ${effectiveOrderId}. If your money was deducted, please enter your Razorpay Payment ID (starts with pay_).`
+          : 'No paid order was found matching those details. Please check your Payment ID or Mobile Number and try again.'
+      });
+    }
+
+    // 4. Payment is confirmed PAID! Atomically check/dispatch the print job with idempotency lock
+    const activated = await activateStagedPrintAgentJob({
+      orderId: effectiveOrderId,
+      paymentId: effectivePaymentId || 'pay_recovered',
+      shopId: effectiveShopId || undefined
+    });
+
+    if (activated.job) {
+      const availability = effectiveShopId
+        ? await getShopAgentAvailability(effectiveShopId).catch(() => ({ isAvailable: true, agentOnline: true, printerReady: true }))
+        : { isAvailable: true, agentOnline: true, printerReady: true };
+
+      return res.status(200).json({
+        success: true,
+        status: 'PAID',
+        verified: true,
+        dispatched: true,
+        alreadyDispatched: activated.alreadyDispatched,
+        pickupCode: activated.job.orderCode || activated.job.id,
+        trackingToken: activated.job.trackingToken,
+        orderId: effectiveOrderId,
+        paymentId: activated.job.paymentId || effectivePaymentId,
+        job: activated.job,
+        order: dbOrder || {
+          providerOrderId: effectiveOrderId,
+          status: 'PAID'
+        },
+        agentOnline: availability.agentOnline,
+        printerReady: availability.printerReady,
+        statusMessage: activated.alreadyDispatched
+          ? `Order #${activated.job.orderCode || activated.job.id} is already in the print queue.`
+          : `Payment verified! Order #${activated.job.orderCode || activated.job.id} dispatched to the printer.`
+      });
+    }
+
+    // Payment is verified PAID, but files were never staged on the server (e.g. client needs to send files)
+    return res.status(200).json({
+      success: true,
+      status: 'PAID',
+      verified: true,
+      dispatched: false,
+      needsFileUpload: true,
+      orderId: effectiveOrderId,
+      paymentId: effectivePaymentId || 'pay_verified',
+      order: dbOrder || {
+        providerOrderId: effectiveOrderId,
+        status: 'PAID'
+      },
+      message: 'Payment verified with Razorpay. Dispatching print files now...'
+    });
+  } catch (err: any) {
+    logger.error('Error in /api/orders/recover-or-retry', { error: deepRedact(err) });
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Could not recover or dispatch order right now. Please try again.'
+    });
+  } finally {
+    recoveringOrderLocks.delete(lockKey);
+  }
+});
+
 app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 'customer-print-jobs-create' }), async (req: Request, res: Response) => {
   if (!isNeonDatabaseConfigured() || !isSharedPoolConfigured()) {
     return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
   }
   const { orderId, paymentId, shopId, customerName, customerPhone, files } = req.body || {};
-  if (
-    typeof orderId !== 'string' ||
-    typeof paymentId !== 'string' ||
-    typeof shopId !== 'string' ||
-    !Array.isArray(files) ||
-    files.length === 0 ||
-    files.length > 20
-  ) {
+  if (typeof orderId !== 'string' || typeof paymentId !== 'string' || typeof shopId !== 'string') {
+    return res.status(400).json({ success: false, error: 'A verified orderId, paymentId, and shopId are required.' });
+  }
+
+  // Fast path: If the order was already staged before payment (or already queued), activate and return it immediately
+  // without requiring the client browser to re-upload base64 files!
+  try {
+    const activated = await activateStagedPrintAgentJob({ orderId, paymentId, shopId });
+    if (activated.job) {
+      const availability = await getShopAgentAvailability(shopId).catch(() => ({
+        isAvailable: true,
+        agentOnline: true,
+        printerReady: true
+      }));
+      return res.status(activated.alreadyDispatched ? 200 : 201).json({
+        success: true,
+        job: activated.job,
+        pickupCode: activated.job.orderCode || activated.job.id,
+        alreadyQueued: activated.alreadyDispatched,
+        alreadyDispatched: activated.alreadyDispatched,
+        agentOnline: availability.agentOnline,
+        printerReady: availability.printerReady,
+        statusMessage: availability.isAvailable
+          ? 'Payment verified. Order queued for printing.'
+          : 'Payment received. Waiting for the print shop to reconnect.'
+      });
+    }
+  } catch (actErr) {
+    logger.warn('Fast-path staged job activation check notice in /api/customer/print-jobs', {
+      orderId,
+      error: deepRedact(actErr)
+    });
+  }
+
+  if (!Array.isArray(files) || files.length === 0 || files.length > 20) {
     return res.status(400).json({ success: false, error: 'A verified payment, shop, and 1–20 print files are required.' });
   }
 

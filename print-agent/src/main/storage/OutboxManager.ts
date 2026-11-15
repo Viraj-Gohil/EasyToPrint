@@ -1,18 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { createRequire } from 'module';
 import { JobPrintStatus } from '../../renderer/types/agent.js';
 import { ApiClient } from '../api/ApiClient.js';
 import { logger } from '../logger/AgentLogger.js';
-
-const require = createRequire(import.meta.url);
-let app: any = null;
-try {
-  const electron = require('electron');
-  app = electron?.app || null;
-} catch {
-  app = null;
-}
+import { getUserDataDir } from './AppPaths.js';
 
 export type OutboxEventType =
   | 'document_download_started'
@@ -51,19 +42,7 @@ export class OutboxManager {
   private timer: NodeJS.Timeout | null = null;
 
   private constructor() {
-    let basePath: string;
-    try {
-      basePath = app ? app.getPath('userData') : path.join(process.cwd(), '.printflow_agent');
-    } catch {
-      basePath = path.join(process.cwd(), '.printflow_agent');
-    }
-
-    if (!fs.existsSync(basePath)) {
-      try {
-        fs.mkdirSync(basePath, { recursive: true });
-      } catch {}
-    }
-
+    const basePath = getUserDataDir();
     this.filePath = path.join(basePath, 'status_outbox.json');
     this.loadFromDisk();
   }

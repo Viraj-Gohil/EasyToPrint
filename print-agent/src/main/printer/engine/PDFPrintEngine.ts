@@ -11,6 +11,7 @@ import {
 } from '../types/printing.js';
 import { windowsPrintEngine } from './WindowsPrintEngine.js';
 import { spoolerMonitor } from './SpoolerMonitor.js';
+import { getTempSpoolDir, getTempPdfCacheDir } from '../../storage/AppPaths.js';
 import { logger } from '../../logger/AgentLogger.js';
 
 export class PDFPrintEngine {
@@ -18,7 +19,7 @@ export class PDFPrintEngine {
 
   private readonly DEFAULT_DPI = 200;
   private readonly DRAFT_DPI = 150;
-  private readonly CACHE_DIR = path.join(os.tmpdir(), 'PrintFlow_Cache', 'pdf_pages');
+  private readonly CACHE_DIR = getTempPdfCacheDir();
 
   private constructor() {
     try {
@@ -104,11 +105,10 @@ export class PDFPrintEngine {
     const renderScale = targetDpi / 72;
     const enableCache = request.enableCache !== false; // enabled by default for maximum speed
 
-    // Isolated temporary directory for rendered page PNGs
+    // Isolated temporary directory for rendered page PNGs inside writable user temp spool folder
     const safeJobId = request.jobId.replace(/[^a-zA-Z0-9_-]/g, '_');
     const jobTempDir = path.join(
-      os.tmpdir(),
-      'PrintFlow_Spool',
+      getTempSpoolDir(),
       `pdf_${safeJobId}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`
     );
 

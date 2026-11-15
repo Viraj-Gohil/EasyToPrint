@@ -52,11 +52,14 @@ import {
   getEffectiveRazorpayKey,
   generateRazorpayPaymentId,
   createRazorpayOrder,
+  stageCustomerPrintOrder,
   verifyRazorpayPayment,
   checkRazorpayOrderStatus,
-  reconcileRazorpayPayment
+  reconcileRazorpayPayment,
+  recoverOrRetryPrintOrder,
+  DispatchedPrintJobSummary
 } from '../../lib/razorpay';
-import { apiUrl } from '../../lib/apiConfig';
+import { apiUrl, fetchWithRetry } from '../../lib/apiConfig';
 import { CustomerErrorModal } from './CustomerErrorModal';
 import { validateClientDocument, DocumentValidationError } from '../../lib/validation/documentValidation';
 
@@ -362,6 +365,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
   // Payment processing & transaction state
   const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
+  const [paymentProcessingLabel, setPaymentProcessingLabel] = useState<string>('Creating payment...');
   const [activeJob, setActiveJob] = useState<PrintJob | null>(null);
   const [paymentFailedState, setPaymentFailedState] = useState<{
     status: 'FAILED' | 'CANCELLED';
@@ -376,7 +380,74 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
   } | null>(null);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState<boolean>(false);
+  const [checkingStatusLabel, setCheckingStatusLabel] = useState<string>('Verifying payment with Razorpay...');
   const [razorpayError, setRazorpayError] = useState<string | null>(null);
+  const [showRecoveryInput, setShowRecoveryInput] = useState<boolean>(false);
+  const [recoveryLookupInput, setRecoveryLookupInput] = useState<string>('');
+
+  const orderSessionStorageKey = `easytoprint_order_session_${shopSlug || 'default'}`;
+
+  const saveOrderSession = React.useCallback(
+    (session: {
+      orderId: string;
+      paymentId?: string;
+      shopId: string;
+      customerPhone?: string;
+      totalAmount?: number;
+      createdAt?: number;
+    }) => {
+      try {
+        localStorage.setItem(
+          orderSessionStorageKey,
+          JSON.stringify({
+            ...session,
+            createdAt: session.createdAt || Date.now()
+          })
+        );
+      } catch {}
+    },
+    [orderSessionStorageKey]
+  );
+
+  const loadOrderSession = React.useCallback((): {
+    orderId: string;
+    paymentId?: string;
+    shopId?: string;
+    customerPhone?: string;
+    totalAmount?: number;
+    createdAt?: number;
+  } | null => {
+    try {
+      const raw = localStorage.getItem(orderSessionStorageKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.orderId !== 'string') return null;
+      // Expire after 24 hours
+      if (parsed.createdAt && Date.now() - Number(parsed.createdAt) > 24 * 60 * 60 * 1000) {
+        localStorage.removeItem(orderSessionStorageKey);
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }, [orderSessionStorageKey]);
+
+  const clearOrderSession = React.useCallback(() => {
+    try {
+      localStorage.removeItem(orderSessionStorageKey);
+    } catch {}
+  }, [orderSessionStorageKey]);
+
+  useEffect(() => {
+    const saved = loadOrderSession();
+    if (saved?.orderId && !activeOrderId) {
+      setActiveOrderId(saved.orderId);
+      if (saved.customerPhone && !customerPhone) {
+        setCustomerPhone(saved.customerPhone);
+      }
+    }
+  }, [loadOrderSession, activeOrderId, customerPhone]);
 
   const pollingTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const activeRzpInstanceRef = React.useRef<any>(null);
@@ -406,7 +477,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     const refreshStatus = async () => {
       try {
         const response = await fetch(
-          `/api/customer/print-jobs/${encodeURIComponent(activeJob.id)}/status`,
+          apiUrl(`/api/customer/print-jobs/${encodeURIComponent(activeJob.id)}/status`),
           { cache: 'no-store', headers: { 'x-print-tracking-token': activeJob.trackingToken } }
         );
         const data = await response.json() as {
@@ -669,24 +740,115 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const transitionToDispatchedConfirmation = React.useCallback(
+    (params: {
+      jobId: string;
+      trackingToken?: string;
+      orderId: string;
+      paymentId: string;
+      totalAmount?: number;
+      statusMessage?: string;
+    }) => {
+      const job = createPrintJob({
+        id: params.jobId,
+        trackingToken: params.trackingToken,
+        shopId: shop.id,
+        customerName: 'Counter Customer',
+        customerPhone: customerPhone.trim() || '',
+        files,
+        totalAmount: params.totalAmount ?? grandTotal,
+        paymentMethod: 'Razorpay Online Payment',
+        paymentStatus: 'SUCCESS',
+        paymentId: params.paymentId
+      });
+      completedOrdersRef.current.add(params.orderId);
+      clearOrderSession();
+      setPaymentPendingState(null);
+      setPaymentFailedState(null);
+      setStepError(null);
+      setActiveJob(job);
+      setCurrentStep(4);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      showToast(
+        'Payment Verified & Sent to Printer!',
+        params.statusMessage || `Token #${params.jobId} confirmed. Order dispatched to ${shop.name} print queue.`,
+        'success',
+        5000
+      );
+    },
+    [createPrintJob, shop.id, shop.name, customerPhone, files, grandTotal, clearOrderSession, showToast]
+  );
+
   // Complete verified payment callback (ONLY invoked upon actual successful transaction)
-  const onPaymentSuccess = async (paymentId: string, orderId: string) => {
+  const onPaymentSuccess = async (
+    paymentId: string,
+    orderId: string,
+    preDispatchedJob?: DispatchedPrintJobSummary
+  ) => {
     if (!orderId || completedOrdersRef.current.has(orderId) || dispatchingOrdersRef.current.has(orderId)) return;
+
+    saveOrderSession({
+      orderId,
+      paymentId,
+      shopId: shop.id,
+      customerPhone: customerPhone.trim() || undefined,
+      totalAmount: grandTotal
+    });
+
+    // FAST PATH 1: Backend already atomically dispatched the print job during /api/verify-payment, /api/payment/check-status, or /api/payment/reconcile!
+    if (preDispatchedJob?.id) {
+      transitionToDispatchedConfirmation({
+        jobId: preDispatchedJob.id,
+        trackingToken: preDispatchedJob.trackingToken,
+        orderId,
+        paymentId,
+        totalAmount: preDispatchedJob.totalAmount ?? grandTotal,
+        statusMessage: preDispatchedJob.statusMessage
+      });
+      return;
+    }
+
     dispatchingOrdersRef.current.add(orderId);
     setIsProcessingPayment(true);
+    setPaymentProcessingLabel('Sending to printer...');
     setPaymentFailedState(null);
     setPaymentPendingState({
       status: 'PENDING',
       orderId,
-      message: 'Payment verified. Sending your files to the shop print queue.',
+      message: 'Payment verified. Sending your print job to the shop printer queue...',
       kind: 'DISPATCH',
       paymentId
     });
 
     try {
+      // FAST PATH 2: Lightweight JSON recovery/dispatch call (does NOT re-upload raw PDF/image files!)
+      const lightweightDispatch = await recoverOrRetryPrintOrder({
+        orderId,
+        paymentId,
+        shopId: shop.id
+      });
+
+      if (lightweightDispatch.success && lightweightDispatch.job?.id) {
+        transitionToDispatchedConfirmation({
+          jobId: lightweightDispatch.job.id,
+          trackingToken: lightweightDispatch.job.trackingToken || lightweightDispatch.trackingToken,
+          orderId,
+          paymentId: lightweightDispatch.paymentId || paymentId,
+          totalAmount: lightweightDispatch.job.totalAmount ?? grandTotal,
+          statusMessage: lightweightDispatch.message
+        });
+        return;
+      }
+
+      // FALLBACK PATH: Only upload files if pre-staging was skipped or server explicitly indicates needsFileUpload
       const payloadFiles = await Promise.all(files.map(async (file) => {
         const sourceFile = sourceFilesRef.current.get(file.id);
-        if (!sourceFile) throw new Error(`The original file for "${file.fileName}" is unavailable. Re-upload it before retrying.`);
+        if (!sourceFile) {
+          throw new Error(
+            lightweightDispatch.message ||
+              `The original file for "${file.fileName}" is unavailable after page reload. Please re-select the file and tap "Already Paid / Check Payment" to dispatch without paying again.`
+          );
+        }
         return {
           fileName: sourceFile.name,
           fileType: sourceFile.type,
@@ -700,19 +862,23 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         };
       }));
 
-      const response = await fetch(apiUrl('/api/customer/print-jobs'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderId,
-          paymentId,
-          shopId: shop.id,
-          customerName: 'Counter Customer',
-          customerPhone: customerPhone.trim(),
-          totalAmount: grandTotal,
-          files: payloadFiles
-        })
-      });
+      const response = await fetchWithRetry(
+        '/api/customer/print-jobs',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId,
+            paymentId,
+            shopId: shop.id,
+            customerName: 'Counter Customer',
+            customerPhone: customerPhone.trim(),
+            totalAmount: grandTotal,
+            files: payloadFiles
+          })
+        },
+        { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
+      );
       const result = await response.json() as {
         success?: boolean;
         code?: string;
@@ -739,32 +905,17 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
             actionText: 'Review Settings'
           });
         }
-        throw new Error(result.error || `Could not dispatch the paid order (HTTP ${response.status}).`);
+        throw new Error(result.error || result.message || `Could not dispatch the paid order (HTTP ${response.status}).`);
       }
 
-      const job = createPrintJob({
-        id: result.job.id,
+      transitionToDispatchedConfirmation({
+        jobId: result.job.id,
         trackingToken: result.job.trackingToken,
-        shopId: shop.id,
-        customerName: 'Counter Customer',
-        customerPhone: customerPhone.trim() || '',
-        files,
+        orderId,
+        paymentId,
         totalAmount: grandTotal,
-        paymentMethod: 'Razorpay Online Payment',
-        paymentStatus: 'SUCCESS',
-        paymentId
+        statusMessage: result.statusMessage
       });
-      completedOrdersRef.current.add(orderId);
-      setPaymentPendingState(null);
-      setActiveJob(job);
-      setCurrentStep(4);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      showToast(
-        'Payment Verified Successfully!',
-        result.statusMessage || `Txn #${paymentId} confirmed. Order dispatched to ${shop.name} print queue.`,
-        'success',
-        5000
-      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Print job dispatch failed.';
       setPaymentPendingState({
@@ -781,7 +932,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     }
   };
 
-  // Pay Now triggers official Razorpay Checkout with server-validated order and HMAC verification
+  // Pay Now triggers official Razorpay Checkout with server-validated order, pre-staged files, and atomic server-side dispatch
   const handlePayNow = async () => {
     setPaymentFailedState(null);
     setPaymentPendingState(null);
@@ -827,6 +978,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     const effectiveKey = getEffectiveRazorpayKey(configuredKey);
 
     setIsProcessingPayment(true);
+    setPaymentProcessingLabel('Creating payment order...');
     let checkoutModalActive = false;
     let modalDismissedOrCompleted = false;
     let openWatchdog: NodeJS.Timeout | null = null;
@@ -858,6 +1010,59 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       }
 
       setActiveOrderId(backendOrderId);
+      saveOrderSession({
+        orderId: backendOrderId,
+        shopId: shop.id,
+        customerPhone: customerPhone.trim() || undefined,
+        totalAmount: grandTotal
+      });
+
+      // 3. Stage files on backend BEFORE opening Razorpay Checkout so server can atomically dispatch on payment verification!
+      setPaymentProcessingLabel('Preparing print files...');
+      const payloadFiles = await Promise.all(files.map(async (file) => {
+        const sourceFile = sourceFilesRef.current.get(file.id);
+        if (!sourceFile) {
+          throw new Error(`The original file for "${file.fileName}" is unavailable. Please re-upload it.`);
+        }
+        return {
+          fileName: sourceFile.name,
+          fileType: sourceFile.type,
+          fileBase64: await fileToBase64(sourceFile),
+          pageCount: countPages(file),
+          copies: file.copies,
+          colorMode: file.color || 'BW',
+          paperSize: file.paperSize,
+          duplex: file.sides === 'DOUBLE',
+          pagesToPrint: file.pageSelection === 'CUSTOM' ? file.customRange || file.customPageRange : undefined
+        };
+      }));
+
+      const stageRes = await stageCustomerPrintOrder({
+        orderId: backendOrderId,
+        shopId: shop.id,
+        customerName: 'Counter Customer',
+        customerPhone: customerPhone.trim(),
+        totalAmount: grandTotal,
+        files: payloadFiles
+      });
+
+      if (!stageRes.success) {
+        if (stageRes.code) {
+          setCustomerErrorModal({
+            isOpen: true,
+            code: (stageRes.code as any) || 'INVALID_CONTENT',
+            title: stageRes.title || 'Print Option Unavailable',
+            message: stageRes.message || stageRes.error || 'Selected print settings are currently unavailable at this shop.',
+            fileName: stageRes.filename || 'Uploaded Document',
+            detectedType: stageRes.detectedType,
+            supportedFormats: Array.isArray(stageRes.supportedFormats) ? stageRes.supportedFormats.join(', ') : undefined,
+            actionText: 'Review Settings'
+          });
+        }
+        throw new Error(stageRes.error || 'Could not stage print files before payment. Please try again.');
+      }
+
+      setPaymentProcessingLabel('Opening Razorpay...');
 
       const activeKey = orderRes.key_id && isRealRazorpayKey(orderRes.key_id)
         ? orderRes.key_id.trim()
@@ -889,7 +1094,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
               }
               setPaymentPendingState(null);
               setPaymentFailedState(null);
-              void onPaymentSuccess(check.paymentId, orderIdToPoll);
+              void onPaymentSuccess(check.paymentId, orderIdToPoll, check.job);
             } else if (check.status === 'FAILED') {
               stopPolling();
               if (activeRzpInstanceRef.current) {
@@ -954,19 +1159,18 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
             if (openWatchdog) clearTimeout(openWatchdog);
 
             // Reconcile status with backend before assuming cancellation
-            // (Crucial for customer scanning UPI QR code and closing or returning to modal)
             try {
               const check = await checkRazorpayOrderStatus(backendOrderId, shop.id);
               if (check.status === 'PAID' && check.paymentId) {
                 stopPolling();
-                void onPaymentSuccess(check.paymentId, backendOrderId);
+                void onPaymentSuccess(check.paymentId, backendOrderId, check.job);
                 return;
               }
 
               const recon = await reconcileRazorpayPayment({ orderId: backendOrderId, shopId: shop.id });
               if (recon.status === 'PAID' && recon.paymentId) {
                 stopPolling();
-                void onPaymentSuccess(recon.paymentId, backendOrderId);
+                void onPaymentSuccess(recon.paymentId, backendOrderId, recon.job);
                 return;
               }
 
@@ -1003,11 +1207,11 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
             setIsProcessingPayment(false);
             setPaymentFailedState({
               status: 'CANCELLED',
-              message: 'Payment window was closed. If your money was deducted, tap "Check Status" below to reconcile.'
+              message: 'Payment window was closed. If your money was deducted, tap "Already Paid / Check Payment" below to recover and print.'
             });
             showToast(
-              'Payment Cancelled',
-              'Payment window was closed. No amount was deducted. Tap Retry below whenever ready.',
+              'Payment Window Closed',
+              'If your money was deducted, tap "Already Paid / Check Payment" below.',
               'info',
               4000
             );
@@ -1034,52 +1238,75 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
             return;
           }
 
+          const resolvedOrderId = response.razorpay_order_id || backendOrderId;
+          saveOrderSession({
+            orderId: resolvedOrderId,
+            paymentId: response.razorpay_payment_id,
+            shopId: shop.id,
+            customerPhone: customerPhone.trim() || undefined,
+            totalAmount: grandTotal
+          });
+
+          setPaymentProcessingLabel('Verifying payment & dispatching...');
+
           try {
             const verification = await verifyRazorpayPayment({
-              razorpay_order_id: response.razorpay_order_id || backendOrderId,
+              razorpay_order_id: resolvedOrderId,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
               shopId: shop.id
             });
 
             if (verification.success) {
-              void onPaymentSuccess(response.razorpay_payment_id, response.razorpay_order_id || backendOrderId);
+              void onPaymentSuccess(
+                response.razorpay_payment_id,
+                resolvedOrderId,
+                verification.job
+              );
             } else {
-              // Fallback to server reconciliation before declaring failure
-              const recon = await reconcileRazorpayPayment({
-                orderId: response.razorpay_order_id || backendOrderId,
+              // Fallback to unified server recovery/reconciliation before declaring failure
+              const recovered = await recoverOrRetryPrintOrder({
+                orderId: resolvedOrderId,
                 paymentId: response.razorpay_payment_id,
                 shopId: shop.id
               });
-              if (recon.success && recon.status === 'PAID') {
-                void onPaymentSuccess(recon.paymentId || response.razorpay_payment_id, backendOrderId);
+              if (recovered.success) {
+                void onPaymentSuccess(
+                  recovered.paymentId || response.razorpay_payment_id,
+                  recovered.orderId || resolvedOrderId,
+                  recovered.job
+                );
               } else {
                 setIsProcessingPayment(false);
-                const errMsg = verification.error || 'Payment signature verification failed. Order was not placed.';
+                const errMsg = verification.error || recovered.message || 'Payment verification failed. Tap "Already Paid / Check Payment" below to verify.';
                 setPaymentFailedState({
                   status: 'FAILED',
                   message: errMsg
                 });
-                showToast('Payment Verification Failed', errMsg, 'error', 6000);
+                showToast('Payment Verification Notice', errMsg, 'error', 6000);
               }
             }
           } catch (verErr: any) {
-            console.error('Payment verification error, attempting reconciliation:', verErr);
-            const recon = await reconcileRazorpayPayment({
-              orderId: response.razorpay_order_id || backendOrderId,
+            console.error('Payment verification error, attempting recovery:', verErr);
+            const recovered = await recoverOrRetryPrintOrder({
+              orderId: resolvedOrderId,
               paymentId: response.razorpay_payment_id,
               shopId: shop.id
             });
-            if (recon.success && recon.status === 'PAID') {
-              void onPaymentSuccess(recon.paymentId || response.razorpay_payment_id, backendOrderId);
+            if (recovered.success) {
+              void onPaymentSuccess(
+                recovered.paymentId || response.razorpay_payment_id,
+                recovered.orderId || resolvedOrderId,
+                recovered.job
+              );
             } else {
               setIsProcessingPayment(false);
-              const errMsg = verErr.message || 'Failed to verify payment with server. Order was not placed.';
+              const errMsg = verErr.message || 'Failed to verify payment with server. Tap "Already Paid / Check Payment" below.';
               setPaymentFailedState({
                 status: 'FAILED',
                 message: errMsg
               });
-              showToast('Payment Verification Failed', errMsg, 'error', 6000);
+              showToast('Payment Verification Notice', errMsg, 'error', 6000);
             }
           }
         }
@@ -1126,60 +1353,105 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     }
   };
 
-  // Safe manual status refresh & reconciliation handler
-  const handleManualStatusCheck = async (targetOrderId?: string) => {
-    const oId = targetOrderId || activeOrderId;
-    if (!oId) return;
+  // Unified "Already Paid / Check Payment" & "Retry Dispatch" recovery handler
+  const handleManualStatusCheck = async (targetOrderId?: string, customLookupInput?: string) => {
+    const savedSession = loadOrderSession();
+    const rawLookup = (customLookupInput ?? recoveryLookupInput ?? '').trim();
+
+    let lookupOrderId = targetOrderId || activeOrderId || paymentPendingState?.orderId || savedSession?.orderId || '';
+    let lookupPaymentId = paymentPendingState?.paymentId || savedSession?.paymentId || '';
+    let lookupPhone = customerPhone.trim() || savedSession?.customerPhone || '';
+
+    if (rawLookup) {
+      if (rawLookup.startsWith('pay_')) {
+        lookupPaymentId = rawLookup;
+      } else if (rawLookup.startsWith('order_')) {
+        lookupOrderId = rawLookup;
+      } else if (/^\d{10}$/.test(rawLookup.replace(/\D/g, ''))) {
+        lookupPhone = rawLookup.replace(/\D/g, '');
+      } else {
+        lookupOrderId = rawLookup;
+      }
+    }
+
+    if (!lookupOrderId && !lookupPaymentId && !lookupPhone) {
+      setShowRecoveryInput(true);
+      setStepError('Enter your Razorpay Payment ID (e.g. pay_...), Order ID (order_...), or 10-digit mobile number below to verify and dispatch your paid order.');
+      return;
+    }
 
     setIsCheckingStatus(true);
+    setCheckingStatusLabel(
+      paymentPendingState?.kind === 'DISPATCH'
+        ? 'Sending to printer...'
+        : 'Verifying payment with Razorpay...'
+    );
     setStepError(null);
 
     try {
-      const check = await checkRazorpayOrderStatus(oId, shop.id);
-      if (check.status === 'PAID' && check.paymentId) {
+      const recovery = await recoverOrRetryPrintOrder({
+        orderId: lookupOrderId || undefined,
+        paymentId: lookupPaymentId || undefined,
+        customerPhone: lookupPhone || undefined,
+        shopId: shop.id
+      });
+
+      if (recovery.success && recovery.job?.id) {
         stopPolling();
         if (activeRzpInstanceRef.current) {
           try {
             activeRzpInstanceRef.current.close();
           } catch (_) {}
         }
-        setPaymentPendingState(null);
-        setPaymentFailedState(null);
-        void onPaymentSuccess(check.paymentId, oId);
+        transitionToDispatchedConfirmation({
+          jobId: recovery.job.id,
+          trackingToken: recovery.job.trackingToken || recovery.trackingToken,
+          orderId: recovery.orderId || lookupOrderId || recovery.job.orderId || `order_recovered_${Date.now()}`,
+          paymentId: recovery.paymentId || lookupPaymentId || recovery.job.paymentId || 'pay_verified',
+          totalAmount: recovery.job.totalAmount ?? grandTotal,
+          statusMessage: recovery.message
+        });
         return;
       }
 
-      const recon = await reconcileRazorpayPayment({ orderId: oId, shopId: shop.id });
-      if (recon.status === 'PAID' && recon.paymentId) {
-        stopPolling();
-        if (activeRzpInstanceRef.current) {
-          try {
-            activeRzpInstanceRef.current.close();
-          } catch (_) {}
-        }
-        setPaymentPendingState(null);
-        setPaymentFailedState(null);
-        void onPaymentSuccess(recon.paymentId, oId);
+      if (recovery.status === 'PAID' && recovery.needsFileUpload && (recovery.paymentId || lookupPaymentId)) {
+        setCheckingStatusLabel('Sending to printer...');
+        void onPaymentSuccess(
+          recovery.paymentId || lookupPaymentId,
+          recovery.orderId || lookupOrderId
+        );
         return;
       }
 
-      if (check.status === 'FAILED' || recon.status === 'FAILED') {
+      if (recovery.status === 'NOT_FOUND') {
+        setShowRecoveryInput(true);
+        const msg = recovery.message || 'No matching order was found. Please enter your Razorpay Payment ID (pay_...) or Order ID (order_...) to check again.';
+        setStepError(msg);
+        showToast('Order Lookup', msg, 'error', 5000);
+        return;
+      }
+
+      if (recovery.status === 'FAILED') {
         setPaymentPendingState(null);
         setPaymentFailedState({
           status: 'FAILED',
-          message: check.message || recon.message || 'Payment declined or failed. Please retry.'
+          message: recovery.message || 'No captured payment was found for this order. You can safely retry payment below.'
         });
-        showToast('Payment Incomplete', 'No successful payment detected. You can retry below.', 'error', 4000);
+        showToast('Payment Not Captured', recovery.message || 'No captured payment detected.', 'error', 4000);
       } else {
         setPaymentPendingState({
           status: 'PENDING',
-          orderId: oId,
-          message: 'Payment processing. Please wait.'
+          orderId: recovery.orderId || lookupOrderId,
+          paymentId: recovery.paymentId || lookupPaymentId || undefined,
+          kind: paymentPendingState?.kind || 'PAYMENT',
+          message: recovery.message || 'Payment is still being confirmed by the bank. Please wait a moment and tap Check Payment again.'
         });
-        showToast('Payment Processing', 'Payment is still processing on UPI. Please wait a moment...', 'info', 3000);
+        showToast('Payment Check', recovery.message || 'Verifying payment status with Razorpay...', 'info', 4000);
       }
     } catch (err: any) {
-      showToast('Status Check', 'Could not verify status right now. Please try again.', 'error', 3000);
+      const exactError = err instanceof Error ? err.message : 'Could not verify payment status right now. Please try again.';
+      setStepError(exactError);
+      showToast('Status Check Error', exactError, 'error', 4000);
     } finally {
       setIsCheckingStatus(false);
     }
@@ -2190,7 +2462,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 font-bold text-amber-950">
-                        <RotateCw className={`w-4 h-4 text-amber-600 shrink-0 ${isProcessingPayment ? 'animate-spin' : ''}`} />
+                        <RotateCw className={`w-4 h-4 text-amber-600 shrink-0 ${isProcessingPayment || isCheckingStatus ? 'animate-spin' : ''}`} />
                         <span>{paymentPendingState.kind === 'DISPATCH' ? 'Payment verified; print dispatch pending.' : 'Payment processing. Please wait.'}</span>
                       </div>
                       {paymentPendingState.kind !== 'DISPATCH' && (
@@ -2207,16 +2479,14 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                     <div className="flex items-center gap-2 pt-1">
                       <button
                         type="button"
-                        onClick={() => paymentPendingState.kind === 'DISPATCH' && paymentPendingState.paymentId
-                          ? void onPaymentSuccess(paymentPendingState.paymentId, paymentPendingState.orderId)
-                          : handleManualStatusCheck(paymentPendingState.orderId)}
+                        onClick={() => handleManualStatusCheck(paymentPendingState.orderId)}
                         disabled={isCheckingStatus || isProcessingPayment}
                         className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                       >
-                        {isCheckingStatus ? (
+                        {isCheckingStatus || isProcessingPayment ? (
                           <>
                             <RotateCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Checking Bank...</span>
+                            <span>{checkingStatusLabel}</span>
                           </>
                         ) : (
                           <>
@@ -2255,19 +2525,17 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                     <p className="text-[11px] text-red-700 pl-6">
                       {paymentFailedState.message}
                     </p>
-                    {activeOrderId && (
-                      <div className="pl-6 pt-1 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleManualStatusCheck(activeOrderId)}
-                          disabled={isCheckingStatus}
-                          className="px-2.5 py-1 bg-white border border-red-300 hover:bg-red-100 text-red-800 font-bold text-[11px] rounded-lg transition-all flex items-center gap-1 cursor-pointer"
-                        >
-                          <RotateCw className={`w-3 h-3 ${isCheckingStatus ? 'animate-spin' : ''}`} />
-                          <span>Check If Amount Was Deducted</span>
-                        </button>
-                      </div>
-                    )}
+                    <div className="pl-6 pt-1 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleManualStatusCheck(activeOrderId || undefined)}
+                        disabled={isCheckingStatus}
+                        className="px-2.5 py-1 bg-white border border-red-300 hover:bg-red-100 text-red-800 font-bold text-[11px] rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                      >
+                        <RotateCw className={`w-3 h-3 ${isCheckingStatus ? 'animate-spin' : ''}`} />
+                        <span>{isCheckingStatus ? checkingStatusLabel : 'Already Paid / Check Payment'}</span>
+                      </button>
+                    </div>
                   </motion.div>
                 )}
 
@@ -2289,12 +2557,12 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                     {isProcessingPayment ? (
                       <>
                         <RotateCw className="w-5 h-5 animate-spin" />
-                        <span>Creating payment...</span>
+                        <span>{paymentProcessingLabel}</span>
                       </>
                     ) : isCheckingStatus ? (
                       <>
                         <RotateCw className="w-5 h-5 animate-spin" />
-                        <span>Verifying payment...</span>
+                        <span>{checkingStatusLabel}</span>
                       </>
                     ) : paymentPendingState?.kind === 'DISPATCH' ? (
                       <>
@@ -2310,20 +2578,61 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                     )}
                   </button>
 
-                  {/* Safe reconciliation link if an order was created */}
-                  {activeOrderId && !paymentPendingState && (
-                    <div className="text-center pt-1">
+                  {/* Always-Available "Already Paid / Check Payment" Recovery Action */}
+                  <div className="pt-1 space-y-2.5">
+                    <div className="flex items-center justify-center gap-3">
                       <button
                         type="button"
-                        onClick={() => handleManualStatusCheck(activeOrderId)}
-                        disabled={isCheckingStatus}
-                        className="text-[11px] font-semibold text-[#008F25] hover:text-[#00B32D] underline underline-offset-2 flex items-center justify-center gap-1 mx-auto cursor-pointer"
+                        onClick={() => handleManualStatusCheck(activeOrderId || undefined)}
+                        disabled={isCheckingStatus || isProcessingPayment}
+                        className="text-[11px] font-bold text-[#008F25] hover:text-[#00B32D] underline underline-offset-2 flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
                       >
                         <RotateCw className={`w-3 h-3 ${isCheckingStatus ? 'animate-spin' : ''}`} />
-                        <span>Already completed UPI payment? Click here to check status</span>
+                        <span>
+                          {isCheckingStatus
+                            ? checkingStatusLabel
+                            : 'Already Paid / Check Payment'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowRecoveryInput((prev) => !prev)}
+                        className="text-[11px] font-medium text-[#646B65] hover:text-[#111111] underline underline-offset-2 cursor-pointer"
+                      >
+                        {showRecoveryInput ? 'Hide Lookup' : 'Enter Payment / Order ID'}
                       </button>
                     </div>
-                  )}
+
+                    {showRecoveryInput && (
+                      <div className="p-3.5 bg-[#F7F8F7] border border-[#E1E7E1] rounded-2xl space-y-2 text-left">
+                        <label className="text-[11px] font-bold text-[#111111] block">
+                          Recover Paid Order (Payment ID, Order ID, or 10-digit Mobile)
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="pay_... or order_... or 10-digit phone"
+                            value={recoveryLookupInput}
+                            onChange={(e) => setRecoveryLookupInput(e.target.value)}
+                            className="flex-1 h-9 px-3 bg-white border border-[#E1E7E1] rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#00B32D]"
+                          />
+                          <button
+                            type="button"
+                            disabled={isCheckingStatus || isProcessingPayment}
+                            onClick={() => handleManualStatusCheck(undefined, recoveryLookupInput)}
+                            className="h-9 px-3.5 bg-[#00B32D] hover:bg-[#008F25] text-white font-bold text-xs rounded-xl shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                          >
+                            <RotateCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
+                            <span>Verify & Print</span>
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-[#646B65]">
+                          Checks Razorpay directly and dispatches your print job without charging you again.
+                        </p>
+                      </div>
+                    )}
+                  </div>
 
                   {/* Supported Payment Channels */}
                   <div className="pt-2 text-center space-y-2">

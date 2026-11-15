@@ -1,16 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { createRequire } from 'module';
 import { AgentLogEntry } from '../../renderer/types/agent.js';
-
-const require = createRequire(import.meta.url);
-let app: any = null;
-try {
-  const electron = require('electron');
-  app = electron?.app || null;
-} catch {
-  app = null;
-}
+import { getLogsDir } from '../storage/AppPaths.js';
 
 export class AgentLogger {
   private static instance: AgentLogger;
@@ -21,23 +12,7 @@ export class AgentLogger {
   private broadcastListener?: (entry: AgentLogEntry) => void;
 
   private constructor() {
-    try {
-      const basePath = app ? app.getPath('userData') : path.join(process.cwd(), '.printflow_agent');
-      this.logDirectory = path.join(basePath, 'logs');
-      if (!fs.existsSync(this.logDirectory)) {
-        fs.mkdirSync(this.logDirectory, { recursive: true });
-      }
-    } catch {
-      this.logDirectory = path.join(process.cwd(), 'logs');
-      if (!fs.existsSync(this.logDirectory)) {
-        try {
-          fs.mkdirSync(this.logDirectory, { recursive: true });
-        } catch {
-          // Fallback ignore
-        }
-      }
-    }
-
+    this.logDirectory = getLogsDir();
     const dateStr = new Date().toISOString().split('T')[0];
     this.currentLogFile = path.join(this.logDirectory, `agent_${dateStr}.log`);
   }
