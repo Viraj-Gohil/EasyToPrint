@@ -216,7 +216,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://api.razorpay.com https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.razorpay.com; connect-src 'self' https://*.devpixel.space https://*.run.app https://api.razorpay.com https://*.razorpay.com https://lumberjack.razorpay.com https://cdnjs.cloudflare.com; frame-src 'self' https://api.razorpay.com https://*.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self';"
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://api.razorpay.com https://*.razorpay.com https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.razorpay.com https://easytoprint.devpixel.space; connect-src 'self' https://*.devpixel.space https://*.run.app https://api.razorpay.com https://*.razorpay.com https://lumberjack.razorpay.com https://cdnjs.cloudflare.com; frame-src 'self' https://api.razorpay.com https://*.razorpay.com https://checkout.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self';"
   );
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -5812,7 +5812,8 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
   }
 
   const printerMatch = await validateJobAgainstRegisteredPrinters(shopId, preparedFiles);
-  if (!printerMatch.eligible) {
+  // TEMP TEST BYPASS: allow staging even when registered printers are offline for payment flow testing
+  if (!printerMatch.eligible && printerMatch.code !== 'PRINTERS_OFFLINE' && printerMatch.code !== 'NO_REGISTERED_PRINTERS') {
     return res.status(422).json({
       success: false,
       code: printerMatch.code || 'INCOMPATIBLE_PRINTER',
@@ -6345,7 +6346,8 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
 
   // Validate print requirements against registered online printers in this shop
   const printerMatch = await validateJobAgainstRegisteredPrinters(shopId, preparedFiles);
-  if (!printerMatch.eligible) {
+  // TEMP TEST BYPASS: allow queuing paid print jobs even when registered printers are offline for payment testing
+  if (!printerMatch.eligible && printerMatch.code !== 'PRINTERS_OFFLINE' && printerMatch.code !== 'NO_REGISTERED_PRINTERS') {
     return res.status(422).json({
       success: false,
       code: printerMatch.code || 'INCOMPATIBLE_PRINTER',
