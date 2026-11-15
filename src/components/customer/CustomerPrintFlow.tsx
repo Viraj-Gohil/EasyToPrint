@@ -881,7 +881,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
             files: payloadFiles
           })
         },
-        { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
+        { maxAttempts: 2, timeoutMs: 60000, backoffDelaysMs: [1500] }
       );
       const rawResponseText = await response.text();
       const result = (() => {
@@ -1370,6 +1370,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       stopPolling();
       if (openWatchdog) clearTimeout(openWatchdog);
       setIsProcessingPayment(false);
+      setPaymentPendingState(null);
       console.warn('Payment gateway error:', err);
       const errMsg = err.message || 'Payment gateway could not be opened. Please try again.';
       setPaymentFailedState({
@@ -1456,6 +1457,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       }
 
       if (recovery.status === 'NOT_FOUND') {
+        setPaymentPendingState(null);
         setShowRecoveryInput(true);
         const msg = recovery.message || 'No matching order was found. Please enter your Razorpay Payment ID (pay_...) or Order ID (order_...) to check again.';
         setStepError(msg);
@@ -1463,14 +1465,18 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         return;
       }
 
-      if (recovery.status === 'FAILED') {
+      if (recovery.status === 'FAILED' || recovery.status === 'NOT_PAID') {
         setPaymentPendingState(null);
+        if (recovery.status === 'NOT_PAID') {
+          setShowRecoveryInput(true);
+        }
         setPaymentFailedState({
           status: 'FAILED',
           message: recovery.message || 'No captured payment was found for this order. You can safely retry payment below.'
         });
         showToast('Payment Not Captured', recovery.message || 'No captured payment detected.', 'error', 4000);
       } else {
+        setPaymentFailedState(null);
         setPaymentPendingState({
           status: 'PENDING',
           orderId: recovery.orderId || lookupOrderId,

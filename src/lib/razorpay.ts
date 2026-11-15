@@ -291,14 +291,16 @@ export const stageCustomerPrintOrder = async (params: {
   supportedFormats?: string[];
 }> => {
   try {
+    const payloadJson = JSON.stringify(params);
+    const adaptiveTimeoutMs = Math.min(120000, Math.max(45000, Math.round((payloadJson.length / 80000) * 1000)));
     const res = await fetchWithRetry(
       '/api/customer/stage-order',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params)
+        body: payloadJson
       },
-      { maxAttempts: 3, timeoutMs: 25000, backoffDelaysMs: [1000, 2000, 4000] }
+      { maxAttempts: 2, timeoutMs: adaptiveTimeoutMs, backoffDelaysMs: [1500] }
     );
     const data = await safeParseJson(res);
     if (res.ok && data.success) {
@@ -524,7 +526,7 @@ export const reconcileRazorpayPayment = async (params: {
 
 export interface RecoverOrRetryOrderResult {
   success: boolean;
-  status: 'PAID' | 'PENDING' | 'FAILED' | 'NOT_FOUND';
+  status: 'PAID' | 'PENDING' | 'FAILED' | 'NOT_FOUND' | 'NOT_PAID';
   dispatched?: boolean;
   alreadyDispatched?: boolean;
   needsFileUpload?: boolean;

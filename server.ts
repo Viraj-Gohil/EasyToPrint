@@ -5854,24 +5854,26 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
       return res.status(503).json({ success: false, error: 'Could not stage print job.' });
     }
 
-    // Also upload customer documents to Supabase Object Storage bucket if configured
+    // Mirror customer documents to Supabase Object Storage asynchronously (BYTEA in print_agent_job_files is primary)
     const storageProvider = getStorageProvider();
     if (storageProvider.isConfigured()) {
-      for (const file of preparedFiles) {
-        try {
-          const ext = path.extname(file.sanitizedFilename) || '.pdf';
-          await storageProvider.upload({
-            shopId,
-            jobId: stagedJob.id,
-            fileId: file.id,
-            extension: ext,
-            buffer: file.buffer,
-            contentType: file.mime
-          });
-        } catch {
-          // Non-fatal; BYTEA in print_agent_job_files is primary
+      void (async () => {
+        for (const file of preparedFiles) {
+          try {
+            const ext = path.extname(file.sanitizedFilename) || '.pdf';
+            await storageProvider.upload({
+              shopId,
+              jobId: stagedJob.id,
+              fileId: file.id,
+              extension: ext,
+              buffer: file.buffer,
+              contentType: file.mime
+            });
+          } catch {
+            // Non-fatal; BYTEA in print_agent_job_files is primary
+          }
         }
-      }
+      })();
     }
 
     return res.status(200).json({
@@ -6382,30 +6384,32 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     );
     if (!storedJob) return res.status(503).json({ success: false, error: 'Print job could not be stored.' });
 
-    // Upload customer documents to Supabase Object Storage bucket
+    // Mirror customer documents to Supabase Object Storage asynchronously (BYTEA in print_agent_job_files is primary)
     const storageProvider = getStorageProvider();
     if (storageProvider.isConfigured()) {
-      for (const file of preparedFiles) {
-        try {
-          const ext = path.extname(file.sanitizedFilename) || '.pdf';
-          const objectPath = buildObjectPath(shopId, id, file.id, ext);
-          await storageProvider.upload({
-            shopId,
-            jobId: id,
-            fileId: file.id,
-            extension: ext,
-            buffer: file.buffer,
-            contentType: file.mime
-          });
-          logger.info('Stored customer file in Supabase Object Storage', { jobId: id, fileId: file.id, objectPath });
-        } catch (uploadErr) {
-          logger.warn('Supabase Object Storage upload skipped/failed (BYTEA preserved):', {
-            jobId: id,
-            fileId: file.id,
-            error: deepRedact(uploadErr)
-          });
+      void (async () => {
+        for (const file of preparedFiles) {
+          try {
+            const ext = path.extname(file.sanitizedFilename) || '.pdf';
+            const objectPath = buildObjectPath(shopId, id, file.id, ext);
+            await storageProvider.upload({
+              shopId,
+              jobId: id,
+              fileId: file.id,
+              extension: ext,
+              buffer: file.buffer,
+              contentType: file.mime
+            });
+            logger.info('Stored customer file in Supabase Object Storage', { jobId: id, fileId: file.id, objectPath });
+          } catch (uploadErr) {
+            logger.warn('Supabase Object Storage upload skipped/failed (BYTEA preserved):', {
+              jobId: id,
+              fileId: file.id,
+              error: deepRedact(uploadErr)
+            });
+          }
         }
-      }
+      })();
     }
 
     if (isSharedPoolConfigured()) {
