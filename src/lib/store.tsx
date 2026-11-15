@@ -391,16 +391,21 @@ const CLOUD_STATE_KEYS = new Set([
 ]);
 let cloudStateWriter: ((key: string, value: unknown) => void) | null = null;
 
-function cloudSafeValue(value: unknown): unknown {
+function cloudSafeValue(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
+  if (depth > 32) return undefined;
   if (typeof value === 'string') return /^data:[^,]*;base64,/i.test(value) ? undefined : value;
+  if (value && typeof value === 'object') {
+    if (seen.has(value)) return undefined;
+    seen.add(value);
+  }
   if (Array.isArray(value)) {
-    return value.map(cloudSafeValue).filter((item) => item !== undefined);
+    return value.map((item) => cloudSafeValue(item, depth + 1, seen)).filter((item) => item !== undefined);
   }
   if (value && typeof value === 'object') {
     const safe: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
       if (/(?:password|secret|credential|auth.?token|api.?key|mfa|recovery.?code|filebase64|buffer)/i.test(key)) continue;
-      const cleaned = cloudSafeValue(item);
+      const cleaned = cloudSafeValue(item, depth + 1, seen);
       if (cleaned !== undefined) safe[key] = cleaned;
     }
     return safe;
@@ -1897,7 +1902,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             return update ? { ...job, ...(update as PrintJob), files: job.files } : job;
           });
           const existingIds = new Set(previous.map((job) => job.id));
-          next.push(...backendJobs.filter((job: PrintJob) => !existingIds.has(job.id)));
+          for (const job of backendJobs) {
+            if (!existingIds.has(job.id)) {
+              next.push(job);
+            }
+          }
           const uniqueNext = Array.from(new Map(next.map(j => [j.id, j])).values());
           if (JSON.stringify(previous) === JSON.stringify(uniqueNext)) return previous;
           setStoredItem('print_jobs', uniqueNext);

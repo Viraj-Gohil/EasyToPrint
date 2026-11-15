@@ -73,31 +73,31 @@ export function inspectPdf(buffer: Buffer): {
   let detectedCount: number | null = null;
 
   // Search for dictionaries having /Type /Pages and /Count <int>
-  const pagesMatches = Array.from(contentStr.matchAll(/\/Type\s*\/Pages\b[\s\S]*?\/Count\s+(\d+)/g));
-  if (pagesMatches.length > 0) {
-    // Find the maximum /Count among /Type /Pages nodes (the root is >= any intermediate nodes)
-    const counts = pagesMatches.map((m) => parseInt(m[1], 10)).filter((n) => !isNaN(n) && n > 0);
-    if (counts.length > 0) {
-      detectedCount = Math.max(...counts);
+  for (const m of contentStr.matchAll(/\/Type\s*\/Pages\b[\s\S]*?\/Count\s+(\d+)/g)) {
+    const n = parseInt(m[1], 10);
+    if (!isNaN(n) && n > 0) {
+      detectedCount = detectedCount === null ? n : Math.max(detectedCount, n);
     }
   }
 
   // Also check alternative order: /Count <int> ... /Type /Pages
   if (detectedCount === null) {
-    const revMatches = Array.from(contentStr.matchAll(/\/Count\s+(\d+)[\s\S]*?\/Type\s*\/Pages\b/g));
-    if (revMatches.length > 0) {
-      const counts = revMatches.map((m) => parseInt(m[1], 10)).filter((n) => !isNaN(n) && n > 0);
-      if (counts.length > 0) {
-        detectedCount = Math.max(...counts);
+    for (const m of contentStr.matchAll(/\/Count\s+(\d+)[\s\S]*?\/Type\s*\/Pages\b/g)) {
+      const n = parseInt(m[1], 10);
+      if (!isNaN(n) && n > 0) {
+        detectedCount = detectedCount === null ? n : Math.max(detectedCount, n);
       }
     }
   }
 
   // Method B: Fallback count individual leaf /Type /Page (excluding /Type /Pages)
   if (detectedCount === null || detectedCount === 0) {
-    const pageLeafMatches = Array.from(contentStr.matchAll(/\/Type\s*\/Page\b(?!\s*s)/g));
-    if (pageLeafMatches.length > 0) {
-      detectedCount = pageLeafMatches.length;
+    let leafCount = 0;
+    for (const _ of contentStr.matchAll(/\/Type\s*\/Page\b(?!\s*s)/g)) {
+      leafCount++;
+    }
+    if (leafCount > 0) {
+      detectedCount = leafCount;
     }
   }
 

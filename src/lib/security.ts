@@ -1199,9 +1199,13 @@ export function consumeRecoveryCode(candidateCode: string, storedHashedCodes: st
 // 11. SENSITIVE DATA REDACTION FOR AUDIT LOGS & HTTP RESPONSES
 // ============================================================================
 
-export function redactSensitiveData(obj: any): any {
+export function redactSensitiveData(obj: any, depth = 0, seen = new WeakSet<object>()): any {
+  if (depth > 32) return '[MAX_DEPTH_EXCEEDED]';
   if (!obj || typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(redactSensitiveData);
+  if (seen.has(obj)) return '[CIRCULAR_REFERENCE]';
+  seen.add(obj);
+
+  if (Array.isArray(obj)) return obj.map((item) => redactSensitiveData(item, depth + 1, seen));
 
   const redacted: any = {};
   const sensitiveKeys = new Set([
@@ -1221,8 +1225,8 @@ export function redactSensitiveData(obj: any): any {
   for (const [k, v] of Object.entries(obj)) {
     if (sensitiveKeys.has(k) && typeof v === 'string') {
       redacted[k] = v.length > 6 ? `${v.slice(0, 3)}••••${v.slice(-2)}` : '••••••••';
-    } else if (typeof v === 'object') {
-      redacted[k] = redactSensitiveData(v);
+    } else if (typeof v === 'object' && v !== null) {
+      redacted[k] = redactSensitiveData(v, depth + 1, seen);
     } else {
       redacted[k] = v;
     }

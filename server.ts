@@ -801,21 +801,32 @@ const ADMIN_APP_STATE_KEYS = new Set([
   'support_settings'
 ]);
 
-function sanitizeAppStateValue(value: unknown, legacyShopId: string, canonicalShopId: string): unknown {
+function sanitizeAppStateValue(
+  value: unknown,
+  legacyShopId: string,
+  canonicalShopId: string,
+  depth = 0,
+  seen = new WeakSet<object>()
+): unknown {
+  if (depth > 32) return undefined;
   if (typeof value === 'string') {
     if (/^data:[^,]*;base64,/i.test(value)) return undefined;
     return value === legacyShopId ? canonicalShopId : value;
   }
+  if (value && typeof value === 'object') {
+    if (seen.has(value)) return undefined;
+    seen.add(value);
+  }
   if (Array.isArray(value)) {
     return value
-      .map((item) => sanitizeAppStateValue(item, legacyShopId, canonicalShopId))
+      .map((item) => sanitizeAppStateValue(item, legacyShopId, canonicalShopId, depth + 1, seen))
       .filter((item) => item !== undefined);
   }
   if (value && typeof value === 'object') {
     const safe: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
       if (/(?:password|secret|credential|auth.?token|api.?key|mfa|recovery.?code|filebase64|buffer)/i.test(key)) continue;
-      const cleaned = sanitizeAppStateValue(item, legacyShopId, canonicalShopId);
+      const cleaned = sanitizeAppStateValue(item, legacyShopId, canonicalShopId, depth + 1, seen);
       if (cleaned !== undefined) safe[key] = cleaned;
     }
     return safe;
@@ -871,9 +882,11 @@ async function resolveAppStateScope(req: Request, res: Response): Promise<{
 }
 
 app.get('/api/app-data', createRateLimiter(60, 60_000, { bucketKey: 'app-data-read' }), requireAdminOrOwnShop, async (req: Request, res: Response) => {
-  const context = await resolveAppStateScope(req, res);
-  if (!context) return;
+  let scopeId = 'unknown';
   try {
+    const context = await resolveAppStateScope(req, res);
+    if (!context) return;
+    scopeId = context.scopeId;
     const stored = await getPrintFlowAppState(context.scopeId);
     const records: Record<string, unknown> = {};
     for (const key of selectAppStateKeys(context.role)) {
@@ -920,22 +933,26 @@ app.get('/api/app-data', createRateLimiter(60, 60_000, { bucketKey: 'app-data-re
       hasData: Object.keys(records).length > 0
     });
   } catch (error) {
-    logger.error('Neon app state read failed', { scopeId: context.scopeId, error: deepRedact(error) });
-    return res.status(503).json({ success: false, error: 'Could not read PrintFlow data from Neon.' });
+    logger.error('Neon app state read failed', { scopeId, error: deepRedact(error) });
+    if (!res.headersSent) {
+      return res.status(503).json({ success: false, error: 'Could not read PrintFlow data from Neon.' });
+    }
   }
 });
 
 app.put('/api/app-data/:key', createRateLimiter(45, 60_000, { bucketKey: 'app-data-write' }), requireAdminOrOwnShop, async (req: Request, res: Response) => {
-  const context = await resolveAppStateScope(req, res);
-  if (!context) return;
   const key = req.params.key;
-  if (!selectAppStateKeys(context.role, key).has(key)) {
-    return res.status(403).json({ success: false, error: 'This data category cannot be synced for your account role.' });
-  }
-  if (context.role === 'SHOP_OWNER' && ADMIN_APP_STATE_KEYS.has(key)) {
-    return res.status(403).json({ success: false, error: 'Only platform admins can update platform settings.' });
-  }
+  let scopeId = 'unknown';
   try {
+    const context = await resolveAppStateScope(req, res);
+    if (!context) return;
+    scopeId = context.scopeId;
+    if (!selectAppStateKeys(context.role, key).has(key)) {
+      return res.status(403).json({ success: false, error: 'This data category cannot be synced for your account role.' });
+    }
+    if (context.role === 'SHOP_OWNER' && ADMIN_APP_STATE_KEYS.has(key)) {
+      return res.status(403).json({ success: false, error: 'Only platform admins can update platform settings.' });
+    }
     let value = sanitizeAppStateValue(req.body?.value, context.legacyShopId, context.canonicalShopId);
     if (context.role === 'SHOP_OWNER') {
       if (key === 'active_shop_id') value = context.canonicalShopId;
@@ -1021,8 +1038,10 @@ app.put('/api/app-data/:key', createRateLimiter(45, 60_000, { bucketKey: 'app-da
 
     return res.json({ success: true, key, updatedAt: new Date().toISOString() });
   } catch (error) {
-    logger.error('Neon app state write failed', { scopeId: context.scopeId, key, error: deepRedact(error) });
-    return res.status(503).json({ success: false, error: 'Could not save PrintFlow data to Neon.' });
+    logger.error('Neon app state write failed', { scopeId, key, error: deepRedact(error) });
+    if (!res.headersSent) {
+      return res.status(503).json({ success: false, error: 'Could not save PrintFlow data to Neon.' });
+    }
   }
 });
 
@@ -3719,7 +3738,11 @@ app.put('/api/shop/:shopId/retention', createRateLimiter(20, 60_000, { bucketKey
   }
 });
 
+let isRetentionCleanupRunning = false;
+
 async function runAutomaticDocumentRetentionCleanup() {
+  if (isRetentionCleanupRunning) return;
+  isRetentionCleanupRunning = true;
   try {
     const storageProvider = getStorageProvider();
     if (!storageProvider.isConfigured() || !isNeonDatabaseConfigured()) {
@@ -3731,19 +3754,28 @@ async function runAutomaticDocumentRetentionCleanup() {
     );
     const shops = shopsRes.rows;
     for (const shop of shops) {
-      const shopId = shop.id;
-      const retentionHours = Number(shop.retention_hours || 1);
+      const shopId = String(shop.id || '').trim();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(shopId)) {
+        continue;
+      }
+      const parsedRetention = Number(shop.retention_hours);
+      const retentionHours = Number.isFinite(parsedRetention) && parsedRetention > 0 ? parsedRetention : 1;
 
       const filesRes = await pool.query(
         `SELECT f.id, f.object_path, f.job_id
          FROM public.uploaded_files f
-         WHERE f.shop_id = $1
+         WHERE f.shop_id = $1::uuid
            AND f.upload_state != 'DELETED'
            AND f.created_at + ($2::text || ' hours')::interval <= NOW()
            AND NOT EXISTS (
              SELECT 1 FROM public.print_agent_jobs j
-             WHERE j.job_id = f.job_id
+             WHERE (j.job_id = f.job_id::text OR (j.job_data->>'printJobId') = f.job_id::text)
                AND j.print_status IN ('QUEUED', 'ASSIGNED', 'DOWNLOADING', 'PRINTING')
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM public.print_jobs pj
+             WHERE pj.id = f.job_id
+               AND pj.print_status IN ('QUEUED', 'ASSIGNED', 'DOWNLOADING', 'PRINTING')
            )
          LIMIT 100`,
         [shopId, retentionHours]
@@ -3768,6 +3800,8 @@ async function runAutomaticDocumentRetentionCleanup() {
     }
   } catch (err) {
     logger.error('Error during automatic document retention cleanup worker:', { error: deepRedact(err) });
+  } finally {
+    isRetentionCleanupRunning = false;
   }
 }
 
@@ -5704,6 +5738,7 @@ interface BackendPrintJob {
 // PRE-PAYMENT PRINT JOB STAGING (STORES FILES BEFORE RAZORPAY MODAL OPENS)
 // ============================================================================
 app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey: 'customer-stage-order' }), async (req: Request, res: Response) => {
+  try {
   if (!isNeonDatabaseConfigured() || !isSharedPoolConfigured()) {
     return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
   }
@@ -5886,7 +5921,15 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
     });
   } catch (err) {
     logger.error('Failed to stage customer print order', { orderId, shopId, error: deepRedact(err) });
-    return res.status(503).json({ success: false, error: 'Could not stage print files before payment.' });
+    if (!res.headersSent) {
+      return res.status(503).json({ success: false, error: 'Could not stage print files before payment.' });
+    }
+  }
+  } catch (outerErr) {
+    logger.error('Unexpected error in /api/customer/stage-order', { error: deepRedact(outerErr) });
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: 'Could not stage print files before payment.' });
+    }
   }
 });
 
@@ -6132,6 +6175,7 @@ app.post('/api/orders/recover-or-retry', createRateLimiter(45, 60_000, { bucketK
 });
 
 app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 'customer-print-jobs-create' }), async (req: Request, res: Response) => {
+  try {
   if (!isNeonDatabaseConfigured() || !isSharedPoolConfigured()) {
     return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
   }
@@ -6461,7 +6505,15 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     });
   } catch (error) {
     logger.error('Could not persist print job in Neon', { shopId, jobId: id, error: deepRedact(error) });
-    return res.status(503).json({ success: false, error: 'Print queue storage is temporarily unavailable.' });
+    if (!res.headersSent) {
+      return res.status(503).json({ success: false, error: 'Print queue storage is temporarily unavailable.' });
+    }
+  }
+  } catch (outerErr) {
+    logger.error('Unexpected error in /api/customer/print-jobs', { error: deepRedact(outerErr) });
+    if (!res.headersSent) {
+      return res.status(500).json({ success: false, error: 'Could not process print job request.' });
+    }
   }
 });
 
@@ -10071,10 +10123,10 @@ async function startServer() {
 }
 
 process.on('uncaughtException', (err) => {
-  console.error('[Process] Uncaught Exception:', err);
+  console.error('[Process] Uncaught Exception:', err?.stack || err);
 });
-process.on('unhandledRejection', (reason) => {
-  console.error('[Process] Unhandled Rejection:', reason);
+process.on('unhandledRejection', (reason: any) => {
+  console.error('[Process] Unhandled Rejection:', reason?.stack || reason);
 });
 
 if (process.env.NODE_ENV !== 'production' || process.argv[1]?.endsWith('server.js') || process.argv[1]?.endsWith('server.ts') || !process.env.VERCEL) {

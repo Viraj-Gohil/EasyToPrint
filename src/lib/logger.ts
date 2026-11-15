@@ -130,7 +130,7 @@ export function sanitizeStringContent(input: string): string {
  * Deep structured redaction of objects, arrays, and errors.
  * Replaces sensitive keys with '[REDACTED]' without relying solely on regex.
  */
-export function deepRedact(value: any, depth = 0): any {
+export function deepRedact(value: any, depth = 0, seen = new WeakSet<object>()): any {
   if (depth > 8) return '[MAX_DEPTH_EXCEEDED]';
   if (value === null || value === undefined) return value;
 
@@ -151,19 +151,28 @@ export function deepRedact(value: any, depth = 0): any {
     const isProd = process.env.NODE_ENV === 'production';
     return {
       name: value.name,
-      message: sanitizeStringContent(value.message),
+      message: sanitizeStringContent(String(value.message || '')),
       // In production, do not leak raw stack traces with internal filesystem paths
-      stack: isProd ? undefined : sanitizeStringContent(value.stack || '')
+      stack: isProd ? undefined : sanitizeStringContent(String(value.stack || ''))
     };
   }
 
-  if (Array.isArray(value)) {
-    return value.map((item) => deepRedact(item, depth + 1));
-  }
-
   if (typeof value === 'object') {
+    if (seen.has(value)) return '[CIRCULAR_REFERENCE]';
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      return value.map((item) => deepRedact(item, depth + 1, seen));
+    }
+
     const result: Record<string, any> = {};
-    for (const [key, val] of Object.entries(value)) {
+    let entries: [string, any][];
+    try {
+      entries = Object.entries(value);
+    } catch {
+      return '[UNSERIALIZABLE_OBJECT]';
+    }
+    for (const [key, val] of entries) {
       const lowerKey = key.toLowerCase().replace(/[-_]/g, '');
 
       // Check if key is sensitive
@@ -172,7 +181,7 @@ export function deepRedact(value: any, depth = 0): any {
       } else if (typeof val === 'string') {
         result[key] = sanitizeStringContent(val);
       } else {
-        result[key] = deepRedact(val, depth + 1);
+        result[key] = deepRedact(val, depth + 1, seen);
       }
     }
     return result;
@@ -287,7 +296,9 @@ class SecurityLogger {
       return logTime >= cutoff;
     });
     auditLogBuffer.length = 0;
-    auditLogBuffer.push(...filtered);
+    for (const item of filtered) {
+      auditLogBuffer.push(item);
+    }
     return initialCount - filtered.length;
   }
 
