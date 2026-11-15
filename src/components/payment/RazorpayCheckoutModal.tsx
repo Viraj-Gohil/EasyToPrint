@@ -11,7 +11,21 @@ import {
   Info
 } from 'lucide-react';
 import { loadRazorpayScript, getEffectiveRazorpayKey } from '../../lib/razorpay';
-import { apiUrl } from '../../lib/apiConfig';
+import { fetchWithRetry } from '../../lib/apiConfig';
+
+const safeParseJson = async (res: Response): Promise<any> => {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      error: res.ok
+        ? 'Unexpected non-JSON server response'
+        : `Server returned HTTP ${res.status}`
+    };
+  }
+};
 
 export interface RazorpayCheckoutModalProps {
   isOpen: boolean;
@@ -69,29 +83,24 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
       });
       setLogs([...newLogs]);
 
-      const controller = new AbortController();
-      const orderTimeout = setTimeout(() => controller.abort(), 10000);
-
-      let orderData: any;
-      try {
-        const orderResponse = await fetch(apiUrl('/api/create-order'), {
+      const safeReceipt = `rcpt_${Date.now()}`.slice(0, 40);
+      const orderResponse = await fetchWithRetry(
+        '/api/create-order',
+        {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
           body: JSON.stringify({
             amount: amountInPaise,
             currency: 'INR',
-            receipt: `rcpt_${Date.now()}`
+            receipt: safeReceipt
           })
-        });
-        clearTimeout(orderTimeout);
+        },
+        { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
+      );
 
-        orderData = await orderResponse.json();
-        if (!orderResponse.ok || (!orderData.order_id && !orderData.orderId && !orderData.id)) {
-          throw new Error(orderData.error || 'Server failed to generate order');
-        }
-      } finally {
-        clearTimeout(orderTimeout);
+      const orderData = await safeParseJson(orderResponse);
+      if (!orderResponse.ok || (!orderData.order_id && !orderData.orderId && !orderData.id)) {
+        throw new Error(orderData.error || orderData.message || 'Server failed to generate order');
       }
 
       const orderId = orderData.order_id || orderData.orderId || orderData.id;
@@ -177,19 +186,23 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
           setLogs([...newLogs]);
 
           try {
-            const verifyRes = await fetch(apiUrl('/api/verify-payment'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                order_id: response.razorpay_order_id || orderId,
-                payment_id: response.razorpay_payment_id,
-                razorpay_order_id: response.razorpay_order_id || orderId,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature
-              })
-            });
+            const verifyRes = await fetchWithRetry(
+              '/api/verify-payment',
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  order_id: response.razorpay_order_id || orderId,
+                  payment_id: response.razorpay_payment_id,
+                  razorpay_order_id: response.razorpay_order_id || orderId,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature
+                })
+              },
+              { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
+            );
 
-            const verifyData = await verifyRes.json();
+            const verifyData = await safeParseJson(verifyRes);
             if (verifyRes.ok && verifyData.success) {
               newLogs[3] = {
                 step: 'Signature Verify',

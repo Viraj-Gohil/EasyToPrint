@@ -5,6 +5,40 @@
 
 import { apiUrl, fetchWithRetry } from './apiConfig';
 
+const safeParseJson = async (res: Response): Promise<any> => {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      error: res.ok
+        ? 'Unexpected non-JSON response from server'
+        : `Server returned HTTP ${res.status} (${res.statusText || 'Error'})`
+    };
+  }
+};
+
+const clampReceipt = (receipt?: string): string => {
+  const raw = (receipt || `rcpt_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+  return raw.slice(0, 40) || `rcpt_${Date.now()}`.slice(0, 40);
+};
+
+const normalizeNotes = (notes?: Record<string, string>): Record<string, string> | undefined => {
+  if (!notes || typeof notes !== 'object') return undefined;
+  const result: Record<string, string> = {};
+  for (const [key, val] of Object.entries(notes)) {
+    if (Object.keys(result).length >= 15) break;
+    if (val === undefined || val === null) continue;
+    const cleanKey = String(key).trim().slice(0, 64);
+    const cleanVal = String(val).trim().slice(0, 255);
+    if (cleanKey && cleanVal) {
+      result[cleanKey] = cleanVal;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+};
+
 export interface RazorpaySuccessResponse {
   razorpay_payment_id: string;
   razorpay_order_id?: string;
@@ -190,16 +224,16 @@ export const createRazorpayOrder = async (params: {
         body: JSON.stringify({
           amount: paise,
           currency: params.currency || 'INR',
-          receipt: params.receipt || `rcpt_${Date.now()}`,
+          receipt: clampReceipt(params.receipt),
           printJobId: params.printJobId,
           shopId: params.shopId,
-          notes: params.notes
+          notes: normalizeNotes(params.notes)
         })
       },
       { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
     );
 
-    const data = await res.json();
+    const data = await safeParseJson(res);
     if (res.ok && (data.order_id || data.orderId || data.id)) {
       const orderId = data.order_id || data.orderId || data.id;
       return {
@@ -211,7 +245,7 @@ export const createRazorpayOrder = async (params: {
         key_id: data.key_id
       };
     }
-    return { success: false, error: data.error || 'Failed to create Razorpay order' };
+    return { success: false, error: data.error || data.message || 'Failed to create Razorpay order' };
   } catch (err: any) {
     return {
       success: false,
@@ -266,7 +300,7 @@ export const stageCustomerPrintOrder = async (params: {
       },
       { maxAttempts: 3, timeoutMs: 25000, backoffDelaysMs: [1000, 2000, 4000] }
     );
-    const data = await res.json();
+    const data = await safeParseJson(res);
     if (res.ok && data.success) {
       return {
         success: true,
@@ -342,7 +376,7 @@ export const verifyRazorpayPayment = async (params: {
       { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
     );
 
-    const data = await res.json();
+    const data = await safeParseJson(res);
     if (res.ok && data.success) {
       return {
         success: true,
@@ -399,7 +433,7 @@ export const checkRazorpayOrderStatus = async (
       { maxAttempts: 2, timeoutMs: 10000, backoffDelaysMs: [1000, 2000] }
     );
 
-    const data = await res.json();
+    const data = await safeParseJson(res);
     if (res.ok && data.status) {
       return {
         success: data.status === 'PAID',
@@ -454,7 +488,7 @@ export const reconcileRazorpayPayment = async (params: {
       { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
     );
 
-    const data = await res.json();
+    const data = await safeParseJson(res);
     if (res.ok && data.status === 'PAID') {
       return {
         success: true,
@@ -530,7 +564,7 @@ export const recoverOrRetryPrintOrder = async (params: {
       { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
     );
 
-    const data = await res.json();
+    const data = await safeParseJson(res);
     if (res.ok && data.success) {
       return {
         success: true,
@@ -568,5 +602,3 @@ export const recoverOrRetryPrintOrder = async (params: {
     };
   }
 };
-
-

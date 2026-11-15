@@ -212,7 +212,8 @@ export const isNeonDatabaseConfigured = (): boolean => {
   }
   if (pgPool !== null) return true;
   try {
-    const activeUrl = (process.env.DATABASE_URL || DEFAULT_SUPABASE_DATABASE_URL).trim().replace(/^['"]|['"]$/g, '');
+    const envUrl = (process.env.DATABASE_URL || '').trim().replace(/^['"]|['"]$/g, '');
+    const activeUrl = isValidDatabaseUrl(envUrl) ? envUrl : DATABASE_URL;
     if (activeUrl && isValidDatabaseUrl(activeUrl)) {
       pgPool = new Pool({
         connectionString: activeUrl,
@@ -779,6 +780,80 @@ export async function initializePaymentTables(maxRetries = 3): Promise<void> {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+
+        -- Ensure subscription payment, usage, events, and trial tables/columns exist
+        CREATE TABLE IF NOT EXISTS public.subscription_payments (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          shop_id TEXT NOT NULL,
+          plan_id TEXT NOT NULL,
+          razorpay_order_id TEXT NOT NULL UNIQUE,
+          razorpay_payment_id TEXT,
+          razorpay_signature TEXT,
+          amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+          currency TEXT NOT NULL DEFAULT 'INR',
+          status TEXT NOT NULL DEFAULT 'PENDING',
+          billing_period TEXT NOT NULL DEFAULT 'MONTHLY',
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_subscription_payments_shop ON public.subscription_payments(shop_id, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS public.usage_records (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          shop_id TEXT NOT NULL,
+          subscription_id UUID,
+          billing_period_start TIMESTAMPTZ NOT NULL,
+          billing_period_end TIMESTAMPTZ NOT NULL,
+          print_jobs_used INT NOT NULL DEFAULT 0,
+          printer_connections_used INT NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (shop_id, billing_period_start)
+        );
+
+        CREATE TABLE IF NOT EXISTS public.subscription_events (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          subscription_id UUID,
+          shop_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS public.trial_history (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          shop_id TEXT NOT NULL UNIQUE,
+          user_id TEXT,
+          plan_id TEXT NOT NULL,
+          activated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          expires_at TIMESTAMPTZ NOT NULL
+        );
+
+        DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'plans') THEN
+            ALTER TABLE public.plans
+              ADD COLUMN IF NOT EXISTS introductory_price NUMERIC(10,2),
+              ADD COLUMN IF NOT EXISTS is_introductory_offer_active BOOLEAN NOT NULL DEFAULT false,
+              ADD COLUMN IF NOT EXISTS introductory_offer_expires_at TIMESTAMPTZ,
+              ADD COLUMN IF NOT EXISTS renewal_price NUMERIC(10,2);
+          END IF;
+
+          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'subscriptions') THEN
+            ALTER TABLE public.subscriptions
+              ADD COLUMN IF NOT EXISTS trial_start_at TIMESTAMPTZ,
+              ADD COLUMN IF NOT EXISTS trial_end_at TIMESTAMPTZ,
+              ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ,
+              ADD COLUMN IF NOT EXISTS grace_period_end TIMESTAMPTZ,
+              ADD COLUMN IF NOT EXISTS razorpay_subscription_id TEXT,
+              ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT,
+              ADD COLUMN IF NOT EXISTS is_introductory_pricing BOOLEAN NOT NULL DEFAULT false,
+              ADD COLUMN IF NOT EXISTS renewal_price NUMERIC(10,2),
+              ADD COLUMN IF NOT EXISTS pending_downgrade_plan_id TEXT,
+              ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+          END IF;
+        END $$;
 
         -- Ensure printer capability and owner configuration columns exist on public.printers
         DO $$
@@ -4225,7 +4300,7 @@ export async function getPlatformPaymentConfig(): Promise<{
     return inMemoryPlatformConfig;
   }
 
-  // 2. Authoritative: server-side environment variables exclusively
+  // 2. Server-side environment variables
   const envKeyId = process.env.RAZORPAY_KEY_ID?.trim();
   const envKeySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
   const envWebhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET?.trim();
@@ -4241,6 +4316,34 @@ export async function getPlatformPaymentConfig(): Promise<{
       isConfigured: true,
       updatedAt: new Date().toISOString()
     };
+  }
+
+  // 3. Authoritative PostgreSQL fallback (platform_payment_configs)
+  if (isNeonDatabaseConfigured()) {
+    try {
+      const pool = requirePostgresPool();
+      const res = await pool.query(
+        `SELECT * FROM platform_payment_configs WHERE id = 'platform_master' AND is_active = true LIMIT 1`
+      );
+      if (res.rows && res.rows.length > 0) {
+        const row = res.rows[0];
+        const secret = decryptSecret(row.encrypted_key_secret);
+        const keyId = String(row.key_id || '').trim();
+        if (keyId && secret) {
+          return {
+            keyId,
+            keySecret: secret,
+            mode: (row.mode === 'live' || keyId.startsWith('rzp_live_')) ? 'live' : 'test',
+            webhookSecret: row.webhook_secret || envWebhookSecret || undefined,
+            isActive: Boolean(row.is_active),
+            isConfigured: true,
+            updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString()
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[PaymentStorage] Failed to query platform_payment_configs:', err);
+    }
   }
 
   return null;
@@ -4329,15 +4432,31 @@ export async function getShopPaymentIntegration(shopId: string): Promise<{
     return inMem;
   }
 
-  // 2. Direct database query
+  // 2. Direct database query (preserves exact $1 parameter for tests), followed by alias/UUID resolution fallback
   if (isNeonDatabaseConfigured()) {
     try {
       const pool = requirePostgresPool();
-      const res = await pool.query(
+      let res = await pool.query(
         `SELECT * FROM shop_payment_integrations WHERE shop_id = $1 AND is_active = true LIMIT 1`,
         [shopId]
       );
-      if (res.rows.length > 0) {
+      if ((!res.rows || res.rows.length === 0) && shopId !== 'platform') {
+        const candidateIds = await getCandidateShopIds(shopId);
+        for (const candidateId of candidateIds) {
+          const memCandidate = inMemoryShopIntegrations.get(candidateId);
+          if (memCandidate && memCandidate.isActive) {
+            return memCandidate;
+          }
+        }
+        const otherIds = candidateIds.filter((id) => id !== shopId);
+        if (otherIds.length > 0) {
+          res = await pool.query(
+            `SELECT * FROM shop_payment_integrations WHERE shop_id = ANY($1::text[]) AND is_active = true LIMIT 1`,
+            [otherIds]
+          );
+        }
+      }
+      if (res.rows && res.rows.length > 0) {
         const row = res.rows[0];
         try {
           const secret = decryptSecret(row.encrypted_key_secret);

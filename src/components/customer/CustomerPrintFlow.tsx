@@ -344,6 +344,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
   const sourceFilesRef = React.useRef(new Map<string, File>());
   const dispatchingOrdersRef = React.useRef(new Set<string>());
   const completedOrdersRef = React.useRef(new Set<string>());
+  const payAttemptLockRef = React.useRef(false);
 
   // Upload loading queue
   const [uploadingQueue, setUploadingQueue] = useState<UploadingItem[]>([]);
@@ -851,14 +852,17 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         }
         return {
           fileName: sourceFile.name,
-          fileType: sourceFile.type,
+          fileType: sourceFile.type || file.fileType || 'application/octet-stream',
           fileBase64: await fileToBase64(sourceFile),
           pageCount: countPages(file),
           copies: file.copies,
           colorMode: file.color || 'BW',
           paperSize: file.paperSize,
           duplex: file.sides === 'DOUBLE',
-          pagesToPrint: file.pageSelection === 'CUSTOM' ? file.customRange || file.customPageRange : undefined
+          pagesToPrint:
+            file.pageSelection === 'CUSTOM' && (file.customRange || file.customPageRange || '').trim()
+              ? (file.customRange || file.customPageRange || '').trim()
+              : undefined
         };
       }));
 
@@ -879,7 +883,14 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         },
         { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
       );
-      const result = await response.json() as {
+      const rawResponseText = await response.text();
+      const result = (() => {
+        try {
+          return rawResponseText ? JSON.parse(rawResponseText) : {};
+        } catch {
+          return { error: `Server returned HTTP ${response.status}` };
+        }
+      })() as {
         success?: boolean;
         code?: string;
         title?: string;
@@ -934,56 +945,63 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
   // Pay Now triggers official Razorpay Checkout with server-validated order, pre-staged files, and atomic server-side dispatch
   const handlePayNow = async () => {
+    if (payAttemptLockRef.current || isProcessingPayment) return;
+    payAttemptLockRef.current = true;
+
     setPaymentFailedState(null);
     setPaymentPendingState(null);
     setStepError(null);
     setRazorpayError(null);
     stopPolling();
 
-    // Re-verify agent availability before initiating payment
-    const freshStatus = await checkAgentAvailability();
-    if (freshStatus && !freshStatus.isAvailable) {
-      setIsProcessingPayment(false);
-      setStepError(freshStatus.message || 'This print shop is currently offline. Please try again later or select another available shop.');
-      showToast('Shop Offline', freshStatus.message, 'error', 5000);
-      return;
-    }
-
-    if (customerPhone.trim()) {
-      setPhoneTouched(true);
-      const phoneCheck = validatePhone(customerPhone, false);
-      if (!phoneCheck.isValid) {
-        setStepError(phoneCheck.error || 'Please enter a valid 10-digit mobile number.');
-        return;
-      }
-    }
-
-    // Pre-checkout validation: Ensure all files match valid printer-supported option combinations
-    for (const file of files) {
-      const check = isCombinationValid(file.paperSize || 'A4', file.color || 'BW', file.sides === 'DOUBLE');
-      if (!check.isValid) {
-        setCustomerErrorModal({
-          isOpen: true,
-          code: 'NO_COMPATIBLE_PRINTER',
-          title: 'Print Option Unavailable',
-          message: `The print settings for "${file.fileName}" are unavailable: ${check.reason || 'No compatible printer available at this shop'}. Please adjust your settings.`,
-          fileName: file.fileName,
-          actionText: 'Adjust Settings'
-        });
-        return;
-      }
-    }
-
-    const configuredKey = shop.razorpaySettings?.keyId?.trim();
-    const effectiveKey = getEffectiveRazorpayKey(configuredKey);
-
-    setIsProcessingPayment(true);
-    setPaymentProcessingLabel('Creating payment order...');
     let checkoutModalActive = false;
     let modalDismissedOrCompleted = false;
     let openWatchdog: NodeJS.Timeout | null = null;
 
     try {
+      // Re-verify agent availability before initiating payment
+      const freshStatus = await checkAgentAvailability();
+      if (freshStatus && !freshStatus.isAvailable) {
+        setStepError(freshStatus.message || 'This print shop is currently offline. Please try again later or select another available shop.');
+        showToast('Shop Offline', freshStatus.message, 'error', 5000);
+        return;
+      }
+
+      if (customerPhone.trim()) {
+        setPhoneTouched(true);
+        const phoneCheck = validatePhone(customerPhone, false);
+        if (!phoneCheck.isValid) {
+          setStepError(phoneCheck.error || 'Please enter a valid 10-digit mobile number.');
+          return;
+        }
+      }
+
+      // Pre-checkout validation: Ensure all files are still in memory BEFORE creating a Razorpay order
+      for (const file of files) {
+        if (!sourceFilesRef.current.get(file.id)) {
+          setStepError(`The original file for "${file.fileName}" is unavailable. Please re-upload it before paying.`);
+          return;
+        }
+        const check = isCombinationValid(file.paperSize || 'A4', file.color || 'BW', file.sides === 'DOUBLE');
+        if (!check.isValid) {
+          setCustomerErrorModal({
+            isOpen: true,
+            code: 'NO_COMPATIBLE_PRINTER',
+            title: 'Print Option Unavailable',
+            message: `The print settings for "${file.fileName}" are unavailable: ${check.reason || 'No compatible printer available at this shop'}. Please adjust your settings.`,
+            fileName: file.fileName,
+            actionText: 'Adjust Settings'
+          });
+          return;
+        }
+      }
+
+      const configuredKey = shop.razorpaySettings?.keyId?.trim();
+      const effectiveKey = getEffectiveRazorpayKey(configuredKey);
+
+      setIsProcessingPayment(true);
+      setPaymentProcessingLabel('Creating payment order...');
+
       // 1. Ensure Razorpay Checkout script is loaded
       const scriptLoaded = await loadRazorpayScript();
       if (!scriptLoaded) {
@@ -1026,14 +1044,17 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         }
         return {
           fileName: sourceFile.name,
-          fileType: sourceFile.type,
+          fileType: sourceFile.type || file.fileType || 'application/octet-stream',
           fileBase64: await fileToBase64(sourceFile),
           pageCount: countPages(file),
           copies: file.copies,
           colorMode: file.color || 'BW',
           paperSize: file.paperSize,
           duplex: file.sides === 'DOUBLE',
-          pagesToPrint: file.pageSelection === 'CUSTOM' ? file.customRange || file.customPageRange : undefined
+          pagesToPrint:
+            file.pageSelection === 'CUSTOM' && (file.customRange || file.customPageRange || '').trim()
+              ? (file.customRange || file.customPageRange || '').trim()
+              : undefined
         };
       }));
 
@@ -1047,6 +1068,9 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       });
 
       if (!stageRes.success) {
+        if (stageRes.code === 'PRINTERS_OFFLINE' || stageRes.code === 'NO_REGISTERED_PRINTERS') {
+          void checkAgentAvailability();
+        }
         if (stageRes.code) {
           setCustomerErrorModal({
             isOpen: true,
@@ -1087,6 +1111,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
             const check = await checkRazorpayOrderStatus(orderIdToPoll, shop.id);
             if (check.status === 'PAID' && check.paymentId) {
               stopPolling();
+              payAttemptLockRef.current = false;
               if (activeRzpInstanceRef.current) {
                 try {
                   activeRzpInstanceRef.current.close();
@@ -1097,6 +1122,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
               void onPaymentSuccess(check.paymentId, orderIdToPoll, check.job);
             } else if (check.status === 'FAILED') {
               stopPolling();
+              payAttemptLockRef.current = false;
               if (activeRzpInstanceRef.current) {
                 try {
                   activeRzpInstanceRef.current.close();
@@ -1120,6 +1146,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       // Watchdog timer: If Razorpay checkout iframe takes > 12s without mounting or callback, reset loading state
       openWatchdog = setTimeout(() => {
         if (!modalDismissedOrCompleted && !document.querySelector('iframe.razorpay-checkout-frame')) {
+          payAttemptLockRef.current = false;
           setIsProcessingPayment(false);
           setPaymentFailedState({
             status: 'FAILED',
@@ -1156,6 +1183,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
           confirm_close: true,
           ondismiss: async () => {
             modalDismissedOrCompleted = true;
+            payAttemptLockRef.current = false;
             if (openWatchdog) clearTimeout(openWatchdog);
 
             // Reconcile status with backend before assuming cancellation
@@ -1219,6 +1247,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         },
         handler: async (response: any) => {
           modalDismissedOrCompleted = true;
+          payAttemptLockRef.current = false;
           stopPolling();
           if (openWatchdog) clearTimeout(openWatchdog);
 
@@ -1321,6 +1350,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
       rzpInstance.on('payment.failed', (errResp: any) => {
         modalDismissedOrCompleted = true;
+        payAttemptLockRef.current = false;
         stopPolling();
         if (openWatchdog) clearTimeout(openWatchdog);
         setIsProcessingPayment(false);
@@ -1336,6 +1366,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       rzpInstance.open();
       checkoutModalActive = true;
     } catch (err: any) {
+      payAttemptLockRef.current = false;
       stopPolling();
       if (openWatchdog) clearTimeout(openWatchdog);
       setIsProcessingPayment(false);
@@ -1348,6 +1379,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       showToast('Payment Error', errMsg, 'error', 6000);
     } finally {
       if (!checkoutModalActive) {
+        payAttemptLockRef.current = false;
         setIsProcessingPayment(false);
       }
     }

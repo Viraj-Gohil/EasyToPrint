@@ -3053,6 +3053,56 @@ const RAZORPAY_KEY_ID = (process.env.RAZORPAY_KEY_ID || '').trim();
 const RAZORPAY_KEY_SECRET = (process.env.RAZORPAY_KEY_SECRET || '').trim();
 const RAZORPAY_WEBHOOK_SECRET = (process.env.RAZORPAY_WEBHOOK_SECRET || '').trim();
 
+function sanitizeRazorpayReceipt(raw?: unknown): string {
+  const base = typeof raw === 'string' && raw.trim()
+    ? raw.trim()
+    : `rcpt_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const cleaned = base.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+  return cleaned || `rcpt_${Date.now()}`.slice(0, 40);
+}
+
+function sanitizeRazorpayNotes(rawNotes: unknown, fallback: Record<string, string> = {}): Record<string, string> {
+  const source = rawNotes && typeof rawNotes === 'object' && !Array.isArray(rawNotes)
+    ? (rawNotes as Record<string, unknown>)
+    : fallback;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(source)) {
+    if (v === undefined || v === null) continue;
+    const key = String(k).trim().slice(0, 64);
+    if (!key) continue;
+    out[key] = String(v).slice(0, 255);
+    if (Object.keys(out).length >= 15) break;
+  }
+  return out;
+}
+
+async function getAuthoritativePlatformRazorpayCreds(): Promise<{
+  keyId: string;
+  keySecret: string;
+  mode: 'test' | 'live';
+}> {
+  if (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET) {
+    return {
+      keyId: RAZORPAY_KEY_ID,
+      keySecret: RAZORPAY_KEY_SECRET,
+      mode: RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'live' : 'test'
+    };
+  }
+  const dbCfg = await getPlatformPaymentConfig().catch(() => null);
+  if (dbCfg?.isActive && dbCfg.keyId && dbCfg.keySecret && !isStaleKey(dbCfg.keyId)) {
+    return {
+      keyId: dbCfg.keyId.trim(),
+      keySecret: dbCfg.keySecret.trim(),
+      mode: dbCfg.keyId.trim().startsWith('rzp_live_') ? 'live' : 'test'
+    };
+  }
+  return {
+    keyId: RAZORPAY_KEY_ID,
+    keySecret: RAZORPAY_KEY_SECRET,
+    mode: RAZORPAY_KEY_ID.startsWith('rzp_live_') ? 'live' : 'test'
+  };
+}
+
 // Short-lived in-flight idempotency set for incoming webhook events
 const processedWebhookEvents = new Set<string>();
 
@@ -3762,7 +3812,8 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
       });
     }
 
-    const orderReceipt = receipt || `rcpt_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const orderReceipt = sanitizeRazorpayReceipt(receipt);
+    const sanitizedNotes = sanitizeRazorpayNotes(notes, printJobId ? { printJobId: String(printJobId) } : {});
 
     // Authoritative check if printJobId is provided and Neon is configured
     let effectiveShopId = shopId;
@@ -3824,15 +3875,23 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
     // Determine target payment configuration:
     // Case 1: SaaS Subscription / Platform payment (funds collected by Platform Admin)
     const isPlatformOrder = !effectiveShopId || effectiveShopId === 'platform' || flow === 'subscription';
+    const targetPlanId = req.body.planId || sanitizedNotes?.planId;
+    const billingPeriod = String(req.body.billingPeriod || sanitizedNotes?.billingPeriod || 'MONTHLY').toUpperCase();
+    const targetSubShopId =
+      sanitizedNotes?.shopId && sanitizedNotes.shopId !== 'platform'
+        ? sanitizedNotes.shopId
+        : effectiveShopId && effectiveShopId !== 'platform'
+          ? effectiveShopId
+          : undefined;
 
-    // Authoritatively validate SaaS Subscription orders against public.plans in database
-    if (flow === 'subscription' || (isPlatformOrder && (req.body.planId || notes?.planId))) {
-      const targetPlanId = req.body.planId || notes?.planId;
-      const billingPeriod = String(req.body.billingPeriod || notes?.billingPeriod || 'MONTHLY').toUpperCase();
-
+    // Authoritatively validate SaaS Subscription orders against public.plans in database (with canonical fallback)
+    if (flow === 'subscription' || (isPlatformOrder && targetPlanId)) {
       if (!targetPlanId) {
         return res.status(400).json({ success: false, error: 'Plan identifier is required for subscription orders.' });
       }
+
+      let resolvedPlanPrice: number | null = null;
+      let resolvedPlanActive = true;
 
       if (isNeonDatabaseConfigured()) {
         try {
@@ -3840,41 +3899,43 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
           const planRes = await pool.query(
             `SELECT id, name, slug, price_monthly, price_yearly, currency, is_active
              FROM public.plans
-             WHERE id::text = $1 OR slug = $1 LIMIT 1`,
+             WHERE id::text = $1 OR LOWER(slug) = LOWER($1) LIMIT 1`,
             [targetPlanId]
           );
 
-          if (!planRes.rowCount || planRes.rows.length === 0) {
-            return res.status(404).json({ success: false, error: 'The requested SaaS plan could not be found.' });
+          if (planRes.rowCount && planRes.rows.length > 0) {
+            const authoritativePlan = planRes.rows[0];
+            resolvedPlanActive = Boolean(authoritativePlan.is_active);
+            resolvedPlanPrice = billingPeriod === 'YEARLY'
+              ? Number(authoritativePlan.price_yearly)
+              : Number(authoritativePlan.price_monthly);
           }
-
-          const authoritativePlan = planRes.rows[0];
-          if (!authoritativePlan.is_active) {
-            return res.status(400).json({ success: false, error: 'This plan is currently inactive and cannot be selected.' });
-          }
-
-          const authoritativePrice = billingPeriod === 'YEARLY'
-            ? Number(authoritativePlan.price_yearly)
-            : Number(authoritativePlan.price_monthly);
-
-          if (authoritativePrice <= 0) {
-            return res.status(400).json({ success: false, error: 'Free plan does not require a payment transaction.' });
-          }
-
-          amountInPaise = Math.round(authoritativePrice * 100);
         } catch (dbErr: any) {
           if (!isDatabaseNetworkError(dbErr)) {
-            throw dbErr;
-          }
-          const fallbackPlan = FALLBACK_PUBLIC_PLANS.find(p => p.id === targetPlanId);
-          if (fallbackPlan) {
-            const fallbackPrice = billingPeriod === 'YEARLY' ? fallbackPlan.priceYearly : fallbackPlan.priceMonthly;
-            if (fallbackPrice > 0) {
-              amountInPaise = Math.round(fallbackPrice * 100);
-            }
+            logger.warn('Plan lookup query notice during create-order', { targetPlanId, error: deepRedact(dbErr) });
           }
         }
       }
+
+      if (resolvedPlanPrice === null) {
+        const fallbackPlan = [...FALLBACK_PUBLIC_PLANS, ...CANONICAL_PLANS].find(
+          (p) => p.id === targetPlanId || p.slug.toLowerCase() === String(targetPlanId).toLowerCase()
+        );
+        if (!fallbackPlan) {
+          return res.status(404).json({ success: false, error: 'The requested SaaS plan could not be found.' });
+        }
+        resolvedPlanActive = fallbackPlan.isActive !== false;
+        resolvedPlanPrice = billingPeriod === 'YEARLY' ? fallbackPlan.priceYearly : fallbackPlan.priceMonthly;
+      }
+
+      if (!resolvedPlanActive) {
+        return res.status(400).json({ success: false, error: 'This plan is currently inactive and cannot be selected.' });
+      }
+      if (resolvedPlanPrice <= 0) {
+        return res.status(400).json({ success: false, error: 'Free plan does not require a payment transaction.' });
+      }
+
+      amountInPaise = Math.round(resolvedPlanPrice * 100);
     }
 
     let targetKeyId: string;
@@ -3882,20 +3943,21 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
     let targetMode: 'test' | 'live';
 
     if (isPlatformOrder) {
-      targetKeyId = RAZORPAY_KEY_ID;
-      targetKeySecret = RAZORPAY_KEY_SECRET;
-      targetMode = targetKeyId.startsWith('rzp_live_') ? 'live' : 'test';
+      const platformCreds = await getAuthoritativePlatformRazorpayCreds();
+      targetKeyId = platformCreds.keyId;
+      targetKeySecret = platformCreds.keySecret;
+      targetMode = platformCreds.mode;
 
       if (!targetKeyId || !targetKeySecret) {
         return res.status(400).json({
           success: false,
-          error: 'Platform Razorpay credentials (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET) are missing from server environment variables.',
+          error: 'Platform Razorpay credentials (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET) are missing from server configuration.',
           code: 'PLATFORM_CREDENTIALS_REQUIRED'
         });
       }
     } else {
       // Case 2: Customer Counter Print Job for a specific shop
-      const orderAvailability = await getShopAgentAvailability(effectiveShopId).catch(() => null);
+      await getShopAgentAvailability(effectiveShopId).catch(() => null);
 
       const shopIntegration = await getShopPaymentIntegration(effectiveShopId);
       if (!shopIntegration || !shopIntegration.isConfigured || !shopIntegration.isActive || !shopIntegration.keyId || !shopIntegration.keySecret) {
@@ -3921,9 +3983,9 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
     try {
       razorpayOrder = await activeRzp.orders.create({
         amount: amountInPaise,
-        currency: currency || 'INR',
+        currency: String(currency || 'INR').toUpperCase(),
         receipt: orderReceipt,
-        notes: notes || (printJobId ? { printJobId } : {})
+        notes: sanitizedNotes
       });
 
       logger.info('Razorpay order created successfully', {
@@ -3939,7 +4001,7 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
         return res.status(503).json({ success: false, error: 'Database is required for payment orders.' });
       }
       try {
-        const canonicalShopId = await resolvePrintFlowShopId(effectiveShopId || '');
+        const canonicalShopId = await resolvePrintFlowShopId(targetSubShopId || effectiveShopId || '');
         await getPaymentRepository().createPaymentOrder({
           jobId: printJobId || undefined,
           shopId: canonicalShopId,
@@ -3947,9 +4009,16 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
           providerOrderId: razorpayOrder.id,
           providerAccountRef: targetKeyId,
           amountMinor: amountInPaise,
-          currency: currency || 'INR',
+          currency: String(currency || 'INR').toUpperCase(),
           idempotencyKey: crypto.randomUUID(),
-          metadata: { receipt: orderReceipt, notes: notes || undefined, allowPendingJob: !printJobId }
+          metadata: {
+            receipt: orderReceipt,
+            notes: Object.keys(sanitizedNotes).length > 0 ? sanitizedNotes : undefined,
+            allowPendingJob: !printJobId,
+            planId: targetPlanId || undefined,
+            billingPeriod: isPlatformOrder ? billingPeriod : undefined,
+            shopId: canonicalShopId
+          }
         });
       } catch (dbOrderErr) {
         logger.error('Failed to persist payment order into Neon public.payment_orders', {
@@ -4045,10 +4114,11 @@ app.post(['/api/verify-payment', '/api/payment/verify'], createRateLimiter(45, 6
 
     // Gather candidate secrets based strictly on account separation
     const candidateSecrets: string[] = [];
+    const platformCreds = await getAuthoritativePlatformRazorpayCreds();
 
     if (dbOrder) {
       if (dbOrder.purpose === 'SUBSCRIPTION' || dbOrder.shopId === 'platform') {
-        if (RAZORPAY_KEY_SECRET) candidateSecrets.push(RAZORPAY_KEY_SECRET);
+        if (platformCreds.keySecret) candidateSecrets.push(platformCreds.keySecret);
       } else {
         const shopIntegration = await getShopPaymentIntegration(dbOrder.shopId);
         if (shopIntegration?.keySecret) candidateSecrets.push(shopIntegration.keySecret);
@@ -4059,7 +4129,7 @@ app.post(['/api/verify-payment', '/api/payment/verify'], createRateLimiter(45, 6
         const shopIntegration = await getShopPaymentIntegration(effectiveShopId);
         if (shopIntegration?.keySecret) candidateSecrets.push(shopIntegration.keySecret);
       } else {
-        if (RAZORPAY_KEY_SECRET) candidateSecrets.push(RAZORPAY_KEY_SECRET);
+        if (platformCreds.keySecret) candidateSecrets.push(platformCreds.keySecret);
       }
     }
 
@@ -4266,11 +4336,12 @@ app.all(['/api/payment/check-status', '/api/payment/order-status/:orderId?'], cr
       targetKeyId = shopIntegration.keyId;
       targetKeySecret = shopIntegration.keySecret;
     } else {
-      if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      const platformCreds = await getAuthoritativePlatformRazorpayCreds();
+      if (!platformCreds.keyId || !platformCreds.keySecret) {
         return res.status(400).json({ success: false, error: 'Platform Razorpay credentials are not configured.' });
       }
-      targetKeyId = RAZORPAY_KEY_ID;
-      targetKeySecret = RAZORPAY_KEY_SECRET;
+      targetKeyId = platformCreds.keyId;
+      targetKeySecret = platformCreds.keySecret;
     }
 
     // 3. Query Razorpay API for live payment status
@@ -4446,11 +4517,12 @@ app.post('/api/payment/reconcile', createRateLimiter(45, 60_000, { bucketKey: 'p
       targetKeyId = shopIntegration.keyId;
       targetKeySecret = shopIntegration.keySecret;
     } else {
-      if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      const platformCreds = await getAuthoritativePlatformRazorpayCreds();
+      if (!platformCreds.keyId || !platformCreds.keySecret) {
         return res.status(400).json({ success: false, error: 'Platform Razorpay credentials are not configured.' });
       }
-      targetKeyId = RAZORPAY_KEY_ID;
-      targetKeySecret = RAZORPAY_KEY_SECRET;
+      targetKeyId = platformCreds.keyId;
+      targetKeySecret = platformCreds.keySecret;
     }
 
     const activeRzp = new Razorpay({
@@ -5668,6 +5740,10 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
   let totalBytes = 0;
 
   for (const input of files) {
+    const cleanPagesToPrint =
+      typeof input?.pagesToPrint === 'string' && input.pagesToPrint.trim().length > 0
+        ? input.pagesToPrint.trim()
+        : undefined;
     if (
       !input ||
       typeof input.fileName !== 'string' ||
@@ -5682,10 +5758,9 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
       !['BW', 'COLOR'].includes(input.colorMode) ||
       !['A4', 'A3', 'A5', 'Letter', 'Legal'].includes(input.paperSize) ||
       typeof input.duplex !== 'boolean' ||
-      (input.pagesToPrint !== undefined &&
-        (typeof input.pagesToPrint !== 'string' ||
-          input.pagesToPrint.length > 200 ||
-          !/^\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*$/.test(input.pagesToPrint)))
+      (cleanPagesToPrint !== undefined &&
+        (cleanPagesToPrint.length > 200 ||
+          !/^\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*$/.test(cleanPagesToPrint)))
     ) {
       return res.status(400).json({ success: false, error: 'One or more print file settings are invalid.' });
     }
@@ -5728,7 +5803,7 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
       colorMode: input.colorMode,
       paperSize: input.paperSize,
       duplex: input.duplex,
-      pagesToPrint: input.pagesToPrint,
+      pagesToPrint: cleanPagesToPrint,
       storageKey: validation.storageKey,
       buffer,
       mime: validation.detectedMime,
@@ -5893,8 +5968,9 @@ app.post('/api/orders/recover-or-retry', createRateLimiter(45, 60_000, { bucketK
         }
       }
       if (!targetKeyId || !targetKeySecret) {
-        targetKeyId = RAZORPAY_KEY_ID;
-        targetKeySecret = RAZORPAY_KEY_SECRET;
+        const platformCreds = await getAuthoritativePlatformRazorpayCreds();
+        targetKeyId = platformCreds.keyId;
+        targetKeySecret = platformCreds.keySecret;
       }
 
       if (targetKeyId && targetKeySecret) {
@@ -6194,6 +6270,10 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
   let totalBytes = 0;
 
   for (const input of files) {
+    const cleanPagesToPrint =
+      typeof input?.pagesToPrint === 'string' && input.pagesToPrint.trim().length > 0
+        ? input.pagesToPrint.trim()
+        : undefined;
     if (
       !input ||
       typeof input.fileName !== 'string' ||
@@ -6208,10 +6288,9 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
       !['BW', 'COLOR'].includes(input.colorMode) ||
       !['A4', 'A3', 'A5', 'Letter', 'Legal'].includes(input.paperSize) ||
       typeof input.duplex !== 'boolean' ||
-      (input.pagesToPrint !== undefined &&
-        (typeof input.pagesToPrint !== 'string' ||
-          input.pagesToPrint.length > 200 ||
-          !/^\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*$/.test(input.pagesToPrint)))
+      (cleanPagesToPrint !== undefined &&
+        (cleanPagesToPrint.length > 200 ||
+          !/^\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*$/.test(cleanPagesToPrint)))
     ) {
       return res.status(400).json({ success: false, error: 'One or more print file settings are invalid.' });
     }
@@ -6254,7 +6333,7 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
       colorMode: input.colorMode,
       paperSize: input.paperSize,
       duplex: input.duplex,
-      pagesToPrint: input.pagesToPrint,
+      pagesToPrint: cleanPagesToPrint,
       storageKey: validation.storageKey,
       buffer,
       mime: validation.detectedMime,
@@ -9200,11 +9279,12 @@ app.post('/api/admin/payments/:orderId/reconcile', createRateLimiter(20, 60_000,
     let targetKeyId: string;
     let targetKeySecret: string;
     if (dbOrder.purpose === 'SUBSCRIPTION' || dbOrder.shopId === 'platform') {
-      if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      const platformCreds = await getAuthoritativePlatformRazorpayCreds();
+      if (!platformCreds.keyId || !platformCreds.keySecret) {
         return res.status(400).json({ success: false, error: 'Platform Razorpay credentials are not configured.' });
       }
-      targetKeyId = RAZORPAY_KEY_ID;
-      targetKeySecret = RAZORPAY_KEY_SECRET;
+      targetKeyId = platformCreds.keyId;
+      targetKeySecret = platformCreds.keySecret;
     } else {
       const shopIntegration = await getShopPaymentIntegration(dbOrder.shopId);
       if (!shopIntegration || !shopIntegration.isConfigured || !shopIntegration.isActive || !shopIntegration.keyId || !shopIntegration.keySecret) {

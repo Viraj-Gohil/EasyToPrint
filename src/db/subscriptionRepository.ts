@@ -959,7 +959,9 @@ export class SubscriptionRepository {
     if (!plan) throw new Error('Selected plan does not exist');
 
     const platformConfig = await getPlatformPaymentConfig();
-    if (!platformConfig || !platformConfig.keyId) {
+    const effectiveKeyId = (process.env.RAZORPAY_KEY_ID || platformConfig?.keyId || '').trim();
+    const effectiveKeySecret = (process.env.RAZORPAY_KEY_SECRET || platformConfig?.keySecret || '').trim();
+    if (!effectiveKeyId || !effectiveKeySecret) {
       throw new Error('Platform payment gateway is not configured.');
     }
 
@@ -982,16 +984,21 @@ export class SubscriptionRepository {
       : effectiveMonthlyPrice;
 
     const amountInPaise = Math.round(totalAmount * 100);
-    const orderReceipt = `sub_${params.shopId.slice(0, 8)}_${Date.now().toString().slice(-4)}`;
+    if (amountInPaise < 100) {
+      throw new Error('Selected plan is free and does not require a payment order.');
+    }
+
+    const safeShopTag = String(params.shopId || 'shop').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 10) || 'shop';
+    const orderReceipt = `sub_${safeShopTag}_${Date.now().toString().slice(-8)}`.slice(0, 40);
 
     // Call Razorpay API
     let razorpayOrderId: string;
-    if (platformConfig.keySecret && !platformConfig.keySecret.includes('fake')) {
+    if (effectiveKeySecret && !effectiveKeySecret.includes('fake')) {
       try {
         const RazorpayModule = (await import('razorpay')).default;
         const rzp = new RazorpayModule({
-          key_id: platformConfig.keyId,
-          key_secret: platformConfig.keySecret
+          key_id: effectiveKeyId,
+          key_secret: effectiveKeySecret
         });
 
         const rzpOrder = await rzp.orders.create({
@@ -999,18 +1006,18 @@ export class SubscriptionRepository {
           currency: 'INR',
           receipt: orderReceipt,
           notes: {
-            shopId: params.shopId,
-            planId: plan.id,
-            billingPeriod: params.billingPeriod,
+            shopId: String(params.shopId).slice(0, 255),
+            planId: String(plan.id).slice(0, 255),
+            billingPeriod: String(params.billingPeriod).slice(0, 32),
             isIntroductory: String(isIntroductory),
             renewalPrice: String(plan.priceMonthly)
           }
         });
         razorpayOrderId = rzpOrder.id;
       } catch (err: any) {
-        logger.error('Failed to create Razorpay order', { error: deepRedact(err) });
-        // Fall back to synthetic order for staging/sandbox
-        razorpayOrderId = `order_sub_${crypto.randomBytes(8).toString('hex')}`;
+        logger.error('Failed to create Razorpay subscription order', { error: deepRedact(err) });
+        const desc = err?.error?.description || err?.message || 'Razorpay order creation failed';
+        throw new Error(`Payment gateway order creation failed: ${desc}`);
       }
     } else {
       razorpayOrderId = `order_sub_${crypto.randomBytes(8).toString('hex')}`;
@@ -1050,7 +1057,7 @@ export class SubscriptionRepository {
       orderId: razorpayOrderId,
       amount: totalAmount,
       currency: 'INR',
-      keyId: platformConfig.keyId,
+      keyId: effectiveKeyId,
       planName: plan.name,
       isIntroductory,
       renewalPrice: plan.priceMonthly
@@ -1067,17 +1074,22 @@ export class SubscriptionRepository {
     razorpaySignature: string;
   }): Promise<SubscriptionRecord> {
     const platformConfig = await getPlatformPaymentConfig();
-    const secret = platformConfig?.keySecret || process.env.RAZORPAY_KEY_SECRET || 'secret';
+    const candidateSecrets = [
+      process.env.RAZORPAY_KEY_SECRET,
+      platformConfig?.keySecret
+    ].filter(Boolean) as string[];
+    if (candidateSecrets.length === 0) candidateSecrets.push('secret');
 
     // Verify HMAC-SHA256 signature
-    const expectedSignature = crypto
-      .createHmac('sha256', secret)
-      .update(`${params.razorpayOrderId}|${params.razorpayPaymentId}`)
-      .digest('hex');
-
     const isValidSignature =
-      params.razorpaySignature === expectedSignature ||
-      params.razorpaySignature === 'simulated_valid_sub_signature';
+      params.razorpaySignature === 'simulated_valid_sub_signature' ||
+      candidateSecrets.some((secret) => {
+        const expectedSignature = crypto
+          .createHmac('sha256', secret)
+          .update(`${params.razorpayOrderId}|${params.razorpayPaymentId}`)
+          .digest('hex');
+        return expectedSignature === params.razorpaySignature;
+      });
 
     if (!isValidSignature) {
       throw new Error('Cryptographic payment signature verification failed.');
@@ -1098,11 +1110,11 @@ export class SubscriptionRepository {
           FOR UPDATE
         `, [params.razorpayOrderId]);
 
-        let planId = '00000000-0000-0000-0000-000000000002'; // default growth
+        let planId = 'plan_growth'; // default growth
         let billingPeriod: 'MONTHLY' | 'YEARLY' = 'MONTHLY';
-        let amount = 699.00;
+        let amount = 499.00;
         let isIntro = false;
-        let renewalPrice = 699.00;
+        let renewalPrice = 499.00;
 
         if (payRes.rowCount && payRes.rows.length > 0) {
           const pay = payRes.rows[0];
@@ -1126,7 +1138,8 @@ export class SubscriptionRepository {
           UPDATE public.subscription_payments
           SET status = 'SUCCESS',
               razorpay_payment_id = $2,
-              razorpay_signature = $3
+              razorpay_signature = $3,
+              updated_at = NOW()
           WHERE razorpay_order_id = $1
         `, [params.razorpayOrderId, params.razorpayPaymentId, params.razorpaySignature]);
 
@@ -1134,10 +1147,10 @@ export class SubscriptionRepository {
         const subRes = await client.query(`
           INSERT INTO public.subscriptions
             (shop_id, plan_id, status, billing_period, current_period_start,
-             current_period_end, amount_paid, razorpay_payment_id, is_introductory_pricing,
+             current_period_end, amount_paid, payment_id, razorpay_payment_id, is_introductory_pricing,
              renewal_price, auto_renew, updated_at)
           VALUES
-            ($1, $2, 'active', $3, NOW(), NOW() + $4::INTERVAL, $5, $6, $7, $8, true, NOW())
+            ($1, $2, 'active', $3, NOW(), NOW() + $4::INTERVAL, $5, $6, $6, $7, $8, true, NOW())
           RETURNING id
         `, [
           params.shopId,

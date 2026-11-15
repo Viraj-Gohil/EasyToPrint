@@ -33,7 +33,8 @@ export function isValidDatabaseUrl(rawUrl?: string): boolean {
     url.includes('USER:PASSWORD') ||
     url.includes('YOUR_DATABASE_URL') ||
     url.includes('your-database-url') ||
-    url.includes('placeholder')
+    url.includes('placeholder') ||
+    url.includes('HOST')
   ) {
     return false;
   }
@@ -72,13 +73,17 @@ let _overridePoolConfigured: boolean | null = null;
 
 /**
  * Returns true when the shared Neon pool is available.
- * Self-healing: lazily initializes pool if process.env.DATABASE_URL is present.
+ * Self-healing: lazily initializes pool if DATABASE_URL is configured (or fallback Supabase pooler).
  */
 export const isSharedPoolConfigured = (): boolean => {
   if (_overridePoolConfigured !== null) return _overridePoolConfigured;
+  if (process.env.DATABASE_URL !== undefined && process.env.DATABASE_URL.trim() === '') {
+    return false;
+  }
   if (!_sharedPool) {
     try {
-      const activeUrl = (process.env.DATABASE_URL || DEFAULT_SUPABASE_DATABASE_URL).trim().replace(/^['"]|['"]$/g, '');
+      const envUrl = (process.env.DATABASE_URL || '').trim().replace(/^['"]|['"]$/g, '');
+      const activeUrl = isValidDatabaseUrl(envUrl) ? envUrl : DATABASE_URL;
       if (activeUrl) {
         _sharedPool = new Pool({
           connectionString: activeUrl,

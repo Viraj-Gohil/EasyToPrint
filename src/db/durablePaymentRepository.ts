@@ -654,23 +654,24 @@ export class DurablePaymentRepository {
           const meta = (order as any).metadata || {};
           const planId = meta.planId || meta.targetPlanId || meta.notes?.planId;
           const billingPeriod = (meta.billingPeriod || meta.notes?.billingPeriod || 'MONTHLY').toUpperCase();
-          const targetShopId = (order.shop_id && order.shop_id !== 'platform') ? order.shop_id : meta.shopId;
+          const candidateShopId = meta.shopId || meta.notes?.shopId || order.shop_id;
+          const targetShopId = (candidateShopId && candidateShopId !== 'platform') ? candidateShopId : undefined;
           const periodInterval = billingPeriod === 'YEARLY' ? '365 days' : '30 days';
           const amountPaid = expectedMinor / 100;
 
-          if (planId && targetShopId && targetShopId !== 'platform') {
+          if (planId && targetShopId) {
             await client.query(
               `INSERT INTO public.subscriptions
-                 (shop_id, plan_id, status, billing_period, current_period_start, current_period_end, amount_paid, payment_id, auto_renew)
+                 (shop_id, plan_id, status, billing_period, current_period_start, current_period_end, amount_paid, payment_id, razorpay_payment_id, auto_renew, updated_at)
                VALUES
-                 ($1, $2, 'ACTIVE', $3, NOW(), NOW() + $4::INTERVAL, $5, $6, true)`,
+                 ($1, $2, 'ACTIVE', $3, NOW(), NOW() + $4::INTERVAL, $5, $6, $6, true, NOW())`,
               [targetShopId, planId, billingPeriod, periodInterval, amountPaid, input.providerPaymentId]
             );
 
             await client.query(
               `UPDATE public.shops
                SET current_plan_id = $1, updated_at = NOW()
-               WHERE id = $2`,
+               WHERE id::text = $2`,
               [planId, targetShopId]
             );
           }
