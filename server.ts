@@ -9557,8 +9557,8 @@ app.get('/api/admin/dashboard-stats', createRateLimiter(60, 60_000, { bucketKey:
     try {
       const subsRes = await pool.query(`
         SELECT 
-          COUNT(CASE WHEN status IN ('active', 'trialing') THEN 1 END)::int AS active,
-          COUNT(CASE WHEN status NOT IN ('active', 'trialing') THEN 1 END)::int AS expired
+          COUNT(CASE WHEN LOWER(status) IN ('active', 'trialing') THEN 1 END)::int AS active,
+          COUNT(CASE WHEN LOWER(status) NOT IN ('active', 'trialing') THEN 1 END)::int AS expired
         FROM public.subscriptions
       `);
       if (subsRes.rows[0]) subsStats = subsRes.rows[0];
@@ -9583,14 +9583,16 @@ app.get('/api/admin/dashboard-stats', createRateLimiter(60, 60_000, { bucketKey:
     try {
       const stRes = await pool.query(`
         SELECT 
-          COALESCE(SUM(bytes_used), 0)::bigint AS "cloudBytesUsed",
-          COALESCE(SUM(file_count), 0)::int AS "cloudFilesCount"
+          COALESCE(SUM(used_bytes), 0)::bigint AS "cloudBytesUsed",
+          COALESCE(SUM(active_document_count), 0)::int AS "cloudFilesCount"
         FROM public.shop_storage_usage
       `);
       if (stRes.rows[0]) {
         storageStats.cloudBytesUsed = Number(stRes.rows[0].cloudBytesUsed) || 0;
         storageStats.cloudFilesCount = Number(stRes.rows[0].cloudFilesCount) || 0;
       }
+    } catch {}
+    try {
       const agDiskRes = await pool.query(`
         SELECT COALESCE(SUM(agent_storage_bytes), 0)::bigint AS "agentDiskBytesUsed"
         FROM public.agent_health
@@ -9604,11 +9606,11 @@ app.get('/api/admin/dashboard-stats', createRateLimiter(60, 60_000, { bucketKey:
     const recentShopsRes = await pool.query(`
       SELECT s.id::text, s.name, s.slug, s.shop_code AS "shopCode",
              s.email AS "ownerEmail", s.phone AS "ownerPhone",
-             s.address, s.city, s.status,
+             s.address, s.status,
              COALESCE(p.name, s.tagline, 'Growth Counter') AS "planName",
              s.created_at AS "createdAt"
       FROM public.shops s
-      LEFT JOIN public.plans p ON p.id = s.current_plan_id
+      LEFT JOIN public.plans p ON p.id::text = s.current_plan_id::text
       ORDER BY s.created_at DESC
       LIMIT 10
     `);
@@ -9672,11 +9674,11 @@ app.get('/api/admin/users', createRateLimiter(60, 60_000, { bucketKey: 'admin-us
       SELECT u.id::text, u.email, u.full_name AS "fullName", u.phone, u.role,
              u.shop_id::text AS "shopId", COALESCE(s.name, 'Platform Admin') AS "shopName",
              s.shop_code AS "shopCode",
-             u.is_email_verified AS "isEmailVerified",
+             (u.email IS NOT NULL) AS "isEmailVerified",
              COALESCE(s.status, 'ACTIVE') AS "accountStatus",
              u.created_at AS "createdAt", u.updated_at AS "updatedAt"
       FROM public.printflow_users u
-      LEFT JOIN public.shops s ON s.id = u.shop_id
+      LEFT JOIN public.shops s ON s.id::text = u.shop_id
       WHERE 1=1
     `;
     const params: any[] = [];
@@ -9752,13 +9754,13 @@ app.get('/api/admin/storage', createRateLimiter(60, 60_000, { bucketKey: 'admin-
 
     const shopsUsageRes = await pool.query(`
       SELECT s.id::text AS "shopId", s.name AS "shopName", s.slug AS "shopSlug",
-             COALESCE(u.bytes_used, 0)::bigint AS "bytesUsed",
-             COALESCE(u.file_count, 0)::int AS "fileCount",
-             COALESCE((p.limits->>'storageLimitMb')::int * 1048576, 5242880000)::bigint AS "allocatedBytes",
+             COALESCE(u.used_bytes, 0)::bigint AS "bytesUsed",
+             COALESCE(u.active_document_count, 0)::int AS "fileCount",
+             COALESCE((p.limits->>'storageLimitMb')::bigint * 1048576, 5242880000)::bigint AS "allocatedBytes",
              u.updated_at AS "lastUpdated"
       FROM public.shops s
-      LEFT JOIN public.shop_storage_usage u ON u.shop_id = s.id
-      LEFT JOIN public.plans p ON p.id = s.current_plan_id
+      LEFT JOIN public.shop_storage_usage u ON u.shop_id = s.id::text
+      LEFT JOIN public.plans p ON p.id::text = s.current_plan_id::text
       ORDER BY "bytesUsed" DESC
     `);
 
@@ -9770,11 +9772,11 @@ app.get('/api/admin/storage', createRateLimiter(60, 60_000, { bucketKey: 'admin-
       SELECT h.agent_id::text AS "agentId", d.device_name AS "deviceName",
              COALESCE(s.name, 'Counter Shop') AS "shopName",
              COALESCE(h.agent_storage_bytes, 0)::bigint AS "localStorageBytes",
-             h.status, h.last_heartbeat AS "lastHeartbeat"
+             h.status, h.last_heartbeat_at AS "lastHeartbeat"
       FROM public.agent_health h
       LEFT JOIN public.print_agent_devices d ON d.agent_id = h.agent_id
-      LEFT JOIN public.shops s ON s.id = d.shop_id
-      ORDER BY h.last_heartbeat DESC NULLS LAST
+      LEFT JOIN public.shops s ON s.id::text = d.shop_id::text
+      ORDER BY h.last_heartbeat_at DESC NULLS LAST
     `);
 
     return res.json({
