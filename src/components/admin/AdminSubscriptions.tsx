@@ -84,7 +84,7 @@ export const AdminSubscriptions: React.FC = () => {
   } = useApp();
 
   // Navigation tabs inside the Admin SaaS Module
-  type AdminTab = 'catalog' | 'subscribers' | 'usage' | 'policies' | 'gateway' | 'audit';
+  type AdminTab = 'catalog' | 'subscribers' | 'usage' | 'policies' | 'audit';
   const [activeTab, setActiveTab] = useState<AdminTab>('catalog');
 
   // Plan catalog state & filters
@@ -327,6 +327,16 @@ export const AdminSubscriptions: React.FC = () => {
 
   // Helper to open Edit Plan
   const handleOpenEditPlan = (plan: SaasPlan) => {
+    const monthly = Number(plan.priceMonthly ?? (plan as any).price_monthly ?? 0);
+    const yearly = Number(plan.priceYearly ?? (plan as any).price_yearly ?? monthly * 10);
+    const prLimit = Number(plan.printerLimit ?? (plan as any).printer_limit ?? 1);
+    const jobLimit = Number(plan.printLimitMonthly ?? (plan as any).print_limit ?? 1500);
+    const storageMb = Number(
+      plan.storageLimitMb ?? ((plan as any).storage_limit_gb ? Number((plan as any).storage_limit_gb) * 1024 : 5000)
+    );
+    const activeFlag = Boolean(plan.isActive ?? (plan as any).is_active ?? true);
+    const resolvedStatus: PlanStatus = plan.status || (activeFlag ? 'ACTIVE' : 'DRAFT');
+
     setEditingPlan(plan);
     setIsCreatingNew(false);
     setUpdatePolicy('NEW_ONLY');
@@ -337,36 +347,36 @@ export const AdminSubscriptions: React.FC = () => {
       slug: plan.slug || plan.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       tagline: plan.tagline || '',
       description: plan.description || plan.tagline || '',
-      priceMonthly: plan.priceMonthly,
-      priceYearly: plan.priceYearly || plan.priceMonthly * 10,
-      isFree: plan.isFree ?? plan.priceMonthly === 0,
+      priceMonthly: monthly,
+      priceYearly: yearly,
+      isFree: plan.isFree ?? monthly === 0,
       billingInterval: plan.billingInterval || 'BOTH',
-      trialDays: plan.trialDays ?? (plan.priceMonthly === 0 ? 0 : 14),
+      trialDays: plan.trialDays ?? (monthly === 0 ? 0 : 14),
       taxInclusive: plan.taxInclusive ?? true,
-      status: plan.status || (plan.isActive ? 'ACTIVE' : 'DRAFT'),
-      isActive: plan.isActive,
-      displayOrder: plan.displayOrder || 1,
-      isPopular: plan.isPopular ?? false,
+      status: resolvedStatus,
+      isActive: activeFlag,
+      displayOrder: plan.displayOrder || plan.sortOrder || 1,
+      isPopular: Boolean(plan.isPopular ?? (plan as any).is_popular ?? false),
       adminNotes: plan.adminNotes || '',
-      printLimitMonthly: plan.printLimitMonthly || 1500,
-      isUnlimitedPrintJobs: plan.isUnlimitedPrintJobs ?? (plan.printLimitMonthly ? plan.printLimitMonthly > 50000 : false),
-      printerLimit: plan.printerLimit || 1,
+      printLimitMonthly: jobLimit,
+      isUnlimitedPrintJobs: plan.isUnlimitedPrintJobs ?? (jobLimit > 50000),
+      printerLimit: prLimit,
       isUnlimitedPrinters: plan.isUnlimitedPrinters ?? false,
-      storageLimitMb: plan.storageLimitMb || 5000,
+      storageLimitMb: storageMb,
       isUnlimitedStorage: plan.isUnlimitedStorage ?? false,
-      staffLimit: plan.staffLimit || 1,
+      staffLimit: 1,
       maxUploadSizeMb: plan.maxUploadSizeMb || 35,
       fileRetentionHours: plan.fileRetentionHours || 48,
-      features: [...plan.features],
+      features: Array.isArray(plan.features) ? [...plan.features] : [],
       featureEntitlements: {
         qrPrinting: plan.featureEntitlements?.qrPrinting ?? true,
         multiFileUpload: plan.featureEntitlements?.multiFileUpload ?? true,
         automatedQueue: plan.featureEntitlements?.automatedQueue ?? true,
-        multiplePrinters: plan.featureEntitlements?.multiplePrinters ?? (plan.printerLimit > 1),
+        multiplePrinters: plan.featureEntitlements?.multiplePrinters ?? (prLimit > 1),
         smartPrinterSelection: plan.featureEntitlements?.smartPrinterSelection ?? false,
         analytics: plan.featureEntitlements?.analytics ?? true,
         customBranding: plan.featureEntitlements?.customBranding ?? false,
-        staffManagement: plan.featureEntitlements?.staffManagement ?? false,
+        staffManagement: false,
         apiAccess: plan.featureEntitlements?.apiAccess ?? false,
         prioritySupport: plan.featureEntitlements?.prioritySupport ?? false
       }
@@ -434,6 +444,19 @@ export const AdminSubscriptions: React.FC = () => {
       return;
     }
 
+    if (!isCreatingNew && editingPlan && updatePolicy === 'IMMEDIATE' && !showGrandfatherWarning) {
+      const activeCount = planSubscribersMap[editingPlan.id] || 0;
+      if (activeCount > 0) {
+        showToast(
+          'Confirmation Required',
+          `Please check the confirmation box under Safe Plan Update Policy to immediately update ${activeCount} active subscriber(s).`,
+          'error',
+          4500
+        );
+        return;
+      }
+    }
+
     const effectiveSlug =
       planForm.slug.trim() ||
       planForm.name
@@ -473,7 +496,6 @@ export const AdminSubscriptions: React.FC = () => {
         printLimitMonthly: planForm.isUnlimitedPrintJobs ? 999999 : Number(planForm.printLimitMonthly),
         printerLimit: planForm.isUnlimitedPrinters ? 99 : Math.max(1, Number(planForm.printerLimit)),
         storageLimitMb: planForm.isUnlimitedStorage ? 500000 : Number(planForm.storageLimitMb),
-        staffLimit: Number(planForm.staffLimit) || 1,
         maxUploadSizeMb: effectiveUploadSize,
         fileRetentionHours: Number(planForm.fileRetentionHours) || 48,
         isUnlimitedPrintJobs: planForm.isUnlimitedPrintJobs,
@@ -486,7 +508,6 @@ export const AdminSubscriptions: React.FC = () => {
       isUnlimitedPrinters: planForm.isUnlimitedPrinters,
       storageLimitMb: planForm.isUnlimitedStorage ? 500000 : Number(planForm.storageLimitMb),
       isUnlimitedStorage: planForm.isUnlimitedStorage,
-      staffLimit: Number(planForm.staffLimit) || 1,
       maxUploadSizeMb: effectiveUploadSize,
       fileRetentionHours: Number(planForm.fileRetentionHours) || 48,
       features: planForm.features.filter((f) => f.trim().length > 0),
@@ -719,36 +740,6 @@ export const AdminSubscriptions: React.FC = () => {
             <span>Active Subscriptions</span>
           </button>
 
-          {/* Gateway Status Badge */}
-          <div
-            onClick={() => setActiveTab('gateway')}
-            className={`cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
-              adminRazorpay.keyId
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-            }`}
-            title="Click to view Gateway diagnostics"
-          >
-            <span
-              className={`w-2 h-2 rounded-full animate-pulse ${
-                adminRazorpay.keyId ? 'bg-emerald-600' : 'bg-amber-600'
-              }`}
-            />
-            <span>
-              {adminRazorpay.keyId
-                ? `Gateway: ${adminRazorpay.isTestMode ? 'Test Sandbox' : 'Production Live'}`
-                : 'Gateway: Unconfigured'}
-            </span>
-          </div>
-
-          <button
-            onClick={() => setActiveTab('gateway')}
-            className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Settings2 className="w-3.5 h-3.5 text-slate-500" />
-            <span>Billing Settings</span>
-          </button>
-
           <button
             onClick={handleOpenCreatePlan}
             className="px-4 py-2 text-xs font-semibold text-white bg-[#00B52D] hover:bg-[#009624] rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -922,18 +913,6 @@ export const AdminSubscriptions: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('gateway')}
-            className={`px-3.5 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'gateway'
-                ? 'border-[#00B52D] text-[#00B52D] bg-emerald-50/50 rounded-t-lg'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <CreditCard className="w-3.5 h-3.5" />
-            <span>Razorpay Billing Gateway</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('audit')}
             className={`px-3.5 py-2.5 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'audit'
@@ -1101,13 +1080,15 @@ export const AdminSubscriptions: React.FC = () => {
                         <div className="my-3 pb-3 border-b border-slate-100">
                           <div className="flex items-baseline gap-1">
                             <span className="text-2xl font-bold font-mono text-slate-900">
-                              {p.isFree || p.priceMonthly === 0 ? '₹0' : `₹${p.priceMonthly}`}
+                              {p.isFree || Number(p.priceMonthly ?? (p as any).price_monthly ?? 0) === 0
+                                ? '₹0'
+                                : `₹${Number(p.priceMonthly ?? (p as any).price_monthly ?? 0)}`}
                             </span>
                             <span className="text-xs text-slate-400">/mo</span>
                           </div>
-                          {p.priceMonthly > 0 && (
+                          {Number(p.priceMonthly ?? (p as any).price_monthly ?? 0) > 0 && (
                             <p className="text-[11px] text-slate-500 font-mono mt-0.5">
-                              or ₹{p.priceYearly || p.priceMonthly * 10}/yr{' '}
+                              or ₹{Number(p.priceYearly ?? (p as any).price_yearly ?? Number(p.priceMonthly ?? 0) * 10)}/yr{' '}
                               <span className="text-emerald-600 font-medium font-sans">
                                 (Save ~17%)
                               </span>
@@ -1123,7 +1104,9 @@ export const AdminSubscriptions: React.FC = () => {
                               Printers:
                             </span>
                             <span className="font-semibold text-slate-800">
-                              {p.isUnlimitedPrinters ? 'Unlimited' : `${p.printerLimit} device(s)`}
+                              {p.isUnlimitedPrinters
+                                ? 'Unlimited'
+                                : `${Number(p.printerLimit ?? (p as any).printer_limit ?? 1)} device(s)`}
                             </span>
                           </div>
 
@@ -1135,7 +1118,7 @@ export const AdminSubscriptions: React.FC = () => {
                             <span className="font-semibold text-slate-800">
                               {p.isUnlimitedPrintJobs
                                 ? 'Unlimited'
-                                : `${(p.printLimitMonthly || 1500).toLocaleString()}/mo`}
+                                : `${Number(p.printLimitMonthly ?? (p as any).print_limit ?? 1500).toLocaleString()}/mo`}
                             </span>
                           </div>
 
@@ -1147,17 +1130,7 @@ export const AdminSubscriptions: React.FC = () => {
                             <span className="font-semibold text-slate-800">
                               {p.isUnlimitedStorage
                                 ? 'Unlimited'
-                                : `${((p.storageLimitMb || 5000) / 1024).toFixed(1)} GB`}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="text-slate-500 flex items-center gap-1">
-                              <Building2 className="w-3 h-3 text-slate-400" />
-                              Staff Operators:
-                            </span>
-                            <span className="font-semibold text-slate-800">
-                              {p.staffLimit || 1} staff accounts
+                                : `${((Number(p.storageLimitMb ?? ((p as any).storage_limit_gb ? (p as any).storage_limit_gb * 1024 : 5000))) / 1024).toFixed(1)} GB`}
                             </span>
                           </div>
                         </div>
@@ -1843,83 +1816,7 @@ export const AdminSubscriptions: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 5: RAZORPAY BILLING GATEWAY SETTINGS */}
-      {/* ========================================================================= */}
-      {activeTab === 'gateway' && (
-        <div className="space-y-6 max-w-4xl">
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Platform Razorpay Gateway Configuration</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Collect recurring SaaS subscriptions from shop owners. Secret credentials remain strictly protected on the backend.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleTestGateway}
-                disabled={isTestingGateway}
-                className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-[#00B52D] text-xs font-semibold rounded-xl border border-emerald-200 flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isTestingGateway ? 'animate-spin' : ''}`} />
-                <span>{isTestingGateway ? 'Verifying...' : 'Verify Gateway Handshake'}</span>
-              </button>
-            </div>
-
-            {/* Test result banner */}
-            {gatewayTestResult && (
-              <div
-                className={`p-4 rounded-xl text-xs flex items-start gap-2.5 ${
-                  gatewayTestResult.success
-                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                    : 'bg-red-50 text-red-800 border border-red-200'
-                }`}
-              >
-                {gatewayTestResult.success ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                )}
-                <div>
-                  <p className="font-bold">{gatewayTestResult.success ? 'Handshake Successful' : 'Handshake Failed'}</p>
-                  <p className="mt-0.5">{gatewayTestResult.message}</p>
-                  {gatewayTestResult.latencyMs && (
-                    <span className="text-[10px] text-slate-500 block mt-1">
-                      Server API Response Latency: {gatewayTestResult.latencyMs}ms
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="p-4 bg-[#E8F8EC] border border-[#A7F3D0] rounded-xl space-y-2 text-xs text-[#080808]">
-              <div className="font-bold flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-[#00B52D] shrink-0" />
-                <span>Configured via Server-Side Environment Variables</span>
-              </div>
-              <p className="text-slate-700 leading-relaxed">
-                Platform SaaS Razorpay Gateway API credentials (<code className="font-mono bg-white border border-[#A7F3D0] px-1 py-0.5 rounded">RAZORPAY_KEY_ID</code> / <code className="font-mono bg-white border border-[#A7F3D0] px-1 py-0.5 rounded">RAZORPAY_KEY_SECRET</code>) are configured exclusively via server-side environment variables. Admin dashboard configuration, editing, saving, and overrides have been permanently disabled for security.
-              </p>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 text-xs space-y-2">
-              <h4 className="font-semibold text-slate-800 flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-[#00B52D]" />
-                <span>Security Architecture Notes</span>
-              </h4>
-              <ul className="text-slate-500 space-y-1 text-[11px] list-disc list-inside">
-                <li>All subscriptions and orders are created server-side via authenticated endpoints.</li>
-                <li>Webhook event IDs are idempotently stored to prevent duplicate charges or double execution.</li>
-                <li>HMAC SHA-256 payload verification is enforced on all captured events.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 6: SECURITY & AUDIT HISTORY */}
+      {/* TAB 5: SECURITY & AUDIT HISTORY */}
       {/* ========================================================================= */}
       {activeTab === 'audit' && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
@@ -2199,17 +2096,6 @@ export const AdminSubscriptions: React.FC = () => {
                   </div>
 
                   <div className="space-y-1">
-                    <label className="font-semibold text-slate-800">Staff Accounts Limit</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={planForm.staffLimit}
-                      onChange={(e) => setPlanForm({ ...planForm, staffLimit: Number(e.target.value) })}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-900"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
                     <label className="font-semibold text-slate-800">Max Upload Size (MB)</label>
                     <input
                       type="number"
@@ -2231,7 +2117,7 @@ export const AdminSubscriptions: React.FC = () => {
                 <h4 className="font-bold text-slate-900 uppercase text-[11px] tracking-wider text-[#00B52D]">
                   4. Feature Entitlements
                 </h4>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {Object.entries({
                     qrPrinting: 'QR Code Stand',
                     multiFileUpload: 'Multi-File Upload',
@@ -2240,7 +2126,6 @@ export const AdminSubscriptions: React.FC = () => {
                     smartPrinterSelection: 'Smart Auto-Routing',
                     analytics: 'Revenue Analytics',
                     customBranding: 'Custom Shop Logo',
-                    staffManagement: 'Staff Roles & Logins',
                     apiAccess: 'Print Agent API',
                     prioritySupport: 'Priority Support SLA'
                   }).map(([key, label]) => {
@@ -2323,19 +2208,24 @@ export const AdminSubscriptions: React.FC = () => {
               </div>
 
               {/* SECTION E: SAFE PLAN UPDATE POLICY (When editing existing plan) */}
-              {!isCreatingNew && (
-                <div className="p-4 bg-amber-50/60 rounded-xl border border-amber-200 space-y-2">
-                  <h4 className="font-bold text-amber-900 text-xs flex items-center gap-1.5">
-                    <Shield className="w-3.5 h-3.5 text-amber-700" />
-                    <span>Safe Plan Update Policy</span>
-                  </h4>
+              {!isCreatingNew && editingPlan && (
+                <div className="p-4 bg-amber-50/60 rounded-xl border border-amber-200 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="font-bold text-amber-900 text-xs flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Safe Plan Update Policy</span>
+                    </h4>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white border border-amber-200 text-amber-800">
+                      {planSubscribersMap[editingPlan.id] || 0} Active Subscriber{(planSubscribersMap[editingPlan.id] || 0) === 1 ? '' : 's'}
+                    </span>
+                  </div>
                   <p className="text-[11px] text-amber-800">
                     Choose how price or quota revisions are applied to existing active subscribers:
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                     <label
-                      className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-start gap-2 ${
+                      className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-start gap-2 transition-all ${
                         updatePolicy === 'NEW_ONLY'
                           ? 'bg-white border-amber-500 font-semibold shadow-2xs'
                           : 'bg-amber-50/40 border-amber-200 text-amber-900'
@@ -2345,7 +2235,10 @@ export const AdminSubscriptions: React.FC = () => {
                         type="radio"
                         name="updatePolicy"
                         checked={updatePolicy === 'NEW_ONLY'}
-                        onChange={() => setUpdatePolicy('NEW_ONLY')}
+                        onChange={() => {
+                          setUpdatePolicy('NEW_ONLY');
+                          setShowGrandfatherWarning(false);
+                        }}
                         className="mt-0.5 text-amber-600"
                       />
                       <div>
@@ -2357,7 +2250,7 @@ export const AdminSubscriptions: React.FC = () => {
                     </label>
 
                     <label
-                      className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-start gap-2 ${
+                      className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-start gap-2 transition-all ${
                         updatePolicy === 'AT_RENEWAL'
                           ? 'bg-white border-amber-500 font-semibold shadow-2xs'
                           : 'bg-amber-50/40 border-amber-200 text-amber-900'
@@ -2367,7 +2260,10 @@ export const AdminSubscriptions: React.FC = () => {
                         type="radio"
                         name="updatePolicy"
                         checked={updatePolicy === 'AT_RENEWAL'}
-                        onChange={() => setUpdatePolicy('AT_RENEWAL')}
+                        onChange={() => {
+                          setUpdatePolicy('AT_RENEWAL');
+                          setShowGrandfatherWarning(false);
+                        }}
                         className="mt-0.5 text-amber-600"
                       />
                       <div>
@@ -2379,7 +2275,7 @@ export const AdminSubscriptions: React.FC = () => {
                     </label>
 
                     <label
-                      className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-start gap-2 ${
+                      className={`p-2.5 rounded-lg border text-xs cursor-pointer flex items-start gap-2 transition-all ${
                         updatePolicy === 'IMMEDIATE'
                           ? 'bg-white border-red-500 font-semibold shadow-2xs'
                           : 'bg-amber-50/40 border-amber-200 text-amber-900'
@@ -2400,6 +2296,20 @@ export const AdminSubscriptions: React.FC = () => {
                       </div>
                     </label>
                   </div>
+
+                  {updatePolicy === 'IMMEDIATE' && (planSubscribersMap[editingPlan.id] || 0) > 0 && (
+                    <label className="mt-2 p-2.5 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-[11px] text-red-800 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showGrandfatherWarning}
+                        onChange={(e) => setShowGrandfatherWarning(e.target.checked)}
+                        className="rounded text-red-600"
+                      />
+                      <span className="font-medium">
+                        I confirm applying these pricing and quota changes immediately to all {planSubscribersMap[editingPlan.id] || 0} active subscriber(s).
+                      </span>
+                    </label>
+                  )}
                 </div>
               )}
 

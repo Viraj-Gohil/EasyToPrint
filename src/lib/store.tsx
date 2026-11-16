@@ -636,6 +636,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setShops(newShops);
           if (newShops.length > 0) {
             setActiveShopIdState((prev) => prev || newShops[0].id);
+          } else {
+            setActiveShopIdState('');
+            setPrinters([]);
+            setAgents([]);
+            setPrintJobs([]);
+            setTransactions([]);
+            setPricingRules([]);
+            setSubscriptions([]);
+            setSupportTickets([]);
+            setAuditLogs([]);
+            try {
+              const staleKeys = [
+                'shops',
+                'active_shop_id',
+                'print_jobs',
+                'transactions',
+                'printers',
+                'agents',
+                'pricing_rules',
+                'saas_subscriptions',
+                'support_tickets',
+                'audit_logs'
+              ];
+              for (const k of staleKeys) {
+                window.localStorage.removeItem(STORAGE_KEY_PREFIX + k);
+              }
+            } catch {}
           }
         }
       })
@@ -1181,7 +1208,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       printLimitMonthly: planData.printLimitMonthly ?? 500,
       printerLimit: planData.printerLimit ?? 2,
       storageLimitMb: planData.storageLimitMb ?? 5120,
-      staffLimit: planData.staffLimit ?? 2,
       maxUploadSizeMb: planData.maxUploadSizeMb ?? 35,
       fileRetentionHours: planData.fileRetentionHours ?? 48,
       isUnlimitedPrintJobs: Boolean(planData.isUnlimitedPrintJobs),
@@ -1217,11 +1243,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updatePlan = async (planId: string, updates: Partial<SaasPlan>, policy: PlanChangePolicy = 'NEW_ONLY') => {
     const now = new Date().toISOString();
     let targetPlanName = '';
+    let affectedCount = 0;
 
     try {
       const res = await authenticatedFetch(`/api/admin/plans/${encodeURIComponent(planId)}`, {
         method: 'PUT',
-        body: JSON.stringify(updates)
+        body: JSON.stringify({
+          ...updates,
+          updatePolicy: policy
+        })
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -1231,7 +1261,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (data.plan) {
         setPlans((prev) => prev.map((p) => (p.id === planId || p.slug === planId ? data.plan : p)));
         targetPlanName = data.plan.name;
-        showToast('Plan Updated', `"${data.plan.name}" updated successfully in database.`, 'success', 3500);
+      }
+      if (typeof data.affectedSubscriptionsCount === 'number') {
+        affectedCount = data.affectedSubscriptionsCount;
       }
     } catch (err: any) {
       console.warn('Backend plan update error:', err);
@@ -1239,14 +1271,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    // Handle Safe Plan Updates grandfathering policy
+    // Handle Safe Plan Updates policy on client state
     if (policy === 'IMMEDIATE') {
       setSubscriptions((prev) => {
         const next = prev.map((sub) => {
-          if (sub.planId === planId && sub.status === 'ACTIVE') {
+          if ((sub.planId === planId || sub.planName === targetPlanName) && (sub.status === 'ACTIVE' || sub.status === 'TRIAL')) {
+            const newRate =
+              sub.billingPeriod === 'YEARLY'
+                ? (updates.priceYearly !== undefined ? updates.priceYearly : sub.amount)
+                : (updates.priceMonthly !== undefined ? updates.priceMonthly : sub.amount);
             return {
               ...sub,
-              amount: updates.priceMonthly !== undefined ? updates.priceMonthly : sub.amount,
+              planName: updates.name || sub.planName,
+              amount: newRate,
+              amountPaid: newRate,
+              updatedAt: now
+            };
+          }
+          return sub;
+        });
+        setStoredItem('saas_subscriptions', next);
+        return next;
+      });
+
+      if (updates.name) {
+        setShops((prev) => {
+          const next = prev.map((s) =>
+            s.planId === planId ? { ...s, planName: updates.name || s.planName } : s
+          );
+          setStoredItem('shops', next);
+          return next;
+        });
+      }
+    } else if (policy === 'AT_RENEWAL') {
+      setSubscriptions((prev) => {
+        const next = prev.map((sub) => {
+          if (sub.planId === planId && (sub.status === 'ACTIVE' || sub.status === 'TRIAL')) {
+            return {
+              ...sub,
+              planName: updates.name || sub.planName,
               updatedAt: now
             };
           }
@@ -1257,13 +1320,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
+    const policyLabel =
+      policy === 'IMMEDIATE'
+        ? `Applied immediately (${affectedCount} active subscription${affectedCount === 1 ? '' : 's'} updated)`
+        : policy === 'AT_RENEWAL'
+        ? `Scheduled for next renewal (${affectedCount} active subscription${affectedCount === 1 ? '' : 's'})`
+        : `New subscribers only (${affectedCount} existing subscription${affectedCount === 1 ? '' : 's'} grandfathered)`;
+
     addAuditLog(
       'SAAS_PLAN_UPDATED',
       'SUBSCRIPTION',
       planId,
-      `Updated plan "${targetPlanName || planId}". Policy: ${policy}. Changes: ${Object.keys(updates).join(', ')}`
+      `Updated plan "${targetPlanName || planId}". Policy: ${policyLabel}.`
     );
-    showToast('Plan Updated', `Changes applied with policy "${policy}".`, 'success', 3500);
+    showToast('Plan Updated', `"${targetPlanName || planId}" saved. ${policyLabel}.`, 'success', 4000);
   };
 
   const duplicatePlan = async (planId: string): Promise<SaasPlan | null> => {
@@ -1298,7 +1368,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         printLimitMonthly: original.printLimitMonthly,
         printerLimit: original.printerLimit,
         storageLimitMb: original.storageLimitMb,
-        staffLimit: original.staffLimit,
         maxUploadSizeMb: original.maxUploadSizeMb,
         fileRetentionHours: original.fileRetentionHours
       });
@@ -1326,13 +1395,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }).catch(() => {});
     } catch {}
 
-    setPlans((prev) => {
-      const next = prev.map((p) =>
+    setPlans((prev) =>
+      prev.map((p) =>
         p.id === planId || p.slug === planId ? { ...p, status: 'ARCHIVED' as const, isActive: false, updatedAt: now } : p
-      );
-      setStoredItem('saas_plans', next);
-      return next;
-    });
+      )
+    );
 
     const msg =
       activeSubs.length > 0
@@ -1369,11 +1436,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, message: err?.message || 'Could not contact server.' };
     }
 
-    setPlans((prev) => {
-      const next = prev.filter((p) => p.id !== effectiveId && p.slug !== targetPlan.slug);
-      setStoredItem('saas_plans', next);
-      return next;
-    });
+    setPlans((prev) => prev.filter((p) => p.id !== effectiveId && p.slug !== targetPlan.slug));
 
     addAuditLog('SAAS_PLAN_DELETED', 'SUBSCRIPTION', effectiveId, `Plan "${targetPlan.name}" deleted.`);
     showToast('Plan Deleted', `Plan "${targetPlan.name}" deleted permanently from database.`, 'success', 4000);
@@ -1391,13 +1454,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }).catch(() => {});
     } catch {}
 
-    setPlans((prev) => {
-      const next = prev.map((p) =>
+    setPlans((prev) =>
+      prev.map((p) =>
         p.id === planId || p.slug === planId ? { ...p, status, isActive, updatedAt: now } : p
-      );
-      setStoredItem('saas_plans', next);
-      return next;
-    });
+      )
+    );
     addAuditLog('SAAS_PLAN_STATUS_CHANGED', 'SUBSCRIPTION', planId, `Plan status set to ${status}`);
     showToast('Status Updated', `Plan is now ${status}.`, 'info', 2500);
   };
@@ -1789,6 +1850,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     if (!currentUser || (currentUser.role !== 'SHOP_OWNER' && currentUser.role !== 'ADMIN')) return;
+    if (currentUser.role === 'ADMIN' && shops.length === 0) return;
 
     let cancelled = false;
     const syncShopLiveData = async () => {
@@ -2768,7 +2830,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setSupportTickets((previous) => mergeShopRecords(previous, remote));
           }
           if (currentUser.role === 'ADMIN') {
-            if (Array.isArray(records.saas_plans)) setPlans(records.saas_plans as SaasPlan[]);
             if (Array.isArray(records.saas_subscriptions)) setSubscriptions(records.saas_subscriptions as Subscription[]);
             if (records.platform_policies) setPlatformPolicies(records.platform_policies as PlatformPolicies);
             if (Array.isArray(records.audit_logs)) setAuditLogs(records.audit_logs as AuditLog[]);

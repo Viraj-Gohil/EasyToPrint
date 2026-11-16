@@ -1987,35 +1987,46 @@ function formatPlanDbRow(row: any) {
 
   const priceMonthly = Number(row.priceMonthly ?? row.price_monthly ?? 0);
   const priceYearly = Number(row.priceYearly ?? row.price_yearly ?? 0);
+  const isActive = Boolean(row.isActive ?? row.is_active);
+  const sortOrder = Number(row.sortOrder ?? row.sort_order ?? 1);
+  const resolvedStatus = limits.status === 'ARCHIVED'
+    ? 'ARCHIVED'
+    : (isActive ? 'ACTIVE' : (limits.status === 'DRAFT' ? 'DRAFT' : 'DRAFT'));
 
   return {
     id: String(row.id),
     name: row.name,
-    slug: row.slug || '',
+    slug: row.slug || String(row.id),
     tagline: row.tagline || '',
-    description: row.description || '',
+    description: row.description || row.tagline || '',
     priceMonthly,
     priceYearly,
+    isFree: limits.isFree !== undefined ? Boolean(limits.isFree) : priceMonthly === 0,
+    billingInterval: limits.billingInterval || 'BOTH',
+    trialDays: limits.trialDays !== undefined ? Number(limits.trialDays) : (priceMonthly === 0 ? 0 : 14),
+    taxInclusive: limits.taxInclusive !== undefined ? Boolean(limits.taxInclusive) : true,
     currency: row.currency || 'INR',
     features,
+    featureEntitlements: limits.featureEntitlements || undefined,
+    adminNotes: limits.adminNotes || '',
     limits,
     printLimitMonthly: limits.printLimitMonthly !== undefined ? Number(limits.printLimitMonthly) : (row.printLimit ? Number(row.printLimit) : 500),
     printLimit: limits.printLimitMonthly !== undefined ? Number(limits.printLimitMonthly) : (row.printLimit ? Number(row.printLimit) : 500),
     printerLimit: limits.printerLimit !== undefined ? Number(limits.printerLimit) : (row.printerLimit ? Number(row.printerLimit) : 2),
     storageLimitMb: limits.storageLimitMb !== undefined ? Number(limits.storageLimitMb) : (row.storageLimitGb ? Number(row.storageLimitGb) * 1024 : 5120),
     storageLimitGb: limits.storageLimitMb ? Math.round(Number(limits.storageLimitMb) / 1024) : (row.storageLimitGb ? Number(row.storageLimitGb) : 5),
-    staffLimit: limits.staffLimit !== undefined ? Number(limits.staffLimit) : 2,
     maxUploadSizeMb: limits.maxUploadSizeMb !== undefined ? Number(limits.maxUploadSizeMb) : 35,
     fileRetentionHours: limits.fileRetentionHours !== undefined ? Number(limits.fileRetentionHours) : 48,
     isUnlimitedPrintJobs: Boolean(limits.isUnlimitedPrintJobs),
     isUnlimitedPrinters: Boolean(limits.isUnlimitedPrinters),
     isUnlimitedStorage: Boolean(limits.isUnlimitedStorage),
-    isActive: Boolean(row.isActive ?? row.is_active),
+    isActive,
     isPublic: row.isPublic !== undefined ? Boolean(row.isPublic) : Boolean(row.is_public ?? true),
     isPopular: Boolean(row.isPopular ?? row.is_popular),
-    sortOrder: Number(row.sortOrder ?? row.sort_order ?? 1),
-    status: (row.isActive ?? row.is_active) ? 'ACTIVE' : 'DRAFT',
-    version: 1,
+    sortOrder,
+    displayOrder: limits.displayOrder !== undefined ? Number(limits.displayOrder) : sortOrder,
+    status: resolvedStatus,
+    version: Number(limits.version || 1),
     createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : (row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString()),
     updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : (row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString())
   };
@@ -2088,7 +2099,15 @@ app.post(['/api/admin/plans', '/api/plans'], createRateLimiter(20, 60_000, { buc
       isActive = true,
       isPublic = true,
       isPopular = false,
-      sortOrder = 1
+      sortOrder = 1,
+      displayOrder,
+      status,
+      isFree,
+      billingInterval,
+      trialDays,
+      taxInclusive,
+      featureEntitlements,
+      adminNotes
     } = req.body;
 
     if (!name || typeof name !== 'string' || name.trim().length < 2) {
@@ -2125,7 +2144,22 @@ app.post(['/api/admin/plans', '/api/plans'], createRateLimiter(20, 60_000, { buc
     }
 
     const safeFeatures = Array.isArray(features) ? features : [];
-    const safeLimits = typeof limits === 'object' && limits !== null ? limits : {};
+    const baseLimits = typeof limits === 'object' && limits !== null ? { ...limits } : {};
+    delete (baseLimits as any).staffLimit;
+    const effectiveSortOrder = parseInt(String(displayOrder ?? sortOrder ?? 1), 10) || 1;
+    const effectiveStatus = status || (isActive ? 'ACTIVE' : 'DRAFT');
+    const safeLimits = {
+      ...baseLimits,
+      status: effectiveStatus,
+      displayOrder: effectiveSortOrder,
+      isFree: isFree !== undefined ? Boolean(isFree) : numMonthly === 0,
+      billingInterval: billingInterval || 'BOTH',
+      trialDays: trialDays !== undefined ? Number(trialDays) : (numMonthly === 0 ? 0 : 14),
+      taxInclusive: taxInclusive !== undefined ? Boolean(taxInclusive) : true,
+      featureEntitlements: featureEntitlements || baseLimits.featureEntitlements || undefined,
+      adminNotes: adminNotes || baseLimits.adminNotes || '',
+      version: 1
+    };
 
     const insertRes = await pool.query(
       `INSERT INTO public.plans (
@@ -2146,10 +2180,10 @@ app.post(['/api/admin/plans', '/api/plans'], createRateLimiter(20, 60_000, { buc
         currency.trim() || 'INR',
         JSON.stringify(safeFeatures),
         JSON.stringify(safeLimits),
-        Boolean(isActive),
+        effectiveStatus === 'ACTIVE' ? Boolean(isActive) : false,
         Boolean(isPublic),
         Boolean(isPopular),
-        parseInt(sortOrder, 10) || 1
+        effectiveSortOrder
       ]
     );
 
@@ -2162,7 +2196,7 @@ app.post(['/api/admin/plans', '/api/plans'], createRateLimiter(20, 60_000, { buc
   }
 });
 
-// PUT /api/admin/plans/:id: Update existing SaaS plan without altering grandfathered subscriptions
+// PUT /api/admin/plans/:id: Update existing SaaS plan and enforce Safe Plan Update Policy (NEW_ONLY, AT_RENEWAL, IMMEDIATE)
 app.put(['/api/admin/plans/:id', '/api/plans/:id'], createRateLimiter(20, 60_000, { bucketKey: 'admin-plans-write' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -2179,7 +2213,16 @@ app.put(['/api/admin/plans/:id', '/api/plans/:id'], createRateLimiter(20, 60_000
       isActive,
       isPublic,
       isPopular,
-      sortOrder
+      sortOrder,
+      displayOrder,
+      status,
+      isFree,
+      billingInterval,
+      trialDays,
+      taxInclusive,
+      featureEntitlements,
+      adminNotes,
+      updatePolicy = 'NEW_ONLY'
     } = req.body;
 
     if (!isNeonDatabaseConfigured()) {
@@ -2190,7 +2233,7 @@ app.put(['/api/admin/plans/:id', '/api/plans/:id'], createRateLimiter(20, 60_000
 
     // Check if target plan exists
     const existing = await pool.query(
-      'SELECT id, slug, name, limits FROM public.plans WHERE id::text = $1 OR slug = $1 LIMIT 1',
+      'SELECT id, slug, name, price_monthly, price_yearly, is_active, sort_order, limits FROM public.plans WHERE id::text = $1 OR slug = $1 LIMIT 1',
       [id]
     );
     if (!existing.rowCount || existing.rows.length === 0) {
@@ -2198,6 +2241,9 @@ app.put(['/api/admin/plans/:id', '/api/plans/:id'], createRateLimiter(20, 60_000
     }
 
     const currentPlan = existing.rows[0];
+    const currentLimits = typeof currentPlan.limits === 'object' && currentPlan.limits !== null
+      ? currentPlan.limits
+      : (typeof currentPlan.limits === 'string' ? JSON.parse(currentPlan.limits) : {});
 
     // Check if new slug conflicts with another plan
     if (slug && slug !== currentPlan.slug) {
@@ -2221,8 +2267,39 @@ app.put(['/api/admin/plans/:id', '/api/plans/:id'], createRateLimiter(20, 60_000
       }
     }
 
+    const effectivePolicy: 'NEW_ONLY' | 'AT_RENEWAL' | 'IMMEDIATE' =
+      updatePolicy === 'IMMEDIATE' || updatePolicy === 'AT_RENEWAL' ? updatePolicy : 'NEW_ONLY';
+
+    const incomingLimits = typeof limits === 'object' && limits !== null ? { ...limits } : {};
+    delete (incomingLimits as any).staffLimit;
+    const nextVersion = (Number(currentLimits.version) || 1) + 1;
+    const effectiveSortOrder = displayOrder !== undefined
+      ? parseInt(String(displayOrder), 10)
+      : (sortOrder !== undefined ? parseInt(String(sortOrder), 10) : Number(currentPlan.sort_order || 1));
+    const effectiveMonthly = priceMonthly !== undefined ? Number(priceMonthly) : Number(currentPlan.price_monthly || 0);
+    const effectiveYearly = priceYearly !== undefined ? Number(priceYearly) : Number(currentPlan.price_yearly || 0);
+    const effectiveStatus = status || (isActive !== undefined ? (isActive ? 'ACTIVE' : 'DRAFT') : (currentLimits.status || (currentPlan.is_active ? 'ACTIVE' : 'DRAFT')));
+    const effectiveIsActive = effectiveStatus === 'ACTIVE';
+
+    const mergedLimits = {
+      ...currentLimits,
+      ...incomingLimits,
+      status: effectiveStatus,
+      displayOrder: effectiveSortOrder,
+      isFree: isFree !== undefined ? Boolean(isFree) : effectiveMonthly === 0,
+      billingInterval: billingInterval || currentLimits.billingInterval || 'BOTH',
+      trialDays: trialDays !== undefined ? Number(trialDays) : (currentLimits.trialDays ?? (effectiveMonthly === 0 ? 0 : 14)),
+      taxInclusive: taxInclusive !== undefined ? Boolean(taxInclusive) : (currentLimits.taxInclusive ?? true),
+      featureEntitlements: featureEntitlements || incomingLimits.featureEntitlements || currentLimits.featureEntitlements || undefined,
+      adminNotes: adminNotes !== undefined ? adminNotes : (incomingLimits.adminNotes ?? currentLimits.adminNotes ?? ''),
+      version: nextVersion,
+      lastUpdatePolicy: effectivePolicy,
+      lastUpdatedAt: new Date().toISOString()
+    };
+    delete (mergedLimits as any).staffLimit;
+
     const safeFeaturesJson = features !== undefined ? JSON.stringify(Array.isArray(features) ? features : []) : null;
-    const safeLimitsJson = limits !== undefined ? JSON.stringify(typeof limits === 'object' && limits !== null ? limits : {}) : null;
+    const safeLimitsJson = JSON.stringify(mergedLimits);
 
     const updateRes = await pool.query(
       `UPDATE public.plans
@@ -2234,8 +2311,8 @@ app.put(['/api/admin/plans/:id', '/api/plans/:id'], createRateLimiter(20, 60_000
            price_yearly = COALESCE($6, price_yearly),
            currency = COALESCE($7, currency),
            features = CASE WHEN $8::jsonb IS NOT NULL THEN $8::jsonb ELSE features END,
-           limits = CASE WHEN $9::jsonb IS NOT NULL THEN $9::jsonb ELSE limits END,
-           is_active = COALESCE($10, is_active),
+           limits = $9::jsonb,
+           is_active = $10,
            is_public = COALESCE($11, is_public),
            is_popular = COALESCE($12, is_popular),
            sort_order = COALESCE($13, sort_order),
@@ -2250,34 +2327,78 @@ app.put(['/api/admin/plans/:id', '/api/plans/:id'], createRateLimiter(20, 60_000
         slug !== undefined ? slug.trim() : null,
         tagline !== undefined ? tagline.trim() : null,
         description !== undefined ? description.trim() : null,
-        priceMonthly !== undefined ? Number(priceMonthly) : null,
-        priceYearly !== undefined ? Number(priceYearly) : null,
+        priceMonthly !== undefined ? effectiveMonthly : null,
+        priceYearly !== undefined ? effectiveYearly : null,
         currency !== undefined ? currency.trim() : null,
         safeFeaturesJson,
         safeLimitsJson,
-        isActive !== undefined ? Boolean(isActive) : null,
+        effectiveIsActive,
         isPublic !== undefined ? Boolean(isPublic) : null,
         isPopular !== undefined ? Boolean(isPopular) : null,
-        sortOrder !== undefined ? parseInt(sortOrder, 10) : null,
+        effectiveSortOrder,
         currentPlan.id
       ]
     );
 
     const updated = formatPlanDbRow(updateRes.rows[0]);
-    logger.info('Admin updated SaaS plan', { planId: updated.id, slug: updated.slug });
-    return res.json({ success: true, plan: updated });
+
+    // Enforce Safe Plan Update Policy on active subscriptions in PostgreSQL
+    let affectedSubscriptionsCount = 0;
+    try {
+      if (effectivePolicy === 'IMMEDIATE') {
+        const subUpdateRes = await pool.query(
+          `UPDATE public.subscriptions
+           SET amount_paid = CASE WHEN billing_period = 'YEARLY' THEN $1 ELSE $2 END
+           WHERE (plan_id::text = $3 OR plan_id::text = $4)
+             AND status IN ('ACTIVE', 'TRIAL')
+           RETURNING id, shop_id`,
+          [effectiveYearly, effectiveMonthly, String(currentPlan.id), String(currentPlan.slug)]
+        );
+        affectedSubscriptionsCount = subUpdateRes.rowCount || 0;
+      } else {
+        const subCountRes = await pool.query(
+          `SELECT COUNT(*)::int AS cnt
+           FROM public.subscriptions
+           WHERE (plan_id::text = $1 OR plan_id::text = $2)
+             AND status IN ('ACTIVE', 'TRIAL')`,
+          [String(currentPlan.id), String(currentPlan.slug)]
+        );
+        affectedSubscriptionsCount = subCountRes.rows[0]?.cnt || 0;
+      }
+    } catch (policyErr) {
+      logger.warn('Non-fatal notice applying Safe Plan Update Policy to subscriptions', {
+        planId: updated.id,
+        policy: effectivePolicy,
+        error: deepRedact(policyErr)
+      });
+    }
+
+    logger.info('Admin updated SaaS plan with Safe Plan Update Policy', {
+      planId: updated.id,
+      slug: updated.slug,
+      policy: effectivePolicy,
+      version: updated.version,
+      affectedSubscriptionsCount
+    });
+    return res.json({
+      success: true,
+      plan: updated,
+      policyApplied: effectivePolicy,
+      affectedSubscriptionsCount
+    });
   } catch (err: any) {
     logger.error('Failed to update SaaS plan:', { error: deepRedact(err) });
     return res.status(500).json({ success: false, error: err?.message || 'Failed to update plan.' });
   }
 });
 
-// PATCH /api/admin/plans/:id/status: Activate or deactivate a plan
+// PATCH /api/admin/plans/:id/status: Activate, draft, or archive a plan
 app.patch(['/api/admin/plans/:id/status', '/api/plans/:id/status'], createRateLimiter(20, 60_000, { bucketKey: 'admin-plans-write' }), requireAdminRole, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { isActive, status } = req.body;
-    const activeVal = isActive !== undefined ? Boolean(isActive) : (status === 'ACTIVE');
+    const resolvedStatus = status === 'ARCHIVED' ? 'ARCHIVED' : status === 'DRAFT' ? 'DRAFT' : (isActive ? 'ACTIVE' : 'DRAFT');
+    const activeVal = resolvedStatus === 'ACTIVE';
 
     if (!isNeonDatabaseConfigured()) {
       return res.status(503).json({ success: false, error: 'Database is required.' });
@@ -2286,13 +2407,15 @@ app.patch(['/api/admin/plans/:id/status', '/api/plans/:id/status'], createRateLi
     const pool = requirePostgresPool();
     const updateRes = await pool.query(
       `UPDATE public.plans
-       SET is_active = $1, updated_at = NOW()
-       WHERE id::text = $2 OR slug = $2
+       SET is_active = $1,
+           limits = COALESCE(limits, '{}'::jsonb) || jsonb_build_object('status', $2::text),
+           updated_at = NOW()
+       WHERE id::text = $3 OR slug = $3
        RETURNING id, name, slug, tagline, description, price_monthly as "priceMonthly",
                  price_yearly as "priceYearly", currency, features, limits,
                  is_active as "isActive", is_public as "isPublic", is_popular as "isPopular",
                  sort_order as "sortOrder", created_at as "createdAt", updated_at as "updatedAt"`,
-      [activeVal, id]
+      [activeVal, resolvedStatus, id]
     );
 
     if (!updateRes.rowCount || updateRes.rows.length === 0) {
@@ -8296,25 +8419,9 @@ app.get('/api/public/shops', createRateLimiter(90, 60_000, { bucketKey: 'public-
         shops = await getBusinessRepository().listAllShops('ACTIVE');
       } catch (dbErr: any) {
         if (!isDatabaseNetworkError(dbErr)) {
-          logger.warn('Could not query active shops from database, using counter shop fallback', { error: deepRedact(dbErr) });
+          logger.warn('Could not query active shops from database', { error: deepRedact(dbErr) });
         }
       }
-    }
-    if (shops.length === 0) {
-      shops = [
-        {
-          id: 'a001a111-0000-0000-0000-000000000001',
-          slug: 'printflow-counter',
-          name: 'EasyToPrint Counter',
-          tagline: 'Fast & Secure Document Printing',
-          isOpen: true,
-          businessHours: '8:30 AM - 9:00 PM',
-          primaryColor: '#00B32D',
-          logoUrl: '/assets/easytoprint-logo.svg',
-          minOrderAmount: 2.0,
-          autoAccept: true
-        }
-      ];
     }
     const shopsWithStatus = await Promise.all(
       shops.map(async (s) => {
@@ -8420,22 +8527,7 @@ app.get('/api/public/shops/:slug', createRateLimiter(90, 60_000, { bucketKey: 'p
     }
 
     if (!shop) {
-      if (slug === 'printflow-counter' || slug === 'counter' || slug === 'default') {
-        shop = {
-          id: 'a001a111-0000-0000-0000-000000000001',
-          slug: 'printflow-counter',
-          name: 'EasyToPrint Counter',
-          tagline: 'Fast & Secure Document Printing',
-          isOpen: true,
-          businessHours: '8:30 AM - 9:00 PM',
-          primaryColor: '#00B32D',
-          logoUrl: '/assets/easytoprint-logo.svg',
-          minOrderAmount: 2.0,
-          autoAccept: true
-        };
-      } else {
-        return res.status(404).json({ success: false, error: 'Shop not found.' });
-      }
+      return res.status(404).json({ success: false, error: 'Shop not found.' });
     }
 
     let agentStatus = null;
@@ -8628,17 +8720,6 @@ app.post('/api/shop-access/resolve', createRateLimiter(15, 60_000, { bucketKey: 
           logger.error('Failed to query shop by code from Neon', { error: deepRedact(dbErr) });
         }
       }
-    }
-
-    // Default canonical counter shop fallback if matching default code
-    if (!shop && (rawCode === '100001' || rawCode === '482916')) {
-      shop = {
-        id: 'a001a111-0000-0000-0000-000000000001',
-        slug: 'printflow-counter',
-        name: 'PrintFlow Counter',
-        status: 'ACTIVE',
-        isOpen: true
-      };
     }
 
     // Rejection for non-existent, suspended, or closed shops

@@ -887,40 +887,6 @@ export async function initializePaymentTables(maxRetries = 3): Promise<void> {
           END IF;
         END $$;
 
-        -- Ensure canonical default counter shop exists for public touchless QR flow
-        INSERT INTO public.shops (
-          id, name, slug, shop_code, tagline, address, phone, email, status, is_open,
-          business_hours, logo_url, primary_color, min_order_amount, auto_accept,
-          file_retention_days, razorpay_enabled, razorpay_test_mode, created_at, updated_at
-        ) VALUES (
-          'a001a111-0000-0000-0000-000000000001',
-          'EasyToPrint Counter',
-          'printflow-counter',
-          '100001',
-          'Instant Counter Xerox & Smart Print Station',
-          'Central Campus Complex, Mumbai',
-          '+91 98765 43210',
-          'shop@easytoprint.io',
-          'ACTIVE',
-          true,
-          '8:30 AM - 9:00 PM',
-          '',
-          '#2563EB',
-          200,
-          true,
-          7,
-          true,
-          false,
-          NOW(),
-          NOW()
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          slug = 'printflow-counter',
-          status = 'ACTIVE',
-          is_open = true,
-          shop_code = COALESCE(public.shops.shop_code, '100001'),
-          updated_at = NOW();
-
         -- Safe backfill of shop_code for any shops lacking one
         DO $$
         DECLARE
@@ -951,12 +917,6 @@ export async function initializePaymentTables(maxRetries = 3): Promise<void> {
         END $$;
 
         CREATE INDEX IF NOT EXISTS idx_shops_shop_code ON public.shops(shop_code);
-
-        INSERT INTO public.printflow_shop_mappings (client_shop_id, neon_shop_id, updated_at)
-        VALUES 
-          ('shop_default', 'a001a111-0000-0000-0000-000000000001', NOW()),
-          ('printflow-counter', 'a001a111-0000-0000-0000-000000000001', NOW())
-        ON CONFLICT (client_shop_id) DO UPDATE SET neon_shop_id = EXCLUDED.neon_shop_id;
 
         -- Safe backfill for public.shop_members table from existing profiles and shops
         INSERT INTO public.shop_members (id, shop_id, user_id, role, created_at)
