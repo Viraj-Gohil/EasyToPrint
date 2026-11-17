@@ -1,14 +1,8 @@
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronDown,
   HelpCircle,
-  MessageCircle,
-  Phone,
-  Mail,
-  ArrowRight,
-  Sparkles,
-  Check
+  Mail
 } from 'lucide-react';
 
 export interface FaqItem {
@@ -163,22 +157,17 @@ export const FaqAccordion: React.FC = () => {
                   </div>
                 </button>
 
-                <AnimatePresence initial={false}>
-                  {isOpen && (
-                    <motion.div
-                      key={`content-${faq.id}`}
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.22, ease: 'easeOut' }}
-                      className="overflow-hidden"
-                    >
-                      <div className="px-5 sm:px-6 pb-5 sm:pb-6 pt-1 text-xs sm:text-sm text-[#646B65] leading-relaxed border-t border-[#E1E7E1]/80">
-                        <p>{faq.answer}</p>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                <div
+                  className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${
+                    isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                  }`}
+                >
+                  <div className="overflow-hidden">
+                    <div className="px-5 sm:px-6 pb-5 sm:pb-6 pt-1 text-xs sm:text-sm text-[#646B65] leading-relaxed border-t border-[#E1E7E1]/80">
+                      <p>{faq.answer}</p>
+                    </div>
+                  </div>
+                </div>
               </div>
             );
           })}

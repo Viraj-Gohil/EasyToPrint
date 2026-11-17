@@ -313,9 +313,88 @@
   .etp-sheet-feed,
   .etp-laser-beam,
   .etp-progress-sweep,
-  .etp-line-reveal {
+  .etp-line-reveal,
+  .etp-page-enter,
+  .etp-float-badge,
+  .etp-dropdown-enter,
+  .etp-modal-enter,
+  .etp-toast-enter {
     animation: none !important;
+    transition: none !important;
   }
+}
+
+@keyframes etpPageEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes etpFloatBadge {
+  0%, 100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -6px, 0);
+  }
+}
+
+@keyframes etpDropdownEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes etpModalEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes etpToastEnter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -14px, 0) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.etp-page-enter {
+  animation: etpPageEnter 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.etp-float-badge {
+  animation: etpFloatBadge 4.4s ease-in-out infinite;
+}
+
+.etp-dropdown-enter {
+  animation: etpDropdownEnter 0.16s ease-out both;
+}
+
+.etp-modal-enter {
+  animation: etpModalEnter 0.18s ease-out both;
+}
+
+.etp-toast-enter {
+  animation: etpToastEnter 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* ==========================================================================

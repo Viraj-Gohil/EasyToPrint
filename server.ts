@@ -2,17 +2,23 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import zlib from 'zlib';
 import dotenv from 'dotenv';
 import dns from 'dns';
 import Razorpay from 'razorpay';
 import cookieParser from 'cookie-parser';
 import {
   PUBLIC_SEO_ROUTES,
+  OG_IMAGE_URL,
+  STRUCTURED_DATA_FAQ_ITEMS,
   getSeoForPath,
   buildJsonLdGraph,
+  buildSitemapXml,
+  buildRobotsTxt,
   isPrivateNoIndexPath,
   normalizePathname
 } from './src/lib/seoConfig.js';
+import { BLOG_POSTS } from './src/lib/blogData.js';
 
 try {
   dns.setDefaultResultOrder('ipv4first');
@@ -211,12 +217,12 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // ============================================================================
-// 1. GLOBAL HTTP SECURITY HEADERS & DEFENSIVE POLICIES
+// 1. GLOBAL HTTP SECURITY HEADERS, COMPRESSION & DEFENSIVE POLICIES
 // ============================================================================
-app.use((_req: Request, res: Response, next: NextFunction) => {
+app.use((req: Request, res: Response, next: NextFunction) => {
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://api.razorpay.com https://*.razorpay.com https://cdnjs.cloudflare.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.razorpay.com https://easytoprint.devpixel.space; connect-src 'self' https://*.devpixel.space https://*.run.app https://api.razorpay.com https://*.razorpay.com https://lumberjack.razorpay.com https://cdnjs.cloudflare.com; frame-src 'self' https://api.razorpay.com https://*.razorpay.com https://checkout.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self';"
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://api.razorpay.com https://*.razorpay.com https://cdnjs.cloudflare.com https://www.googletagmanager.com; worker-src 'self' blob: https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.razorpay.com https://easytoprint.devpixel.space https://www.google-analytics.com; connect-src 'self' https://*.devpixel.space https://*.run.app https://api.razorpay.com https://*.razorpay.com https://lumberjack.razorpay.com https://cdnjs.cloudflare.com https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com; frame-src 'self' https://api.razorpay.com https://*.razorpay.com https://checkout.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self';"
   );
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -226,6 +232,57 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
   if (process.env.NODE_ENV === 'production') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
+
+  // Lightweight gzip compression for text/HTML/JSON/XML/SVG responses via res.send
+  const acceptEncoding = String(req.headers['accept-encoding'] || '');
+  if (acceptEncoding.includes('gzip') && !req.path.includes('/file')) {
+    const origSend = res.send.bind(res);
+    res.send = function compressedSend(body?: any): Response {
+      if (
+        res.headersSent ||
+        res.getHeader('Content-Encoding') ||
+        req.method === 'HEAD' ||
+        body == null
+      ) {
+        return origSend(body);
+      }
+
+      let buf: Buffer | null = null;
+      if (typeof body === 'string') {
+        buf = Buffer.from(body, 'utf-8');
+      } else if (Buffer.isBuffer(body)) {
+        buf = body;
+      } else if (typeof body === 'object') {
+        if (!res.getHeader('Content-Type')) {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        }
+        buf = Buffer.from(JSON.stringify(body), 'utf-8');
+      }
+
+      const contentType = String(res.getHeader('Content-Type') || '').toLowerCase();
+      const isCompressible =
+        !contentType ||
+        contentType.includes('text/') ||
+        contentType.includes('application/json') ||
+        contentType.includes('application/javascript') ||
+        contentType.includes('application/xml') ||
+        contentType.includes('image/svg+xml');
+
+      if (buf && buf.length >= 1024 && isCompressible) {
+        try {
+          const gzipped = zlib.gzipSync(buf, { level: 6 });
+          res.setHeader('Content-Encoding', 'gzip');
+          res.setHeader('Vary', 'Accept-Encoding');
+          res.removeHeader('Content-Length');
+          return res.end(gzipped) as unknown as Response;
+        } catch {
+          return origSend(body);
+        }
+      }
+      return origSend(body);
+    } as typeof res.send;
+  }
+
   next();
 });
 
@@ -9973,6 +10030,8 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
   const escapedTitle = escapeHtmlAttr(seo.title);
   const escapedDesc = escapeHtmlAttr(seo.description);
   const escapedCanonical = escapeHtmlAttr(seo.canonical);
+  const escapedOgType = escapeHtmlAttr(seo.ogType || 'website');
+  const escapedOgImage = escapeHtmlAttr(OG_IMAGE_URL);
 
   let html = rawHtml;
   html = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapedTitle}</title>`);
@@ -9982,11 +10041,15 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
   );
   html = html.replace(
     /<meta\s+name="robots"\s+content="[^"]*"\s*\/?>/i,
-    `<meta name="robots" content="${ seo.robots }" />`
+    `<meta name="robots" content="${seo.robots}" />`
   );
   html = html.replace(
     /<link\s+rel="canonical"\s+href="[^"]*"\s*\/?>/i,
     `<link rel="canonical" href="${escapedCanonical}" />`
+  );
+  html = html.replace(
+    /<meta\s+property="og:type"\s+content="[^"]*"\s*\/?>/i,
+    `<meta property="og:type" content="${escapedOgType}" />`
   );
   html = html.replace(
     /<meta\s+property="og:title"\s+content="[^"]*"\s*\/?>/i,
@@ -10001,6 +10064,10 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
     `<meta property="og:url" content="${escapedCanonical}" />`
   );
   html = html.replace(
+    /<meta\s+property="og:image"\s+content="[^"]*"\s*\/?>/i,
+    `<meta property="og:image" content="${escapedOgImage}" />`
+  );
+  html = html.replace(
     /<meta\s+name="twitter:title"\s+content="[^"]*"\s*\/?>/i,
     `<meta name="twitter:title" content="${escapedTitle}" />`
   );
@@ -10008,6 +10075,19 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
     /<meta\s+name="twitter:description"\s+content="[^"]*"\s*\/?>/i,
     `<meta name="twitter:description" content="${escapedDesc}" />`
   );
+  html = html.replace(
+    /<meta\s+name="twitter:image"\s+content="[^"]*"\s*\/?>/i,
+    `<meta name="twitter:image" content="${escapedOgImage}" />`
+  );
+
+  // Inject optional Google Search Console verification tag when provided via environment variable
+  const gscVerificationToken = (process.env.GOOGLE_SITE_VERIFICATION || process.env.VITE_GSC_VERIFICATION || '').trim();
+  if (gscVerificationToken && !/name="google-site-verification"/i.test(html)) {
+    html = html.replace(
+      '</head>',
+      `  <meta name="google-site-verification" content="${escapeHtmlAttr(gscVerificationToken)}" />\n  </head>`
+    );
+  }
 
   // Inject route-specific JSON-LD or remove on noindex pages
   if (seo.robots === 'index, follow') {
@@ -10023,62 +10103,93 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
     );
   }
 
-  // Inject route-specific H1 and summary into #root for initial HTML crawlers
+  // Inject rich route-specific semantic HTML inside #root for initial HTTP crawlers
+  const navLinksHtml = [
+    '<a href="/">Home</a>',
+    '<a href="/features">Features</a>',
+    '<a href="/how-it-works">How It Works</a>',
+    '<a href="/qr-print-ordering">QR Print Ordering</a>',
+    '<a href="/print-shop-management">Print Shop Management</a>',
+    '<a href="/print-agent">EasyToPrint Windows Agent</a>',
+    '<a href="/pricing">Pricing</a>',
+    '<a href="/blog">Xerox Guides &amp; Blog</a>',
+    '<a href="/about">About EasyToPrint</a>',
+    '<a href="/contact">Contact Us</a>',
+    '<a href="/faq">FAQ</a>'
+  ].join(' ');
+
   if (seo.h1 && seo.ssrSummary) {
-    const ssrBlock = `<main><h1>${escapeHtmlAttr(seo.h1)}</h1><p>${escapeHtmlAttr(seo.ssrSummary)}</p><nav aria-label="Primary Public Pages"><a href="/">Home</a> <a href="/features">Features</a> <a href="/qr-print-ordering">QR Print Ordering</a> <a href="/print-shop-management">Print Shop Management</a> <a href="/print-agent">EasyToPrint Windows Agent</a> <a href="/pricing">Pricing</a> <a href="/about">About EasyToPrint</a> <a href="/contact">Contact Us</a> <a href="/faq">FAQ</a></nav></main>`;
+    const bulletsHtml =
+      seo.ssrBullets && seo.ssrBullets.length > 0
+        ? `<ul>${seo.ssrBullets.map((b) => `<li>${escapeHtmlAttr(b)}</li>`).join('')}</ul>`
+        : '';
+
+    const faqHtml = seo.includeFaqSchema
+      ? `<section><h2>Frequently Asked Questions</h2>${STRUCTURED_DATA_FAQ_ITEMS.map(
+          (f) => `<article><h3>${escapeHtmlAttr(f.question)}</h3><p>${escapeHtmlAttr(f.answer)}</p></article>`
+        ).join('')}</section>`
+      : '';
+
+    const blogLinksHtml =
+      seo.path === '/blog'
+        ? `<section><h2>Guides &amp; Articles</h2><ul>${BLOG_POSTS.map(
+            (p) => `<li><a href="/blog/${escapeHtmlAttr(p.slug)}">${escapeHtmlAttr(p.title)}</a></li>`
+          ).join('')}</ul></section>`
+        : '';
+
+    const ssrBlock = `<main><h1>${escapeHtmlAttr(seo.h1)}</h1><p>${escapeHtmlAttr(seo.ssrSummary)}</p>${bulletsHtml}${blogLinksHtml}${faqHtml}<nav aria-label="Primary Public Pages">${navLinksHtml}</nav></main>`;
     html = html.replace(/<div id="root">[\s\S]*?<\/div>/i, `<div id="root">${ssrBlock}</div>`);
   } else if (seo.isNotFound) {
-    const notFoundBlock = `<main><h1>Page Not Found (404) – EasyToPrint</h1><p>The requested URL could not be found. Return to the <a href="/">EasyToPrint Homepage</a>.</p></main>`;
+    const notFoundBlock = `<main><h1>Page Not Found (404) – EasyToPrint</h1><p>The requested URL could not be found. Return to the <a href="/">EasyToPrint Homepage</a>.</p><nav aria-label="Primary Public Pages">${navLinksHtml}</nav></main>`;
     html = html.replace(/<div id="root">[\s\S]*?<\/div>/i, `<div id="root">${notFoundBlock}</div>`);
   }
 
   return { html, statusCode, robotsHeader };
 }
 
-// Explicit /robots.txt and /sitemap.xml endpoints
+// Explicit dynamic /robots.txt and /sitemap.xml endpoints (always synced with seoConfig)
 app.get('/robots.txt', (_req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=3600');
-  const robotsPath = path.resolve('public/robots.txt');
-  if (fs.existsSync(robotsPath)) {
-    return res.status(200).send(fs.readFileSync(robotsPath, 'utf-8'));
-  }
-  return res.status(200).send(
-    `User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /shop\nDisallow: /auth\nDisallow: /customer\nDisallow: /track-print\nDisallow: /s/\nDisallow: /api/\n\nSitemap: https://easytoprint.devpixel.space/sitemap.xml\n`
-  );
+  return res.status(200).send(buildRobotsTxt());
 });
 
 app.get('/sitemap.xml', (_req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/xml; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=3600');
-  const sitemapPath = path.resolve('public/sitemap.xml');
-  if (fs.existsSync(sitemapPath)) {
-    return res.status(200).send(fs.readFileSync(sitemapPath, 'utf-8'));
-  }
-  const urls = Object.values(PUBLIC_SEO_ROUTES)
-    .map(
-      (r) =>
-        `  <url>\n    <loc>${r.canonical}</loc>\n    <changefreq>weekly</changefreq>\n    <priority>${r.path === '/' ? '1.0' : '0.8'}</priority>\n  </url>`
-    )
-    .join('\n');
-  return res
-    .status(200)
-    .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`);
+  return res.status(200).send(buildSitemapXml());
 });
 
-// Canonical trailing-slash redirect & X-Robots-Tag middleware for non-API requests
+// Canonical hostname, trailing-slash redirect & X-Robots-Tag middleware for non-API requests
 app.use((req: Request, res: Response, next) => {
   if (req.path.startsWith('/api/')) {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     return next();
   }
-  if (req.method === 'GET' && req.path.length > 1 && req.path.endsWith('/')) {
-    const cleanPath = normalizePathname(req.path);
-    if (PUBLIC_SEO_ROUTES[cleanPath]) {
-      const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-      return res.redirect(301, `${cleanPath}${query}`);
-    }
+
+  const rawHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').toLowerCase().split(':')[0];
+  const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || '').toLowerCase();
+
+  // Enforce canonical https://easytoprint.devpixel.space for www or http requests on production domain
+  if (
+    req.method === 'GET' &&
+    (rawHost === 'www.easytoprint.devpixel.space' || (rawHost === 'easytoprint.devpixel.space' && rawProto === 'http'))
+  ) {
+    return res.redirect(301, `https://easytoprint.devpixel.space${req.originalUrl}`);
   }
+
+  // Redirect trailing slashes cleanly on all non-root, non-API, non-asset GET routes
+  if (
+    req.method === 'GET' &&
+    req.path.length > 1 &&
+    req.path.endsWith('/') &&
+    !req.path.startsWith('/assets/')
+  ) {
+    const cleanPath = normalizePathname(req.path);
+    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    return res.redirect(301, `${cleanPath}${query}`);
+  }
+
   if (isPrivateNoIndexPath(req.path)) {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   }
@@ -10129,13 +10240,71 @@ async function startServer() {
   const distExists = fs.existsSync(path.join(distPath, 'index.html'));
 
   if (process.env.NODE_ENV === 'production' || distExists) {
-    app.use(express.static(distPath, { index: false }));
+    const gzipStaticCache = new Map<string, Buffer>();
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.method !== 'GET') return next();
+      const acceptEncoding = String(req.headers['accept-encoding'] || '');
+      if (!acceptEncoding.includes('gzip')) return next();
+      if (!/\.(js|css|svg|xml|txt|json|webmanifest)$/i.test(req.path)) return next();
+
+      const safeRelPath = req.path.replace(/^\/+/, '');
+      const absPath = path.resolve(distPath, safeRelPath);
+      if (!absPath.startsWith(distPath + path.sep)) return next();
+
+      try {
+        if (!fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) return next();
+        let gz = gzipStaticCache.get(absPath);
+        if (!gz) {
+          const raw = fs.readFileSync(absPath);
+          if (raw.length < 1024) return next();
+          gz = zlib.gzipSync(raw, { level: 6 });
+          if (gzipStaticCache.size < 250) {
+            gzipStaticCache.set(absPath, gz);
+          }
+        }
+        const ext = path.extname(absPath).toLowerCase();
+        const mimeMap: Record<string, string> = {
+          '.js': 'application/javascript; charset=utf-8',
+          '.css': 'text/css; charset=utf-8',
+          '.svg': 'image/svg+xml; charset=utf-8',
+          '.xml': 'application/xml; charset=utf-8',
+          '.txt': 'text/plain; charset=utf-8',
+          '.json': 'application/json; charset=utf-8',
+          '.webmanifest': 'application/manifest+json; charset=utf-8'
+        };
+        res.setHeader('Content-Type', mimeMap[ext] || 'application/octet-stream');
+        res.setHeader('Content-Encoding', 'gzip');
+        res.setHeader('Vary', 'Accept-Encoding');
+        if (/^\/assets\/.*-[a-zA-Z0-9_-]{6,}\.(js|css)$/i.test(req.path)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        } else {
+          res.setHeader('Cache-Control', 'public, max-age=86400');
+        }
+        return res.status(200).end(gz);
+      } catch {
+        return next();
+      }
+    });
+    app.use(
+      express.static(distPath, {
+        index: false,
+        setHeaders: (res, filePath) => {
+          const normalized = filePath.replace(/\\/g, '/');
+          if (/\/assets\/.*-[a-zA-Z0-9_-]{6,}\.(js|css)$/i.test(normalized)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          } else if (/\.(png|jpg|jpeg|webp|svg|ico|woff2)$/i.test(normalized)) {
+            res.setHeader('Cache-Control', 'public, max-age=2592000');
+          }
+        }
+      })
+    );
     app.get('*', (req: Request, res: Response) => {
       const indexFile = path.join(distPath, 'index.html');
       const rawHtml = fs.readFileSync(indexFile, 'utf-8');
       const { html, statusCode, robotsHeader } = injectRouteSeoIntoHtml(rawHtml, req.path);
       res.setHeader('X-Robots-Tag', robotsHeader);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', statusCode === 200 ? 'public, max-age=0, must-revalidate' : 'no-store');
       res.status(statusCode).send(html);
     });
   } else {

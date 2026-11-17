@@ -178,12 +178,23 @@ export const CustomerHowItWorks: React.FC<CustomerHowItWorksProps> = ({
                   <span className="flex items-center gap-1 text-[8px] font-semibold">5G</span>
                 </div>
 
-                <img
-                  src="/assets/aistudio/IMG_20261115_161124_a8461b71.jpg"
-                  alt="Step 2: Upload Your Documents on EasyToPrint"
-                  loading="lazy"
-                  className="w-full flex-1 min-h-0 object-cover object-top select-none group-hover:scale-[1.01] transition-transform duration-300"
-                />
+                <picture className="w-full flex-1 min-h-0 flex">
+                  <source
+                    type="image/webp"
+                    srcSet="/assets/optimized/step-upload-280.webp 280w, /assets/optimized/step-upload-480.webp 480w"
+                    sizes="244px"
+                  />
+                  <img
+                    src="/assets/optimized/step-upload-480.jpg"
+                    alt="Step 2: Upload Your PDF or Image Document on EasyToPrint Mobile Portal"
+                    width={480}
+                    height={939}
+                    loading="lazy"
+                    decoding="async"
+                    fetchPriority="low"
+                    className="w-full h-full object-cover object-top select-none group-hover:scale-[1.01] transition-transform duration-300"
+                  />
+                </picture>
               </div>
             </div>
           </div>
@@ -224,12 +235,23 @@ export const CustomerHowItWorks: React.FC<CustomerHowItWorksProps> = ({
                   <span className="flex items-center gap-1 text-[8px] font-semibold">5G</span>
                 </div>
 
-                <img
-                  src="/assets/aistudio/IMG_20261115_161138_8f2e2afd.jpg"
-                  alt="Step 3: Review and Set Print Preferences on EasyToPrint"
-                  loading="lazy"
-                  className="w-full flex-1 min-h-0 object-cover object-top select-none group-hover:scale-[1.01] transition-transform duration-300"
-                />
+                <picture className="w-full flex-1 min-h-0 flex">
+                  <source
+                    type="image/webp"
+                    srcSet="/assets/optimized/step-preferences-280.webp 280w, /assets/optimized/step-preferences-480.webp 480w"
+                    sizes="244px"
+                  />
+                  <img
+                    src="/assets/optimized/step-preferences-480.jpg"
+                    alt="Step 3: Review and Set Print Preferences on EasyToPrint"
+                    width={480}
+                    height={922}
+                    loading="lazy"
+                    decoding="async"
+                    fetchPriority="low"
+                    className="w-full h-full object-cover object-top select-none group-hover:scale-[1.01] transition-transform duration-300"
+                  />
+                </picture>
               </div>
             </div>
           </div>
@@ -270,12 +292,23 @@ export const CustomerHowItWorks: React.FC<CustomerHowItWorksProps> = ({
                   <span className="flex items-center gap-1 text-[8px] font-semibold">5G</span>
                 </div>
 
-                <img
-                  src="/assets/aistudio/IMG_20261115_161226_f445e35c.jpg"
-                  alt="Step 4: Complete Payment and Print Instantly on EasyToPrint"
-                  loading="lazy"
-                  className="w-full flex-1 min-h-0 object-cover object-top select-none group-hover:scale-[1.01] transition-transform duration-300"
-                />
+                <picture className="w-full flex-1 min-h-0 flex">
+                  <source
+                    type="image/webp"
+                    srcSet="/assets/optimized/step-payment-280.webp 280w, /assets/optimized/step-payment-480.webp 480w"
+                    sizes="244px"
+                  />
+                  <img
+                    src="/assets/optimized/step-payment-480.jpg"
+                    alt="Step 4: Complete UPI Payment and Track Print Status on EasyToPrint"
+                    width={480}
+                    height={937}
+                    loading="lazy"
+                    decoding="async"
+                    fetchPriority="low"
+                    className="w-full h-full object-cover object-top select-none group-hover:scale-[1.01] transition-transform duration-300"
+                  />
+                </picture>
               </div>
             </div>
           </div>

@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 
 interface EasyToPrintLoaderProps {
   variant?: 'fullscreen' | 'card' | 'inline';
@@ -167,21 +166,12 @@ export const TopRouteLoader: React.FC<TopRouteLoaderProps> = ({ active = false, 
 
   const isVisible = active || navigating;
 
-  return (
-    <AnimatePresence>
-      {isVisible && (
-        <motion.div
-          key="top-route-loader"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-          aria-hidden="true"
-          className="fixed top-0 left-0 right-0 z-[90] h-[3px] bg-[#E8F8EC]/80 pointer-events-none overflow-hidden"
-        >
-          <div className="h-full w-1/3 rounded-r-full bg-linear-to-r from-[#008F25] via-[#00B32D] to-[#4ADE80] shadow-[0_0_8px_rgba(0,179,45,0.6)] etp-progress-sweep" />
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
+  return isVisible ? (
+    <div
+      aria-hidden="true"
+      className="fixed top-0 left-0 right-0 z-[90] h-[3px] bg-[#E8F8EC]/80 pointer-events-none overflow-hidden transition-opacity duration-150"
+    >
+      <div className="h-full w-1/3 rounded-r-full bg-linear-to-r from-[#008F25] via-[#00B32D] to-[#4ADE80] shadow-[0_0_8px_rgba(0,179,45,0.6)] etp-progress-sweep" />
+    </div>
+  ) : null;
 };

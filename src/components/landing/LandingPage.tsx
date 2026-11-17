@@ -1,19 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { useApp } from '../../lib/store';
 import { apiUrl } from '../../lib/apiConfig';
-import { FaqAccordion } from './FaqAccordion';
-import { CustomerHowItWorks } from './CustomerHowItWorks';
 import {
   Printer,
   QrCode,
   CreditCard,
   CheckCircle2,
   ArrowRight,
-  Shield,
   Smartphone,
-  ChevronDown,
-  ChevronUp,
   Zap,
   Check,
   X,
@@ -21,27 +15,20 @@ import {
   Clock,
   Laptop,
   Layers,
-  HardDrive,
-  Lock,
-  Wifi,
   SlidersHorizontal,
   RefreshCw,
-  Store,
-  Sliders,
-  DollarSign,
-  Activity,
-  ArrowUpRight,
-  Flame,
-  CheckCheck,
-  HelpCircle,
-  ShieldCheck,
-  Monitor,
-  Eye,
-  Sparkles
+  ShieldCheck
 } from 'lucide-react';
 
+const CustomerHowItWorks = lazy(() =>
+  import('./CustomerHowItWorks').then((m) => ({ default: m.CustomerHowItWorks }))
+);
+const FaqAccordion = lazy(() =>
+  import('./FaqAccordion').then((m) => ({ default: m.FaqAccordion }))
+);
+
 export const LandingPage: React.FC = () => {
-  const { navigate, plans, currentUser, activeShop, setIsQrScannerOpen } = useApp();
+  const { navigate, plans, setIsQrScannerOpen } = useApp();
 
   // Billing period toggle (Monthly / Yearly)
   const [billingPeriod, setBillingPeriod] = useState<'MONTHLY' | 'YEARLY'>('MONTHLY');
@@ -74,53 +61,53 @@ export const LandingPage: React.FC = () => {
   const displayPlans = livePlans.length > 0 ? livePlans : (plans.length > 0 ? plans : [
     {
       id: 'starter',
-      name: 'Starter Plan',
-      tagline: 'Ideal for independent Xerox & photocopy counters',
-      priceMonthly: 499,
-      priceYearly: 4990,
+      name: 'Starter',
+      tagline: '7-Day Free Trial · Ideal for independent Xerox counters',
+      priceMonthly: 399,
+      priceYearly: 3830,
       maxPrinters: 1,
       isRecommended: false,
       features: [
-        '1 Physical Printer Connection',
-        'Windows EasyToPrint Agent Included',
-        'Customer QR Self-Service',
-        'Direct UPI & Razorpay Payments',
-        'Automated Print Spooling',
-        'Standard Email Support'
+        '500 print jobs per billing period',
+        '1 registered Windows printer connection',
+        '7-Day Free Starter Trial',
+        'Customer QR Self-Service Upload',
+        'Instant UPI & Razorpay Payments',
+        'Automated Print Spooling'
       ]
     },
     {
-      id: 'pro',
-      name: 'Professional Plan',
-      tagline: 'Best for busy printing stores with dual printer setups',
-      priceMonthly: 999,
-      priceYearly: 9990,
-      maxPrinters: 3,
+      id: 'growth',
+      name: 'Growth',
+      tagline: 'Recommended for busy college & market photocopy shops',
+      priceMonthly: 699,
+      priceYearly: 6710,
+      maxPrinters: 5,
       isRecommended: true,
       features: [
-        'Up to 3 Physical Printers (B&W + Color)',
-        'Multi-Printer Smart Routing',
-        'Real-Time Job Queue Management',
-        'Driver Capability Auto-Detection',
-        'Priority Spooler Crash Recovery',
-        'Instant WhatsApp & Phone Support'
+        '2,000 print jobs per billing period',
+        'Up to 5 registered printer connections',
+        'Smart capability-based printer routing',
+        'Multiple concurrent printer queues',
+        'Detailed revenue & job analytics',
+        'Priority queue management'
       ]
     },
     {
       id: 'business',
-      name: 'Enterprise Hub',
-      tagline: 'For commercial print presses & campus cyber centers',
-      priceMonthly: 1999,
-      priceYearly: 19990,
+      name: 'Business',
+      tagline: 'Introductory Offer ₹1,199/mo (Reg. ₹1,499) · Commercial print hubs',
+      priceMonthly: 1199,
+      priceYearly: 14390,
       maxPrinters: 10,
       isRecommended: false,
       features: [
-        'Up to 10 Physical Printers',
-        'Multi-Station Windows Agents',
-        'High-Volume Parallel Spooling',
-        'Detailed Shop Analytics & Logs',
-        'Custom QR Signage & Branding',
-        'Dedicated Technical Onboarding'
+        '5,000 print jobs per billing period',
+        'Up to 10 registered printer connections',
+        'Dynamic load balancing across printers',
+        'Automated queue optimization',
+        'Printer jam & failover monitoring',
+        'Priority technical onboarding'
       ]
     }
   ]);
@@ -228,48 +215,39 @@ export const LandingPage: React.FC = () => {
                 {/* Floating Status Indicator Badges */}
                 <div className="relative mx-auto max-w-lg lg:max-w-none">
                   {/* Floating Indicator 1: Agent Connected */}
-                  <motion.div
-                    initial={{ y: -8, opacity: 0 }}
-                    animate={{ y: [0, -6, 0], opacity: 1 }}
-                    transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
-                    className="absolute -top-4 -left-3 sm:-left-6 z-20 px-3 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-[#E1E7E1] shadow-lg flex items-center gap-2 text-xs font-bold text-[#111111]"
+                  <div
+                    className="absolute -top-4 -left-3 sm:-left-6 z-20 px-3 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-[#E1E7E1] shadow-lg flex items-center gap-2 text-xs font-bold text-[#111111] etp-float-badge"
                   >
                     <span className="w-2 h-2 rounded-full bg-[#00B32D] animate-ping" />
                     <span>Agent Connected</span>
-                  </motion.div>
+                  </div>
 
                   {/* Floating Indicator 2: Payment Successful */}
-                  <motion.div
-                    initial={{ y: 8, opacity: 0 }}
-                    animate={{ y: [0, 6, 0], opacity: 1 }}
-                    transition={{ repeat: Infinity, duration: 4.5, ease: 'easeInOut', delay: 0.5 }}
-                    className="absolute top-1/4 -right-3 sm:-right-6 z-20 px-3.5 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-[#A7F3D0] shadow-lg flex items-center gap-2 text-xs font-bold text-[#008F25]"
+                  <div
+                    style={{ animationDelay: '0.5s' }}
+                    className="absolute top-1/4 -right-3 sm:-right-6 z-20 px-3.5 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-[#A7F3D0] shadow-lg flex items-center gap-2 text-xs font-bold text-[#008F25] etp-float-badge"
                   >
                     <CheckCircle2 className="w-4 h-4 text-[#00B32D]" />
                     <span>₹24.00 UPI Received</span>
-                  </motion.div>
+                  </div>
 
                   {/* Floating Indicator 3: Printer Online */}
-                  <motion.div
-                    initial={{ y: 8, opacity: 0 }}
-                    animate={{ y: [0, -5, 0], opacity: 1 }}
-                    transition={{ repeat: Infinity, duration: 5, ease: 'easeInOut', delay: 1 }}
-                    className="absolute -bottom-4 left-4 z-20 px-3 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-[#E1E7E1] shadow-lg flex items-center gap-2 text-xs font-bold text-[#111111]"
+                  <div
+                    style={{ animationDelay: '1s' }}
+                    className="absolute -bottom-4 left-4 z-20 px-3 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-[#E1E7E1] shadow-lg flex items-center gap-2 text-xs font-bold text-[#111111] etp-float-badge"
                   >
                     <Printer className="w-4 h-4 text-[#00B32D]" />
                     <span>HP LaserJet Online</span>
-                  </motion.div>
+                  </div>
 
                   {/* Floating Indicator 4: Spooling Job */}
-                  <motion.div
-                    initial={{ y: -8, opacity: 0 }}
-                    animate={{ y: [0, 5, 0], opacity: 1 }}
-                    transition={{ repeat: Infinity, duration: 4.2, ease: 'easeInOut', delay: 1.5 }}
-                    className="absolute bottom-16 -right-2 sm:-right-4 z-20 px-3 py-1.5 rounded-xl bg-[#E8F8EC] border border-[#A7F3D0] shadow-lg flex items-center gap-2 text-xs font-bold text-[#008F25]"
+                  <div
+                    style={{ animationDelay: '1.5s' }}
+                    className="absolute bottom-16 -right-2 sm:-right-4 z-20 px-3 py-1.5 rounded-xl bg-[#E8F8EC] border border-[#A7F3D0] shadow-lg flex items-center gap-2 text-xs font-bold text-[#008F25] etp-float-badge"
                   >
                     <RefreshCw className="w-3.5 h-3.5 text-[#00B32D] animate-spin" />
                     <span>Auto-Spooling (8 pgs)</span>
-                  </motion.div>
+                  </div>
 
                   {/* Main Desktop Showcase Frame */}
                   <div className="rounded-2xl border border-[#E1E7E1] bg-white shadow-xl overflow-hidden">
@@ -515,11 +493,21 @@ export const LandingPage: React.FC = () => {
               </p>
             </div>
 
-            {/* Customer Side: 4 Visual Green Cards with Mobile Screens */}
-            <CustomerHowItWorks
-              onOpenQrScanner={() => setIsQrScannerOpen(true)}
-              onFindShop={() => setIsQrScannerOpen(true)}
-            />
+            {/* Customer Side: 4 Visual Green Cards with Mobile Screens (Lazy-loaded below-the-fold) */}
+            <Suspense
+              fallback={
+                <div className="min-h-[620px] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                  {[0, 1, 2, 3].map((n) => (
+                    <div key={n} className="rounded-2xl bg-[#009E22]/15 border border-[#CBEBD0] h-[560px]" />
+                  ))}
+                </div>
+              }
+            >
+              <CustomerHowItWorks
+                onOpenQrScanner={() => setIsQrScannerOpen(true)}
+                onFindShop={() => setIsQrScannerOpen(true)}
+              />
+            </Suspense>
 
             {/* Shop Owner Side: 4 Connected Setup Step Cards */}
             <div className="mt-16 pt-14 border-t border-[#E1E7E1]">
@@ -1286,6 +1274,17 @@ export const LandingPage: React.FC = () => {
                 </p>
                 <div className="flex flex-wrap items-center gap-4 pt-1">
                   <a
+                    href="/how-it-works"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate('/how-it-works');
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
+                  >
+                    <span>How It Works</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </a>
+                  <a
                     href="/about"
                     onClick={(e) => {
                       e.preventDefault();
@@ -1308,6 +1307,17 @@ export const LandingPage: React.FC = () => {
                     <ArrowRight className="w-3.5 h-3.5" />
                   </a>
                   <a
+                    href="/blog"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate('/blog');
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
+                  >
+                    <span>Xerox Automation Blog</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </a>
+                  <a
                     href="/contact"
                     onClick={(e) => {
                       e.preventDefault();
@@ -1325,9 +1335,11 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* ========================================================================= */}
-        {/* SECTION 8: INTERACTIVE FAQ ACCORDION                                      */}
+        {/* SECTION 8: INTERACTIVE FAQ ACCORDION (Lazy-loaded below-the-fold)         */}
         {/* ========================================================================= */}
-        <FaqAccordion />
+        <Suspense fallback={<div id="faq" className="min-h-[640px] border-b border-[#E1E7E1] bg-white" />}>
+          <FaqAccordion />
+        </Suspense>
 
 
       </div>

@@ -1,6 +1,7 @@
 User-agent: *
 Allow: /
 Allow: /features
+Allow: /how-it-works
 Allow: /qr-print-ordering
 Allow: /print-shop-management
 Allow: /print-agent
@@ -8,18 +9,28 @@ Allow: /pricing
 Allow: /about
 Allow: /contact
 Allow: /faq
+Allow: /blog
+Allow: /blog/
 Allow: /assets/
 
 Disallow: /admin
 Disallow: /admin/
 Disallow: /shop
 Disallow: /shop/
+Disallow: /dashboard
+Disallow: /dashboard/
 Disallow: /auth
 Disallow: /auth/
+Disallow: /login
+Disallow: /register
+Disallow: /signup
+Disallow: /forgot-password
+Disallow: /reset-password
 Disallow: /customer
 Disallow: /customer/
 Disallow: /track-print
 Disallow: /s/
+Disallow: /print/
 Disallow: /api/
 
 Sitemap: https://easytoprint.devpixel.space/sitemap.xml

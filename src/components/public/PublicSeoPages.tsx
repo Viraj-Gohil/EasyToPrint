@@ -23,10 +23,13 @@ import {
   Cpu,
   Wifi,
   Settings,
-  Building2
+  Building2,
+  BookOpen,
+  Calendar
 } from 'lucide-react';
 import { useApp } from '../../lib/store';
 import { FaqAccordion } from '../landing/FaqAccordion';
+import { BLOG_POSTS, getBlogPostBySlug } from '../../lib/blogData';
 
 interface SpaLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
   href: string;
@@ -62,15 +65,28 @@ export const SpaLink: React.FC<SpaLinkProps> = ({ href, children, onClick, ...re
   );
 };
 
-const BreadcrumbBar: React.FC<{ currentLabel: string; currentPath: string }> = ({ currentLabel, currentPath }) => (
+const BreadcrumbBar: React.FC<{
+  currentLabel: string;
+  currentPath: string;
+  parentLabel?: string;
+  parentPath?: string;
+}> = ({ currentLabel, currentPath, parentLabel, parentPath }) => (
   <nav aria-label="Breadcrumb" className="bg-[#F7F8F7] border-b border-[#E1E7E1]">
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2 text-xs text-[#646B65]">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center gap-2 text-xs text-[#646B65] flex-wrap">
       <SpaLink href="/" className="hover:text-[#00B32D] font-medium transition-colors flex items-center gap-1">
         <Home className="w-3.5 h-3.5" />
         <span>Home</span>
       </SpaLink>
+      {parentLabel && parentPath && (
+        <>
+          <span>/</span>
+          <SpaLink href={parentPath} className="hover:text-[#00B32D] font-medium transition-colors">
+            {parentLabel}
+          </SpaLink>
+        </>
+      )}
       <span>/</span>
-      <SpaLink href={currentPath} className="text-[#111111] font-bold" aria-current="page">
+      <SpaLink href={currentPath} className="text-[#111111] font-bold truncate max-w-xs sm:max-w-md" aria-current="page">
         {currentLabel}
       </SpaLink>
     </div>
@@ -83,17 +99,29 @@ const InternalLinksFooterBlock: React.FC = () => (
       <h2 className="text-lg font-extrabold text-[#111111] mb-4">
         Explore EasyToPrint Solutions for Indian Printing Businesses
       </h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <SpaLink
+          href="/how-it-works"
+          className="p-4 rounded-2xl bg-white border border-[#E1E7E1] hover:border-[#00B32D] transition-all group block"
+        >
+          <h3 className="text-sm font-bold text-[#111111] group-hover:text-[#00B32D] flex items-center justify-between">
+            <span>How It Works</span>
+            <ArrowRight className="w-4 h-4 text-[#00B32D]" />
+          </h3>
+          <p className="text-xs text-[#646B65] mt-1">
+            Complete QR scan to automated printer dispatch workflow for counters.
+          </p>
+        </SpaLink>
         <SpaLink
           href="/qr-print-ordering"
           className="p-4 rounded-2xl bg-white border border-[#E1E7E1] hover:border-[#00B32D] transition-all group block"
         >
           <h3 className="text-sm font-bold text-[#111111] group-hover:text-[#00B32D] flex items-center justify-between">
-            <span>QR Code Print Ordering</span>
+            <span>QR Print Ordering</span>
             <ArrowRight className="w-4 h-4 text-[#00B32D]" />
           </h3>
           <p className="text-xs text-[#646B65] mt-1">
-            Touch-free smartphone PDF upload and instant print configuration for walk-in customers.
+            Touch-free smartphone PDF upload and instant print configuration for walk-ins.
           </p>
         </SpaLink>
         <SpaLink
@@ -101,11 +129,11 @@ const InternalLinksFooterBlock: React.FC = () => (
           className="p-4 rounded-2xl bg-white border border-[#E1E7E1] hover:border-[#00B32D] transition-all group block"
         >
           <h3 className="text-sm font-bold text-[#111111] group-hover:text-[#00B32D] flex items-center justify-between">
-            <span>Print Shop Management</span>
+            <span>Shop Management</span>
             <ArrowRight className="w-4 h-4 text-[#00B32D]" />
           </h3>
           <p className="text-xs text-[#646B65] mt-1">
-            Centralized cloud dashboard for Xerox billing, pricing rules, and order queue control.
+            Cloud dashboard for Xerox billing, pricing rules, and order queue control.
           </p>
         </SpaLink>
         <SpaLink
@@ -113,23 +141,23 @@ const InternalLinksFooterBlock: React.FC = () => (
           className="p-4 rounded-2xl bg-white border border-[#E1E7E1] hover:border-[#00B32D] transition-all group block"
         >
           <h3 className="text-sm font-bold text-[#111111] group-hover:text-[#00B32D] flex items-center justify-between">
-            <span>Windows Print Agent</span>
+            <span>Windows Agent</span>
             <ArrowRight className="w-4 h-4 text-[#00B32D]" />
           </h3>
           <p className="text-xs text-[#646B65] mt-1">
-            Automated Win32 print spooling, multi-printer routing, and real-time hardware status.
+            Automated Win32 print spooling, multi-printer routing, and hardware status.
           </p>
         </SpaLink>
         <SpaLink
-          href="/pricing"
+          href="/blog"
           className="p-4 rounded-2xl bg-white border border-[#E1E7E1] hover:border-[#00B32D] transition-all group block"
         >
           <h3 className="text-sm font-bold text-[#111111] group-hover:text-[#00B32D] flex items-center justify-between">
-            <span>Pricing &amp; Plans</span>
+            <span>Xerox Guides &amp; Blog</span>
             <ArrowRight className="w-4 h-4 text-[#00B32D]" />
           </h3>
           <p className="text-xs text-[#646B65] mt-1">
-            Affordable monthly and annual plans for single-counter Xerox shops and commercial centres.
+            Step-by-step playbooks on print shop automation and UPI counter workflows.
           </p>
         </SpaLink>
       </div>
@@ -750,7 +778,276 @@ export const FaqSeoPage: React.FC = () => {
 };
 
 // ============================================================================
-// 8. CUSTOM 404 NOT FOUND PAGE
+// 8. /how-it-works – END-TO-END WORKFLOW GUIDE
+// ============================================================================
+export const HowItWorksSeoPage: React.FC = () => {
+  return (
+    <div className="bg-white text-[#111111] font-['Manrope',sans-serif]">
+      <BreadcrumbBar currentLabel="How It Works" currentPath="/how-it-works" />
+
+      <section className="py-14 sm:py-20 border-b border-[#E1E7E1] bg-linear-to-b from-[#F7F8F7] to-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
+          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#E8F8EC] border border-[#A7F3D0] text-[#008F25] text-xs font-bold">
+            End-to-End Online Printing Automation
+          </span>
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-[#111111] max-w-4xl leading-tight">
+            How EasyToPrint Automates Customer Orders and Shop Printing
+          </h1>
+          <p className="text-base sm:text-lg text-[#646B65] max-w-3xl leading-relaxed">
+            From the moment a student or walk-in customer scans your counter QR code to the second your Windows printer spits out crisp copies, every step runs cleanly without WhatsApp chats or pen drives.
+          </p>
+          <div className="pt-2 flex flex-wrap gap-3">
+            <SpaLink
+              href="/auth/register"
+              className="px-6 py-3 rounded-xl bg-[#00B32D] hover:bg-[#008F25] text-white text-sm font-bold shadow-md shadow-emerald-500/20 transition-all inline-flex items-center gap-2"
+            >
+              <span>Create Free Shop Account</span>
+              <ArrowRight className="w-4 h-4" />
+            </SpaLink>
+            <SpaLink
+              href="/pricing"
+              className="px-6 py-3 rounded-xl bg-white border border-[#E1E7E1] hover:border-[#00B32D] text-[#111111] text-sm font-bold transition-all"
+            >
+              Compare Plans
+            </SpaLink>
+          </div>
+        </div>
+      </section>
+
+      <section className="py-16 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-14">
+        <div className="space-y-6">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-[#111111]">
+            Part 1: Customer Self-Service Workflow (Zero App Needed)
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+            {[
+              {
+                step: '01',
+                title: 'Scan Shop Counter QR',
+                desc: 'Customer points their smartphone camera at your counter standee QR code or enters your 6-digit shop code.'
+              },
+              {
+                step: '02',
+                title: 'Upload PDF or Image',
+                desc: 'Customer selects PDF, JPG, or PNG documents from mobile storage. Page count is automatically inspected in seconds.'
+              },
+              {
+                step: '03',
+                title: 'Select Print Options & Pay',
+                desc: 'Customer chooses B&W or Color, single or double-sided, paper size, and copies, then pays instantly via UPI or card.'
+              },
+              {
+                step: '04',
+                title: 'Track Status & Collect',
+                desc: 'Customer receives a live order tracking screen (Queued → Printing → Completed) and collects prints at the counter.'
+              }
+            ].map((item) => (
+              <div key={item.step} className="p-6 rounded-2xl bg-[#F7F8F7] border border-[#E1E7E1] space-y-3">
+                <span className="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-[#00B32D] text-white text-xs font-extrabold">
+                  {item.step}
+                </span>
+                <h3 className="text-base font-bold text-[#111111]">{item.title}</h3>
+                <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-6 pt-4 border-t border-[#E1E7E1]">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-[#111111]">
+            Part 2: Shop Owner &amp; Windows Print Agent Pipeline
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="p-6 rounded-2xl border border-[#E1E7E1] bg-white space-y-2">
+              <Zap className="w-6 h-6 text-[#00B32D]" />
+              <h3 className="text-base font-bold text-[#111111]">Payment-Verified Dispatch</h3>
+              <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">
+                Unpaid uploads never trigger physical prints. Only after Razorpay confirms payment via webhook or signature check does the job enter the active queue.
+              </p>
+            </div>
+            <div className="p-6 rounded-2xl border border-[#E1E7E1] bg-white space-y-2">
+              <Monitor className="w-6 h-6 text-[#00B32D]" />
+              <h3 className="text-base font-bold text-[#111111]">Automatic Win32 Spooling</h3>
+              <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">
+                The EasyToPrint Windows Agent pulls paid jobs securely and dispatches them straight to the matching USB or LAN printer without manual print dialogs.
+              </p>
+            </div>
+            <div className="p-6 rounded-2xl border border-[#E1E7E1] bg-white space-y-2">
+              <Shield className="w-6 h-6 text-[#00B32D]" />
+              <h3 className="text-base font-bold text-[#111111]">Auto-Purge Document Privacy</h3>
+              <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">
+                Customer documents stay encrypted in transit and are automatically cleaned up according to your shop retention policy after printing finishes.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <InternalLinksFooterBlock />
+    </div>
+  );
+};
+
+// ============================================================================
+// 9. /blog – EDUCATIONAL GUIDES INDEX
+// ============================================================================
+export const BlogIndexSeoPage: React.FC = () => {
+  return (
+    <div className="bg-white text-[#111111] font-['Manrope',sans-serif]">
+      <BreadcrumbBar currentLabel="Blog & Guides" currentPath="/blog" />
+
+      <section className="py-14 sm:py-18 border-b border-[#E1E7E1] bg-linear-to-b from-[#F7F8F7] to-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
+          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#E8F8EC] border border-[#A7F3D0] text-[#008F25] text-xs font-bold">
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>EasyToPrint Knowledge Hub</span>
+          </span>
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-[#111111] max-w-4xl leading-tight">
+            EasyToPrint Guides for Indian Xerox &amp; Print Shop Owners
+          </h1>
+          <p className="text-base sm:text-lg text-[#646B65] max-w-3xl leading-relaxed">
+            Practical, no-fluff playbooks on replacing WhatsApp Web queues, accepting online UPI print orders, and automating multi-printer counters on Windows.
+          </p>
+        </div>
+      </section>
+
+      <section className="py-14 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {BLOG_POSTS.map((post) => (
+            <article
+              key={post.slug}
+              className="p-6 sm:p-7 rounded-3xl border border-[#E1E7E1] bg-white hover:border-[#00B32D] transition-all flex flex-col justify-between space-y-5 shadow-2xs"
+            >
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  <span className="px-2.5 py-0.5 rounded-full bg-[#E8F8EC] text-[#008F25] font-bold">
+                    {post.category}
+                  </span>
+                  <span className="text-[#646B65] flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5" />
+                    {post.readTime}
+                  </span>
+                  <span className="text-[#646B65] flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5" />
+                    {post.updatedAt}
+                  </span>
+                </div>
+                <h2 className="text-xl font-extrabold text-[#111111] leading-snug">
+                  <SpaLink href={`/blog/${post.slug}`} className="hover:text-[#00B32D] transition-colors">
+                    {post.title}
+                  </SpaLink>
+                </h2>
+                <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">{post.excerpt}</p>
+              </div>
+              <div>
+                <SpaLink
+                  href={`/blog/${post.slug}`}
+                  className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#008F25] hover:text-[#00B32D]"
+                >
+                  <span>Read Full Guide</span>
+                  <ArrowRight className="w-4 h-4" />
+                </SpaLink>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <InternalLinksFooterBlock />
+    </div>
+  );
+};
+
+// ============================================================================
+// 10. /blog/:slug – INDIVIDUAL GUIDE ARTICLE PAGE
+// ============================================================================
+export const BlogPostSeoPage: React.FC<{ slug: string }> = ({ slug }) => {
+  const post = getBlogPostBySlug(slug);
+
+  if (!post) {
+    return <NotFoundPage />;
+  }
+
+  return (
+    <div className="bg-white text-[#111111] font-['Manrope',sans-serif]">
+      <BreadcrumbBar
+        currentLabel={post.title}
+        currentPath={`/blog/${post.slug}`}
+        parentLabel="Blog"
+        parentPath="/blog"
+      />
+
+      <article className="py-12 sm:py-16">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+          <header className="space-y-4 pb-6 border-b border-[#E1E7E1]">
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <span className="px-3 py-1 rounded-full bg-[#E8F8EC] border border-[#A7F3D0] text-[#008F25] font-bold">
+                {post.category}
+              </span>
+              <span className="text-[#646B65] flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5" />
+                {post.readTime}
+              </span>
+              <span className="text-[#646B65]">Updated {post.updatedAt}</span>
+            </div>
+
+            <h1 className="text-2xl sm:text-4xl font-extrabold text-[#111111] leading-tight">
+              {post.title}
+            </h1>
+
+            <p className="text-base text-[#646B65] leading-relaxed">{post.excerpt}</p>
+          </header>
+
+          <div className="space-y-8">
+            {post.sections.map((section, idx) => (
+              <section key={idx} className="space-y-3">
+                <h2 className="text-xl sm:text-2xl font-extrabold text-[#111111]">
+                  {section.heading}
+                </h2>
+                {section.paragraphs.map((para, pIdx) => (
+                  <p key={pIdx} className="text-sm sm:text-base text-[#646B65] leading-relaxed">
+                    {para}
+                  </p>
+                ))}
+                {section.bullets && section.bullets.length > 0 && (
+                  <ul className="space-y-2 pt-1">
+                    {section.bullets.map((bullet, bIdx) => (
+                      <li key={bIdx} className="flex items-start gap-2.5 text-sm text-[#111111]">
+                        <Check className="w-4 h-4 text-[#00B32D] shrink-0 mt-1" />
+                        <span>{bullet}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            ))}
+          </div>
+
+          <aside className="p-6 rounded-2xl bg-[#F7F8F7] border border-[#E1E7E1] space-y-4">
+            <h2 className="text-base font-extrabold text-[#111111]">Related EasyToPrint Resources</h2>
+            <div className="flex flex-wrap gap-3">
+              {post.relatedLinks.map((link) => (
+                <SpaLink
+                  key={link.href}
+                  href={link.href}
+                  className="px-4 py-2 rounded-xl bg-white border border-[#E1E7E1] hover:border-[#00B32D] text-xs font-bold text-[#008F25] inline-flex items-center gap-1.5"
+                >
+                  <span>{link.label}</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </SpaLink>
+              ))}
+            </div>
+          </aside>
+        </div>
+      </article>
+
+      <InternalLinksFooterBlock />
+    </div>
+  );
+};
+
+// ============================================================================
+// 11. CUSTOM 404 NOT FOUND PAGE
 // ============================================================================
 export const NotFoundPage: React.FC = () => {
   return (

@@ -110,12 +110,13 @@ export const loadRazorpayScript = (): Promise<boolean> => {
     // Check if script tag is already in head/body
     const existingScript = document.querySelector('script[src*="checkout.razorpay.com"]');
     if (existingScript) {
-      existingScript.addEventListener('load', () => resolve(true));
-      existingScript.addEventListener('error', () => resolve(false));
       if (window.Razorpay) {
         resolve(true);
         return;
       }
+      existingScript.addEventListener('load', () => resolve(true), { once: true });
+      existingScript.addEventListener('error', () => resolve(false), { once: true });
+      return;
     }
 
     const script = document.createElement('script');

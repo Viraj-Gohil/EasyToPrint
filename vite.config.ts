@@ -15,6 +15,19 @@ export default defineConfig(() => {
     },
     build: {
       sourcemap: false,
+      rolldownOptions: {
+        output: {
+          manualChunks(id) {
+            if (
+              id.includes('/node_modules/react/') ||
+              id.includes('/node_modules/react-dom/') ||
+              id.includes('/node_modules/scheduler/')
+            ) {
+              return 'react-vendor';
+            }
+          },
+        },
+      },
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

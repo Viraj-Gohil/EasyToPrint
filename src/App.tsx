@@ -1,77 +1,154 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence, Variants } from 'framer-motion';
+import React, { Suspense, lazy } from 'react';
 import { AppProvider, useApp } from './lib/store';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { LandingPage } from './components/landing/LandingPage';
-import { CustomerPrintFlow } from './components/customer/CustomerPrintFlow';
-import { TrackPrintPage } from './components/customer/TrackPrintPage';
-import { AuthPages } from './components/auth/AuthPages';
-import { AdminLogin } from './components/admin/AdminLogin';
-import { PricingPage } from './components/pricing/PricingPage';
 import { ToastContainer } from './components/common/ToastContainer';
-import { QrScannerModal } from './components/common/QrScannerModal';
 import { SEOHead } from './components/common/SEOHead';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { EasyToPrintLoader, TopRouteLoader } from './components/common/EasyToPrintLoader';
-import {
-  FeaturesSeoPage,
-  QrOrderingSeoPage,
-  PrintShopManagementSeoPage,
-  PrintAgentSeoPage,
-  AboutSeoPage,
-  ContactSeoPage,
-  FaqSeoPage,
-  NotFoundPage
-} from './components/public/PublicSeoPages';
 import { normalizePathname } from './lib/seoConfig';
 import { ADMIN_BASE_PATH, ADMIN_LOGIN_PATH, ADMIN_DASHBOARD_PATH, isAdminRoutePath } from './lib/adminConfig';
 import { ShieldAlert, Shield, LogOut, LayoutDashboard, AlertCircle } from 'lucide-react';
 
-// Shop Owner Components & Layout
-import { ShopLayout } from './components/shop/ShopLayout';
-import { ShopDashboard } from './components/shop/ShopDashboard';
-import { ShopPrintJobs } from './components/shop/ShopPrintJobs';
-import { ShopPrinters } from './components/shop/ShopPrinters';
-import { ShopQrCodes } from './components/shop/ShopQrCodes';
-import { ShopPricing } from './components/shop/ShopPricing';
-import { ShopPayments } from './components/shop/ShopPayments';
-import { ShopSubscription } from './components/shop/ShopSubscription';
-import { ShopAnalytics } from './components/shop/ShopAnalytics';
-import { ShopPrintAgent } from './components/shop/ShopPrintAgent';
-import { ShopSettings } from './components/shop/ShopSettings';
+// Lazy-loaded heavy routes to keep public landing page JS bundle lean for fast LCP & INP
+const QrScannerModal = lazy(() =>
+  import('./components/common/QrScannerModal').then((m) => ({ default: m.QrScannerModal }))
+);
+const CustomerPrintFlow = lazy(() =>
+  import('./components/customer/CustomerPrintFlow').then((m) => ({ default: m.CustomerPrintFlow }))
+);
+const TrackPrintPage = lazy(() =>
+  import('./components/customer/TrackPrintPage').then((m) => ({ default: m.TrackPrintPage }))
+);
+const AuthPages = lazy(() =>
+  import('./components/auth/AuthPages').then((m) => ({ default: m.AuthPages }))
+);
+const AdminLogin = lazy(() =>
+  import('./components/admin/AdminLogin').then((m) => ({ default: m.AdminLogin }))
+);
+const PricingPage = lazy(() =>
+  import('./components/pricing/PricingPage').then((m) => ({ default: m.PricingPage }))
+);
+const FeaturesSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.FeaturesSeoPage }))
+);
+const HowItWorksSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.HowItWorksSeoPage }))
+);
+const QrOrderingSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.QrOrderingSeoPage }))
+);
+const PrintShopManagementSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.PrintShopManagementSeoPage }))
+);
+const PrintAgentSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.PrintAgentSeoPage }))
+);
+const AboutSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.AboutSeoPage }))
+);
+const ContactSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.ContactSeoPage }))
+);
+const FaqSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.FaqSeoPage }))
+);
+const BlogIndexSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.BlogIndexSeoPage }))
+);
+const BlogPostSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.BlogPostSeoPage }))
+);
+const NotFoundPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.NotFoundPage }))
+);
 
-// Platform Admin Components & Layout
-import { AdminLayout } from './components/admin/AdminLayout';
-import { AdminDashboard } from './components/admin/AdminDashboard';
-import { AdminAnalytics } from './components/admin/AdminAnalytics';
-import { AdminShops } from './components/admin/AdminShops';
-import { AdminUsers } from './components/admin/AdminUsers';
-import { AdminPrinters } from './components/admin/AdminPrinters';
-import { AdminStorage } from './components/admin/AdminStorage';
-import { AdminSubscriptions } from './components/admin/AdminSubscriptions';
-import { AdminShopSubscriptions } from './components/admin/AdminShopSubscriptions';
-import { AdminPayments } from './components/admin/AdminPayments';
-import { AdminAuditLogs } from './components/admin/AdminAuditLogs';
-import { AdminSystemHealth } from './components/admin/AdminSystemHealth';
-import { AdminPlatformSettings } from './components/admin/AdminPlatformSettings';
-import { AdminSupport } from './components/admin/AdminSupport';
-import { AdminAgents } from './components/admin/AdminAgents';
-import { AdminPrintJobs } from './components/admin/AdminPrintJobs';
+// Shop Owner Components & Layout (Lazy-loaded)
+const ShopLayout = lazy(() =>
+  import('./components/shop/ShopLayout').then((m) => ({ default: m.ShopLayout }))
+);
+const ShopDashboard = lazy(() =>
+  import('./components/shop/ShopDashboard').then((m) => ({ default: m.ShopDashboard }))
+);
+const ShopPrintJobs = lazy(() =>
+  import('./components/shop/ShopPrintJobs').then((m) => ({ default: m.ShopPrintJobs }))
+);
+const ShopPrinters = lazy(() =>
+  import('./components/shop/ShopPrinters').then((m) => ({ default: m.ShopPrinters }))
+);
+const ShopQrCodes = lazy(() =>
+  import('./components/shop/ShopQrCodes').then((m) => ({ default: m.ShopQrCodes }))
+);
+const ShopPricing = lazy(() =>
+  import('./components/shop/ShopPricing').then((m) => ({ default: m.ShopPricing }))
+);
+const ShopPayments = lazy(() =>
+  import('./components/shop/ShopPayments').then((m) => ({ default: m.ShopPayments }))
+);
+const ShopSubscription = lazy(() =>
+  import('./components/shop/ShopSubscription').then((m) => ({ default: m.ShopSubscription }))
+);
+const ShopAnalytics = lazy(() =>
+  import('./components/shop/ShopAnalytics').then((m) => ({ default: m.ShopAnalytics }))
+);
+const ShopPrintAgent = lazy(() =>
+  import('./components/shop/ShopPrintAgent').then((m) => ({ default: m.ShopPrintAgent }))
+);
+const ShopSettings = lazy(() =>
+  import('./components/shop/ShopSettings').then((m) => ({ default: m.ShopSettings }))
+);
 
-const pageTransitionVariants: Variants = {
-  initial: { opacity: 0, y: 10 },
-  animate: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.22, ease: 'easeOut' as const }
-  },
-  exit: {
-    opacity: 0,
-    y: -8,
-    transition: { duration: 0.15, ease: 'easeIn' as const }
-  }
-};
+// Platform Admin Components & Layout (Lazy-loaded)
+const AdminLayout = lazy(() =>
+  import('./components/admin/AdminLayout').then((m) => ({ default: m.AdminLayout }))
+);
+const AdminDashboard = lazy(() =>
+  import('./components/admin/AdminDashboard').then((m) => ({ default: m.AdminDashboard }))
+);
+const AdminAnalytics = lazy(() =>
+  import('./components/admin/AdminAnalytics').then((m) => ({ default: m.AdminAnalytics }))
+);
+const AdminShops = lazy(() =>
+  import('./components/admin/AdminShops').then((m) => ({ default: m.AdminShops }))
+);
+const AdminUsers = lazy(() =>
+  import('./components/admin/AdminUsers').then((m) => ({ default: m.AdminUsers }))
+);
+const AdminPrinters = lazy(() =>
+  import('./components/admin/AdminPrinters').then((m) => ({ default: m.AdminPrinters }))
+);
+const AdminStorage = lazy(() =>
+  import('./components/admin/AdminStorage').then((m) => ({ default: m.AdminStorage }))
+);
+const AdminSubscriptions = lazy(() =>
+  import('./components/admin/AdminSubscriptions').then((m) => ({ default: m.AdminSubscriptions }))
+);
+const AdminShopSubscriptions = lazy(() =>
+  import('./components/admin/AdminShopSubscriptions').then((m) => ({ default: m.AdminShopSubscriptions }))
+);
+const AdminPayments = lazy(() =>
+  import('./components/admin/AdminPayments').then((m) => ({ default: m.AdminPayments }))
+);
+const AdminAuditLogs = lazy(() =>
+  import('./components/admin/AdminAuditLogs').then((m) => ({ default: m.AdminAuditLogs }))
+);
+const AdminSystemHealth = lazy(() =>
+  import('./components/admin/AdminSystemHealth').then((m) => ({ default: m.AdminSystemHealth }))
+);
+const AdminPlatformSettings = lazy(() =>
+  import('./components/admin/AdminPlatformSettings').then((m) => ({ default: m.AdminPlatformSettings }))
+);
+const AdminSupport = lazy(() =>
+  import('./components/admin/AdminSupport').then((m) => ({ default: m.AdminSupport }))
+);
+const AdminAgents = lazy(() =>
+  import('./components/admin/AdminAgents').then((m) => ({ default: m.AdminAgents }))
+);
+const AdminPrintJobs = lazy(() =>
+  import('./components/admin/AdminPrintJobs').then((m) => ({ default: m.AdminPrintJobs }))
+);
+
 
 function resolveShopTab(cleanPath: string): string | null {
   const rawSub = cleanPath.replace(/^\/shop\/?/, '').split('/')[0].toLowerCase();
@@ -214,18 +291,9 @@ const AppRouter: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#F7F8F7] flex flex-col">
         <Navbar />
-        <AnimatePresence mode="wait">
-          <motion.main
-            key="admin-login-page"
-            variants={pageTransitionVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="flex-1"
-          >
-            <AdminLogin />
-          </motion.main>
-        </AnimatePresence>
+        <main key="admin-login-page" className="flex-1 etp-page-enter">
+          <AdminLogin />
+        </main>
       </div>
     );
   }
@@ -245,18 +313,9 @@ const AppRouter: React.FC = () => {
       activeShop.slug;
     return (
       <div className="min-h-screen bg-[#f8fafc] flex flex-col">
-        <AnimatePresence mode="wait">
-          <motion.main
-            key={`customer-flow-${slug}`}
-            variants={pageTransitionVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="flex-1"
-          >
-            <CustomerPrintFlow shopSlug={slug} />
-          </motion.main>
-        </AnimatePresence>
+        <main key={`customer-flow-${slug}`} className="flex-1 etp-page-enter">
+          <CustomerPrintFlow shopSlug={slug} />
+        </main>
       </div>
     );
   }
@@ -265,18 +324,9 @@ const AppRouter: React.FC = () => {
   if (path === '/track-print' || path.startsWith('/track-print')) {
     return (
       <div className="min-h-screen bg-[#F6F6F6] flex flex-col w-full overflow-x-hidden">
-        <AnimatePresence mode="wait">
-          <motion.main
-            key="track-print-page"
-            variants={pageTransitionVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="flex-1 w-full"
-          >
-            <TrackPrintPage />
-          </motion.main>
-        </AnimatePresence>
+        <main key="track-print-page" className="flex-1 w-full etp-page-enter">
+          <TrackPrintPage />
+        </main>
       </div>
     );
   }
@@ -285,30 +335,26 @@ const AppRouter: React.FC = () => {
   const publicPageMap: Record<string, React.ReactNode> = {
     '/pricing': <PricingPage />,
     '/features': <FeaturesSeoPage />,
+    '/how-it-works': <HowItWorksSeoPage />,
     '/qr-print-ordering': <QrOrderingSeoPage />,
     '/print-shop-management': <PrintShopManagementSeoPage />,
     '/print-agent': <PrintAgentSeoPage />,
     '/about': <AboutSeoPage />,
     '/contact': <ContactSeoPage />,
-    '/faq': <FaqSeoPage />
+    '/faq': <FaqSeoPage />,
+    '/blog': <BlogIndexSeoPage />
   };
 
-  if (publicPageMap[path]) {
+  const blogPostMatch = path.startsWith('/blog/') ? path.slice('/blog/'.length) : null;
+  const resolvedPublicPage = publicPageMap[path] || (blogPostMatch ? <BlogPostSeoPage slug={blogPostMatch} /> : null);
+
+  if (resolvedPublicPage) {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex flex-col">
         <Navbar />
-        <AnimatePresence mode="wait">
-          <motion.main
-            key={`public-seo-${path}`}
-            variants={pageTransitionVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="flex-1"
-          >
-            {publicPageMap[path]}
-          </motion.main>
-        </AnimatePresence>
+        <main key={`public-seo-${path}`} className="flex-1 etp-page-enter">
+          {resolvedPublicPage}
+        </main>
         <Footer />
       </div>
     );
@@ -318,18 +364,9 @@ const AppRouter: React.FC = () => {
   if (path.startsWith('/customer')) {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex flex-col">
-        <AnimatePresence mode="wait">
-          <motion.main
-            key="customer-flow-redirect"
-            variants={pageTransitionVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="flex-1"
-          >
-            <CustomerPrintFlow shopSlug={activeShop.slug} />
-          </motion.main>
-        </AnimatePresence>
+        <main key="customer-flow-redirect" className="flex-1 etp-page-enter">
+          <CustomerPrintFlow shopSlug={activeShop.slug} />
+        </main>
       </div>
     );
   }
@@ -351,18 +388,12 @@ const AppRouter: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex flex-col">
         <Navbar />
-        <AnimatePresence mode="wait">
-          <motion.main
-            key={`auth-${isRegister ? 'register' : isForgot ? 'forgot' : 'login'}`}
-            variants={pageTransitionVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="flex-1"
-          >
-            <AuthPages initialView={isRegister ? 'register' : isForgot ? 'forgot' : 'login'} />
-          </motion.main>
-        </AnimatePresence>
+        <main
+          key={`auth-${isRegister ? 'register' : isForgot ? 'forgot' : 'login'}`}
+          className="flex-1 etp-page-enter"
+        >
+          <AuthPages initialView={isRegister ? 'register' : isForgot ? 'forgot' : 'login'} />
+        </main>
       </div>
     );
   }
@@ -459,18 +490,9 @@ const AppRouter: React.FC = () => {
       return (
         <div className="min-h-screen bg-[#f8fafc] flex flex-col">
           <Navbar />
-          <AnimatePresence mode="wait">
-            <motion.main
-              key="auth-required-shop"
-              variants={pageTransitionVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="flex-1"
-            >
-              <AuthPages initialView="login" />
-            </motion.main>
-          </AnimatePresence>
+          <main key="auth-required-shop" className="flex-1 etp-page-enter">
+            <AuthPages initialView="login" />
+          </main>
         </div>
       );
     }
@@ -580,18 +602,9 @@ const AppRouter: React.FC = () => {
       return (
         <div className="min-h-screen bg-[#F7F8F7] flex flex-col">
           <Navbar />
-          <AnimatePresence mode="wait">
-            <motion.main
-              key="auth-required-admin"
-              variants={pageTransitionVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="flex-1"
-            >
-              <AdminLogin />
-            </motion.main>
-          </AnimatePresence>
+          <main key="auth-required-admin" className="flex-1 etp-page-enter">
+            <AdminLogin />
+          </main>
         </div>
       );
     }
@@ -653,18 +666,9 @@ const AppRouter: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex flex-col">
         <Navbar />
-        <AnimatePresence mode="wait">
-          <motion.main
-            key="landing-page"
-            variants={pageTransitionVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="flex-1"
-          >
-            <LandingPage />
-          </motion.main>
-        </AnimatePresence>
+        <main key="landing-page" className="flex-1 etp-page-enter">
+          <LandingPage />
+        </main>
         <Footer />
       </div>
     );
@@ -674,18 +678,9 @@ const AppRouter: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col">
       <Navbar />
-      <AnimatePresence mode="wait">
-        <motion.main
-          key="not-found-page"
-          variants={pageTransitionVariants}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          className="flex-1"
-        >
-          <NotFoundPage />
-        </motion.main>
-      </AnimatePresence>
+      <main key="not-found-page" className="flex-1 etp-page-enter">
+        <NotFoundPage />
+      </main>
       <Footer />
     </div>
   );
@@ -693,14 +688,6 @@ const AppRouter: React.FC = () => {
 
 const AppContent: React.FC = () => {
   const { currentPath, currentUser, isQrScannerOpen, setIsQrScannerOpen, isLoadingData, navigate } = useApp();
-  const [showBootLoader, setShowBootLoader] = useState(true);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setShowBootLoader(false);
-    }, 3000);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   const fallbackDashboardPath =
     currentUser?.role === 'ADMIN'
@@ -717,32 +704,19 @@ const AppContent: React.FC = () => {
     >
       <SEOHead currentPath={currentPath} />
       <TopRouteLoader active={isLoadingData} routeKey={currentPath} />
-      <AnimatePresence>
-        {showBootLoader && (
-          <motion.div
-            key="app-boot-loader"
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="fixed inset-0 z-[100]"
-          >
-            <EasyToPrintLoader
-              variant="fullscreen"
-              title="EasyToPrint"
-              subtitle="Smart print automation, ready in a moment..."
-            />
-          </motion.div>
+      <Suspense fallback={<TopRouteLoader active routeKey={currentPath} />}>
+        <AppRouter />
+        {isQrScannerOpen && (
+          <QrScannerModal
+            isOpen={isQrScannerOpen}
+            onClose={() => setIsQrScannerOpen(false)}
+            onSuccess={(shopSlug: string) => {
+              setIsQrScannerOpen(false);
+              navigate(`/s/${shopSlug}`);
+            }}
+          />
         )}
-      </AnimatePresence>
-      <AppRouter />
-      <QrScannerModal
-        isOpen={isQrScannerOpen}
-        onClose={() => setIsQrScannerOpen(false)}
-        onSuccess={(shopSlug: string) => {
-          setIsQrScannerOpen(false);
-          navigate(`/s/${shopSlug}`);
-        }}
-      />
+      </Suspense>
       <ToastContainer />
     </ErrorBoundary>
   );
