@@ -38,11 +38,39 @@ export interface SignedUrlResult {
   expiresAt: Date;
 }
 
+export interface StorageListEntry {
+  name: string;
+  id: string | null;
+  isFolder: boolean;
+  sizeBytes: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface BucketListResult {
+  bucketExists: boolean;
+  entries: StorageListEntry[];
+}
+
+export interface BucketRemoveResult {
+  deletedPaths: string[];
+  alreadyMissingPaths: string[];
+  failedItems: Array<{ objectPath: string; reason: string }>;
+}
+
 export interface StorageProvider {
   upload(input: StorageUploadInput): Promise<StorageUploadResult>;
   download(objectPath: string): Promise<Buffer>;
   createSignedUrl(objectPath: string, expiresInSeconds?: number): Promise<SignedUrlResult>;
+  verifyObjectExists(objectPath: string): Promise<boolean>;
   delete(objectPaths: string[]): Promise<void>;
+  listDirectoryInBucket?(
+    bucket: string,
+    prefix: string,
+    options?: { limit?: number; offset?: number }
+  ): Promise<BucketListResult>;
+  removeFromBucket?(bucket: string, objectPaths: string[]): Promise<BucketRemoveResult>;
+  getPrimaryBucket?(): string;
   isConfigured(): boolean;
 }
 
@@ -102,6 +130,10 @@ export class SupabaseStorageService implements StorageProvider {
 
   isConfigured(): boolean {
     return this.client !== null;
+  }
+
+  getPrimaryBucket(): string {
+    return this.bucket;
   }
 
   private requireClient(): SupabaseClient {
@@ -173,23 +205,146 @@ export class SupabaseStorageService implements StorageProvider {
 
   async createSignedUrl(objectPath: string, expiresInSeconds = DEFAULT_SIGNED_URL_TTL_SECONDS): Promise<SignedUrlResult> {
     const client = this.requireClient();
-    const { data, error } = await client.storage.from(this.bucket).createSignedUrl(objectPath, expiresInSeconds);
+    let res = await client.storage.from(this.bucket).createSignedUrl(objectPath, expiresInSeconds);
 
-    if (error || !data?.signedUrl) {
-      throw new Error(`Failed to generate signed URL for ${objectPath}: ${error?.message || 'Unknown error'}`);
+    if ((res.error || !res.data?.signedUrl) && this.bucket !== 'user-files') {
+      const fallbackRes = await client.storage.from('user-files').createSignedUrl(objectPath, expiresInSeconds);
+      if (!fallbackRes.error && fallbackRes.data?.signedUrl) {
+        res = fallbackRes;
+      }
+    }
+
+    if (res.error || !res.data?.signedUrl) {
+      throw new Error(`Failed to generate signed URL for ${objectPath}: ${res.error?.message || 'Unknown error'}`);
     }
 
     const expiresAt = new Date(Date.now() + expiresInSeconds * 1000);
     return {
-      signedUrl: data.signedUrl,
+      signedUrl: res.data.signedUrl,
       expiresAt
     };
+  }
+
+  async verifyObjectExists(objectPath: string): Promise<boolean> {
+    if (!this.client) return false;
+    try {
+      const signed = await this.createSignedUrl(objectPath, 60);
+      return Boolean(signed.signedUrl);
+    } catch {
+      return false;
+    }
+  }
+
+  async listDirectoryInBucket(
+    bucket: string,
+    prefix: string,
+    options?: { limit?: number; offset?: number }
+  ): Promise<BucketListResult> {
+    const client = this.requireClient();
+    const limit = Math.max(1, Math.min(1000, options?.limit ?? 100));
+    const offset = Math.max(0, options?.offset ?? 0);
+    const cleanPrefix = prefix.replace(/^\/+|\/+$/g, '');
+
+    const { data, error } = await client.storage.from(bucket).list(cleanPrefix, {
+      limit,
+      offset,
+      sortBy: { column: 'name', order: 'asc' }
+    });
+
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      if (msg.includes('bucket not found') || msg.includes('not found')) {
+        return { bucketExists: false, entries: [] };
+      }
+      throw new Error(`Supabase Storage list failed for bucket '${bucket}' prefix '${cleanPrefix}': ${error.message}`);
+    }
+
+    const entries: StorageListEntry[] = (data || []).map((item: any) => {
+      const hasFileMetadata = item.id !== null && item.id !== undefined;
+      const metaSize =
+        item.metadata && typeof item.metadata.size === 'number'
+          ? item.metadata.size
+          : item.metadata && typeof item.metadata.contentLength === 'number'
+            ? item.metadata.contentLength
+            : 0;
+      return {
+        name: String(item.name || ''),
+        id: item.id ? String(item.id) : null,
+        isFolder: !hasFileMetadata,
+        sizeBytes: Number.isFinite(metaSize) ? metaSize : 0,
+        createdAt: item.created_at || null,
+        updatedAt: item.updated_at || null
+      };
+    });
+
+    return { bucketExists: true, entries };
+  }
+
+  async removeFromBucket(bucket: string, objectPaths: string[]): Promise<BucketRemoveResult> {
+    const deletedPaths: string[] = [];
+    const alreadyMissingPaths: string[] = [];
+    const failedItems: Array<{ objectPath: string; reason: string }> = [];
+
+    if (objectPaths.length === 0) {
+      return { deletedPaths, alreadyMissingPaths, failedItems };
+    }
+
+    const client = this.requireClient();
+    const { data, error } = await client.storage.from(bucket).remove(objectPaths);
+
+    if (!error) {
+      const returnedNames = new Set((data || []).map((item: any) => String(item?.name || '')));
+      for (const objectPath of objectPaths) {
+        if (returnedNames.size === 0 || returnedNames.has(objectPath)) {
+          deletedPaths.push(objectPath);
+        } else {
+          // Object was already absent from bucket when batch remove ran
+          alreadyMissingPaths.push(objectPath);
+        }
+      }
+      return { deletedPaths, alreadyMissingPaths, failedItems };
+    }
+
+    // Batch failed — isolate per-object errors so valid deletions still succeed and failures are never marked deleted
+    for (const objectPath of objectPaths) {
+      try {
+        const singleRes = await client.storage.from(bucket).remove([objectPath]);
+        if (!singleRes.error) {
+          if ((singleRes.data || []).length > 0) {
+            deletedPaths.push(objectPath);
+          } else {
+            alreadyMissingPaths.push(objectPath);
+          }
+        } else {
+          const msg = singleRes.error.message || 'Unknown Supabase Storage remove error';
+          if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('404')) {
+            alreadyMissingPaths.push(objectPath);
+          } else {
+            failedItems.push({ objectPath, reason: msg });
+          }
+        }
+      } catch (err: any) {
+        failedItems.push({
+          objectPath,
+          reason: err?.message || 'Unexpected error during object removal'
+        });
+      }
+    }
+
+    return { deletedPaths, alreadyMissingPaths, failedItems };
   }
 
   async delete(objectPaths: string[]): Promise<void> {
     if (objectPaths.length === 0) return;
     const client = this.requireClient();
     const { error } = await client.storage.from(this.bucket).remove(objectPaths);
+    if (error && this.bucket !== 'user-files') {
+      const fallback = await client.storage.from('user-files').remove(objectPaths);
+      if (fallback.error) {
+        throw new Error(`Failed to delete storage objects: ${error.message}`);
+      }
+      return;
+    }
     if (error) {
       throw new Error(`Failed to delete storage objects: ${error.message}`);
     }
@@ -197,28 +352,62 @@ export class SupabaseStorageService implements StorageProvider {
 }
 
 /**
- * In-memory Mock Storage Service for unit testing and offline development
+ * In-memory Mock Storage Service for unit testing and offline development.
+ * Supports multi-bucket recursive folder listing, pagination, and fault injection.
  */
 export class MockStorageService implements StorageProvider {
-  private readonly storage = new Map<string, { buffer: Buffer; contentType: string }>();
+  private readonly buckets = new Map<
+    string,
+    Map<string, { buffer: Buffer; contentType: string; createdAt: string; updatedAt: string }>
+  >();
+  private readonly simulatedFailurePaths = new Map<string, string>();
   public readonly bucket: string;
 
   constructor(bucket = 'mock-print-documents') {
     this.bucket = bucket;
+    this.buckets.set(bucket, new Map());
   }
 
   isConfigured(): boolean {
     return true;
   }
 
+  getPrimaryBucket(): string {
+    return this.bucket;
+  }
+
+  private getBucketMap(bucketName: string, createIfMissing = false) {
+    let map = this.buckets.get(bucketName);
+    if (!map && createIfMissing) {
+      map = new Map();
+      this.buckets.set(bucketName, map);
+    }
+    return map;
+  }
+
+  createTestBucket(bucketName: string): void {
+    this.getBucketMap(bucketName, true);
+  }
+
+  putRawObject(bucketName: string, objectPath: string, buffer: Buffer, contentType = 'application/octet-stream'): void {
+    const map = this.getBucketMap(bucketName, true)!;
+    const nowIso = new Date().toISOString();
+    const normalized = objectPath.replace(/^\/+/, '');
+    map.set(normalized, { buffer, contentType, createdAt: nowIso, updatedAt: nowIso });
+  }
+
+  simulateDeleteFailure(objectPath: string, reason = 'Simulated storage I/O error'): void {
+    this.simulatedFailurePaths.set(objectPath.replace(/^\/+/, ''), reason);
+  }
+
+  clearSimulatedDeleteFailures(): void {
+    this.simulatedFailurePaths.clear();
+  }
+
   async upload(input: StorageUploadInput): Promise<StorageUploadResult> {
     const objectPath = buildObjectPath(input.shopId, input.jobId, input.fileId, input.extension);
     const sha256 = crypto.createHash('sha256').update(input.buffer).digest('hex');
-
-    this.storage.set(objectPath, {
-      buffer: input.buffer,
-      contentType: input.contentType
-    });
+    this.putRawObject(this.bucket, objectPath, input.buffer, input.contentType);
 
     return {
       bucket: this.bucket,
@@ -229,7 +418,7 @@ export class MockStorageService implements StorageProvider {
   }
 
   async download(objectPath: string): Promise<Buffer> {
-    const entry = this.storage.get(objectPath);
+    const entry = this.getBucketMap(this.bucket)?.get(objectPath);
     if (!entry) {
       throw new Error(`MockStorage: Object not found at ${objectPath}`);
     }
@@ -237,7 +426,7 @@ export class MockStorageService implements StorageProvider {
   }
 
   async createSignedUrl(objectPath: string, expiresInSeconds = DEFAULT_SIGNED_URL_TTL_SECONDS): Promise<SignedUrlResult> {
-    if (!this.storage.has(objectPath)) {
+    if (!this.getBucketMap(this.bucket)?.has(objectPath)) {
       throw new Error(`MockStorage: Object not found at ${objectPath}`);
     }
     const token = crypto.randomBytes(16).toString('hex');
@@ -248,18 +437,106 @@ export class MockStorageService implements StorageProvider {
     };
   }
 
+  async verifyObjectExists(objectPath: string): Promise<boolean> {
+    return Boolean(this.getBucketMap(this.bucket)?.has(objectPath));
+  }
+
+  async listDirectoryInBucket(
+    bucket: string,
+    prefix: string,
+    options?: { limit?: number; offset?: number }
+  ): Promise<BucketListResult> {
+    const map = this.buckets.get(bucket);
+    if (!map) {
+      return { bucketExists: false, entries: [] };
+    }
+
+    const cleanPrefix = prefix.replace(/^\/+|\/+$/g, '');
+    const prefixSlash = cleanPrefix ? `${cleanPrefix}/` : '';
+    const folders = new Set<string>();
+    const files: StorageListEntry[] = [];
+
+    for (const [fullPath, meta] of map.entries()) {
+      if (prefixSlash && !fullPath.startsWith(prefixSlash)) continue;
+      const remainder = prefixSlash ? fullPath.slice(prefixSlash.length) : fullPath;
+      if (!remainder) continue;
+      const slashIdx = remainder.indexOf('/');
+      if (slashIdx >= 0) {
+        folders.add(remainder.slice(0, slashIdx));
+      } else {
+        files.push({
+          name: remainder,
+          id: `mock_${crypto.createHash('sha1').update(`${bucket}/${fullPath}`).digest('hex').slice(0, 12)}`,
+          isFolder: false,
+          sizeBytes: meta.buffer.length,
+          createdAt: meta.createdAt,
+          updatedAt: meta.updatedAt
+        });
+      }
+    }
+
+    const folderEntries: StorageListEntry[] = Array.from(folders)
+      .sort()
+      .map((name) => ({
+        name,
+        id: null,
+        isFolder: true,
+        sizeBytes: 0,
+        createdAt: null,
+        updatedAt: null
+      }));
+
+    files.sort((a, b) => a.name.localeCompare(b.name));
+    const allEntries = [...folderEntries, ...files];
+    const limit = Math.max(1, options?.limit ?? 100);
+    const offset = Math.max(0, options?.offset ?? 0);
+    return {
+      bucketExists: true,
+      entries: allEntries.slice(offset, offset + limit)
+    };
+  }
+
+  async removeFromBucket(bucket: string, objectPaths: string[]): Promise<BucketRemoveResult> {
+    const map = this.buckets.get(bucket);
+    const deletedPaths: string[] = [];
+    const alreadyMissingPaths: string[] = [];
+    const failedItems: Array<{ objectPath: string; reason: string }> = [];
+
+    for (const rawPath of objectPaths) {
+      const normalized = rawPath.replace(/^\/+/, '');
+      const failReason = this.simulatedFailurePaths.get(normalized);
+      if (failReason) {
+        failedItems.push({ objectPath: normalized, reason: failReason });
+        continue;
+      }
+      if (!map || !map.has(normalized)) {
+        alreadyMissingPaths.push(normalized);
+        continue;
+      }
+      map.delete(normalized);
+      deletedPaths.push(normalized);
+    }
+
+    return { deletedPaths, alreadyMissingPaths, failedItems };
+  }
+
   async delete(objectPaths: string[]): Promise<void> {
+    const map = this.getBucketMap(this.bucket);
+    if (!map) return;
     for (const p of objectPaths) {
-      this.storage.delete(p);
+      map.delete(p);
     }
   }
 
-  has(objectPath: string): boolean {
-    return this.storage.has(objectPath);
+  has(objectPath: string, bucketName = this.bucket): boolean {
+    return Boolean(this.buckets.get(bucketName)?.has(objectPath.replace(/^\/+/, '')));
   }
 
   clear(): void {
-    this.storage.clear();
+    for (const map of this.buckets.values()) {
+      map.clear();
+    }
+    this.simulatedFailurePaths.clear();
   }
 }
 

@@ -45,6 +45,8 @@ export interface PaymentOrderRecord {
   reconciliationNeeded: boolean;
   reconciliationAttempts: number;
   lastReconciledAt: Date | null;
+  checkoutSessionId?: string | null;
+  stagedJobId?: string | null;
   metadata: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
@@ -87,6 +89,8 @@ export interface CreatePaymentOrderInput {
   currency?: string;
   amountMinor: number;
   idempotencyKey?: string;
+  checkoutSessionId?: string;
+  stagedJobId?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -125,7 +129,7 @@ export class DurablePaymentRepository {
     ensureMinor('amountMinor', input.amountMinor);
 
     if (input.purpose === 'PRINT_JOB') {
-      if (!input.jobId && !input.metadata?.allowPendingJob) {
+      if (!input.jobId && !input.stagedJobId && !input.metadata?.allowPendingJob) {
         throw new Error('jobId is required for PRINT_JOB payment orders.');
       }
       if (input.jobId) ensureUuid('jobId', input.jobId);
@@ -200,6 +204,8 @@ export class DurablePaymentRepository {
         reconciliation_needed: boolean;
         reconciliation_attempts: number;
         last_reconciled_at: Date | null;
+        checkout_session_id?: string | null;
+        staged_job_id?: string | null;
         metadata: Record<string, unknown>;
         created_at: Date;
         updated_at: Date;
@@ -210,6 +216,8 @@ export class DurablePaymentRepository {
                 COALESCE(reconciliation_needed, false) AS reconciliation_needed,
                 COALESCE(reconciliation_attempts, 0) AS reconciliation_attempts,
                 last_reconciled_at,
+                checkout_session_id,
+                staged_job_id,
                 COALESCE(metadata, '{}'::jsonb) AS metadata,
                 created_at, updated_at
          FROM public.payment_orders
@@ -236,6 +244,8 @@ export class DurablePaymentRepository {
           reconciliationNeeded: row.reconciliation_needed,
           reconciliationAttempts: row.reconciliation_attempts,
           lastReconciledAt: row.last_reconciled_at,
+          checkoutSessionId: row.checkout_session_id ?? null,
+          stagedJobId: row.staged_job_id ?? null,
           metadata: row.metadata,
           createdAt: row.created_at,
           updatedAt: row.updated_at
@@ -258,18 +268,21 @@ export class DurablePaymentRepository {
         reconciliation_needed: boolean;
         reconciliation_attempts: number;
         last_reconciled_at: Date | null;
+        checkout_session_id?: string | null;
+        staged_job_id?: string | null;
         metadata: Record<string, unknown>;
         created_at: Date;
         updated_at: Date;
       }>(
         `INSERT INTO public.payment_orders
            (job_id, shop_id, purpose, provider, provider_order_id, provider_account_ref,
-            currency, amount_minor, status, idempotency_key, metadata)
-         VALUES ($1, $2, $3, 'RAZORPAY', $4, $5, $6, $7, 'CREATED', $8, $9::jsonb)
+            currency, amount_minor, status, idempotency_key, checkout_session_id, staged_job_id, metadata)
+         VALUES ($1, $2, $3, 'RAZORPAY', $4, $5, $6, $7, 'CREATED', $8, $9, $10, $11::jsonb)
          RETURNING id::text, job_id::text, shop_id::text, purpose, provider,
                    provider_order_id, provider_account_ref, currency, amount_minor,
                    status, idempotency_key::text,
                    reconciliation_needed, reconciliation_attempts, last_reconciled_at,
+                   checkout_session_id, staged_job_id,
                    metadata, created_at, updated_at`,
         [
           input.jobId || null,
@@ -280,6 +293,8 @@ export class DurablePaymentRepository {
           currency,
           input.amountMinor,
           idempotencyKey,
+          input.checkoutSessionId || null,
+          input.stagedJobId || null,
           JSON.stringify(input.metadata || {})
         ]
       );
@@ -301,6 +316,8 @@ export class DurablePaymentRepository {
         reconciliationNeeded: row.reconciliation_needed,
         reconciliationAttempts: row.reconciliation_attempts,
         lastReconciledAt: row.last_reconciled_at,
+        checkoutSessionId: row.checkout_session_id ?? input.checkoutSessionId ?? null,
+        stagedJobId: row.staged_job_id ?? input.stagedJobId ?? null,
         metadata: row.metadata,
         createdAt: row.created_at,
         updatedAt: row.updated_at
@@ -338,6 +355,8 @@ export class DurablePaymentRepository {
         reconciliation_needed: boolean;
         reconciliation_attempts: number;
         last_reconciled_at: Date | null;
+        checkout_session_id?: string | null;
+        staged_job_id?: string | null;
         metadata: Record<string, unknown>;
         created_at: Date;
         updated_at: Date;
@@ -348,6 +367,8 @@ export class DurablePaymentRepository {
                 COALESCE(reconciliation_needed, false) AS reconciliation_needed,
                 COALESCE(reconciliation_attempts, 0) AS reconciliation_attempts,
                 last_reconciled_at,
+                checkout_session_id,
+                staged_job_id,
                 COALESCE(metadata, '{}'::jsonb) AS metadata,
                 created_at, updated_at
          FROM public.payment_orders
@@ -373,10 +394,94 @@ export class DurablePaymentRepository {
         reconciliationNeeded: row.reconciliation_needed,
         reconciliationAttempts: row.reconciliation_attempts,
         lastReconciledAt: row.last_reconciled_at,
+        checkoutSessionId: row.checkout_session_id ?? null,
+        stagedJobId: row.staged_job_id ?? null,
         metadata: row.metadata,
         createdAt: row.created_at,
         updatedAt: row.updated_at
       };
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Finds an existing unpaid (CREATED) payment order scoped strictly to an active checkoutSessionId & shopId.
+   * Used only to reuse an active unpaid Razorpay order within the same checkout session if amount matches.
+   * Never returns PAID, FAILED, EXPIRED, or CANCELLED orders.
+   */
+  async getUnpaidOrderByCheckoutSession(
+    checkoutSessionId: string,
+    shopId: string
+  ): Promise<PaymentOrderRecord | null> {
+    if (!checkoutSessionId || !shopId) return null;
+    const client = await this.database.connect();
+    try {
+      const result = await client.query<{
+        id: string;
+        job_id: string | null;
+        shop_id: string;
+        purpose: PaymentOrderPurpose;
+        provider: 'RAZORPAY';
+        provider_order_id: string;
+        provider_account_ref: string;
+        currency: string;
+        amount_minor: string;
+        status: PaymentOrderStatus;
+        idempotency_key: string;
+        reconciliation_needed: boolean;
+        reconciliation_attempts: number;
+        last_reconciled_at: Date | null;
+        checkout_session_id?: string | null;
+        staged_job_id?: string | null;
+        metadata: Record<string, unknown>;
+        created_at: Date;
+        updated_at: Date;
+      }>(
+        `SELECT id::text, job_id::text, shop_id::text, purpose, provider,
+                provider_order_id, provider_account_ref, currency, amount_minor,
+                status, idempotency_key::text,
+                COALESCE(reconciliation_needed, false) AS reconciliation_needed,
+                COALESCE(reconciliation_attempts, 0) AS reconciliation_attempts,
+                last_reconciled_at,
+                checkout_session_id,
+                staged_job_id,
+                COALESCE(metadata, '{}'::jsonb) AS metadata,
+                created_at, updated_at
+         FROM public.payment_orders
+         WHERE checkout_session_id = $1
+           AND shop_id::text = $2
+           AND status = 'CREATED'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [checkoutSessionId, shopId]
+      );
+
+      if (result.rowCount === 0) return null;
+      const row = result.rows[0];
+      return {
+        id: row.id,
+        jobId: row.job_id,
+        shopId: row.shop_id,
+        purpose: row.purpose,
+        provider: row.provider,
+        providerOrderId: row.provider_order_id,
+        providerAccountRef: row.provider_account_ref,
+        currency: row.currency,
+        amountMinor: parseInt(row.amount_minor, 10),
+        status: row.status,
+        idempotencyKey: row.idempotency_key,
+        reconciliationNeeded: row.reconciliation_needed,
+        reconciliationAttempts: row.reconciliation_attempts,
+        lastReconciledAt: row.last_reconciled_at,
+        checkoutSessionId: row.checkout_session_id ?? null,
+        stagedJobId: row.staged_job_id ?? null,
+        metadata: row.metadata,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      };
+    } catch {
+      return null;
     } finally {
       client.release();
     }

@@ -81,6 +81,12 @@ import {
   isNeonDatabaseConfigured,
   insertPrintAgentJob,
   stagePrintAgentJob,
+  getStagedPrintJobByCheckoutSession,
+  linkRazorpayOrderToStagedJob,
+  upsertStagedCheckoutFile,
+  getStagedCheckoutFilesByIds,
+  markStagedCheckoutFilesLinked,
+  calculateAuthoritativeCustomerPrintTotal,
   activateStagedPrintAgentJob,
   findRecentOrderForRecovery,
   getPrintAgentJob,
@@ -138,6 +144,12 @@ import {
 import type { FilePrintConfig } from './src/db/guestCheckoutRepository';
 import { inspectDocument } from './src/lib/documentInspector';
 import { getStorageProvider, buildObjectPath } from './src/lib/storage/supabaseStorage';
+import {
+  executeMidnightStorageCleanup,
+  registerMidnightStorageCleanupCron,
+  getMidnightCleanupCronStatus,
+  listRecentCleanupRuns
+} from './src/lib/storage/midnightCleanupJob';
 import { subscriptionRepository, CANONICAL_PLANS } from './src/db/subscriptionRepository';
 import type { PaymentOrderRecord } from './src/db/durablePaymentRepository';
 
@@ -508,7 +520,7 @@ app.use('/api', createRateLimiter(300, 60_000, {
   bucketKey: 'api-global',
   skip: (req) => {
     const p = normalizeRateLimitPath(req.path);
-    return p === '/health' || p === '/payment/webhook' || p === '/payments/webhook' || p === '/webhooks/razorpay';
+    return p === '/health' || p === '/payment/webhook';
   }
 }));
 app.use('/api/admin', createRateLimiter(120, 60_000, { bucketKey: 'admin-api-general' }));
@@ -521,71 +533,22 @@ setInterval(() => {
   }
 }, 300_000);
 
-/**
- * Computes milliseconds until the next 12:00 AM midnight India Standard Time (Asia/Kolkata).
- * IST is UTC+5:30.
- */
-function getMsUntilNextMidnightIST(): number {
-  const now = new Date();
-  const istOffsetMs = (5 * 60 + 30) * 60 * 1000;
-  const nowIst = new Date(now.getTime() + istOffsetMs);
-  
-  const nextMidnightIst = new Date(Date.UTC(
-    nowIst.getUTCFullYear(),
-    nowIst.getUTCMonth(),
-    nowIst.getUTCDate() + 1,
-    0, 0, 0, 0
-  ));
-
-  const targetEpochMs = nextMidnightIst.getTime() - istOffsetMs;
-  return Math.max(1000, targetEpochMs - now.getTime());
-}
-
-async function runMidnightIstStorageCleanupJob() {
-  logger.info('Executing scheduled midnight IST (Asia/Kolkata) storage cleanup job...');
-  try {
-    const storageProvider = getStorageProvider();
-    if (!storageProvider.isConfigured()) {
-      logger.info('Supabase Storage provider not configured; skipping storage cleanup.');
-    } else if (isNeonDatabaseConfigured() && isSharedPoolConfigured()) {
-      const pool = requireSharedPool();
-      const res = await pool.query(
-        `SELECT id, object_path FROM public.uploaded_files
-         WHERE upload_state != 'DELETED' AND (retention_expires_at <= NOW() OR created_at < NOW() - INTERVAL '24 hours')
-         LIMIT 500`
-      );
-      const expiredFiles = res.rows;
-      if (expiredFiles.length > 0) {
-        const objectPaths = expiredFiles.map((f: any) => f.object_path);
-        try {
-          await storageProvider.delete(objectPaths);
-        } catch (delErr) {
-          logger.warn('Failed to delete some storage objects from Supabase bucket during cron cleanup:', { error: deepRedact(delErr) });
-        }
-
-        const fileIds = expiredFiles.map((f: any) => f.id);
-        await pool.query(
-          `UPDATE public.uploaded_files
-           SET upload_state = 'DELETED'
-           WHERE id = ANY($1::uuid[])`,
-          [fileIds]
-        );
-        logger.info(`Successfully deleted ${expiredFiles.length} expired customer print files from Supabase Storage bucket at midnight IST.`);
-      } else {
-        logger.info('No expired customer print files found for midnight IST cleanup.');
-      }
-    }
-  } catch (err) {
-    logger.error('Error during scheduled midnight IST storage cleanup:', { error: deepRedact(err) });
+// Register the SINGLE daily midnight IST (0 0 * * * Asia/Kolkata / 18:30 UTC previous day)
+// Supabase Storage auto-cleanup cron job (singleton — never registers duplicates).
+function resolveCleanupDatabasePool() {
+  if (isSharedPoolConfigured()) {
+    return requireSharedPool();
   }
-
-  // Schedule next midnight IST execution
-  const nextDelay = getMsUntilNextMidnightIST();
-  setTimeout(runMidnightIstStorageCleanupJob, nextDelay);
+  if (isNeonDatabaseConfigured()) {
+    return requirePostgresPool();
+  }
+  return null;
 }
 
-// Initialize midnight IST cleanup scheduler on server boot
-setTimeout(runMidnightIstStorageCleanupJob, getMsUntilNextMidnightIST());
+registerMidnightStorageCleanupCron({
+  getPool: resolveCleanupDatabasePool,
+  getStorage: getStorageProvider
+});
 
 // ============================================================================
 // 3. CSRF & ORIGIN INTEGRITY VERIFICATION
@@ -597,11 +560,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     return next();
   }
 
-  // Exempt webhook endpoints, M2M agent endpoints, and stateless customer payment/recovery endpoints
+  // Exempt webhook endpoint, M2M agent/cron endpoints, and stateless customer payment/recovery endpoints
   if (
     req.path === '/api/payment/webhook' ||
-    req.path === '/api/payments/webhook' ||
-    req.path === '/api/webhooks/razorpay' ||
+    req.path === '/api/internal/cron/midnight-storage-cleanup' ||
     req.path === '/api/create-order' ||
     req.path === '/api/verify-payment' ||
     req.path.startsWith('/api/payment/') ||
@@ -3503,7 +3465,6 @@ app.use(async (req: Request, res: Response, next: NextFunction) => {
   if (
     path.startsWith('/api/health') ||
     path.startsWith('/api/payment/webhook') ||
-    path.startsWith('/api/webhooks/razorpay') ||
     path.startsWith('/api/auth/session') ||
     path.startsWith('/api/admin/') ||
     path === ADMIN_API_LOGIN_PATH ||
@@ -3571,7 +3532,7 @@ app.get('/api/payment/platform-config', createRateLimiter(60, 60_000, { bucketKe
       hasSecret: Boolean(RAZORPAY_KEY_SECRET),
       lastUpdatedAt: new Date().toISOString(),
       endpoints: {
-        subscriptions: 'https://easytoprint.devpixel.space/api/webhooks/razorpay',
+        subscriptions: 'https://easytoprint.devpixel.space/api/payment/webhook',
         orders: 'https://easytoprint.devpixel.space/api/payment/webhook'
       }
     });
@@ -3918,75 +3879,9 @@ app.put('/api/shop/:shopId/retention', createRateLimiter(20, 60_000, { bucketKey
   }
 });
 
-let isRetentionCleanupRunning = false;
-
-async function runAutomaticDocumentRetentionCleanup() {
-  if (isRetentionCleanupRunning) return;
-  isRetentionCleanupRunning = true;
-  try {
-    const storageProvider = getStorageProvider();
-    if (!storageProvider.isConfigured() || !isNeonDatabaseConfigured()) {
-      return;
-    }
-    const pool = requirePostgresPool();
-    const shopsRes = await pool.query(
-      `SELECT id::text, retention_hours FROM public.shops WHERE auto_delete_enabled = true`
-    );
-    const shops = shopsRes.rows;
-    for (const shop of shops) {
-      const shopId = String(shop.id || '').trim();
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(shopId)) {
-        continue;
-      }
-      const parsedRetention = Number(shop.retention_hours);
-      const retentionHours = Number.isFinite(parsedRetention) && parsedRetention > 0 ? parsedRetention : 1;
-
-      const filesRes = await pool.query(
-        `SELECT f.id, f.object_path, f.job_id
-         FROM public.uploaded_files f
-         WHERE f.shop_id = $1::uuid
-           AND f.upload_state != 'DELETED'
-           AND f.created_at + ($2::text || ' hours')::interval <= NOW()
-           AND NOT EXISTS (
-             SELECT 1 FROM public.print_agent_jobs j
-             WHERE (j.job_id = f.job_id::text OR (j.job_data->>'printJobId') = f.job_id::text)
-               AND j.print_status IN ('QUEUED', 'ASSIGNED', 'DOWNLOADING', 'PRINTING')
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM public.print_jobs pj
-             WHERE pj.id = f.job_id
-               AND pj.print_status IN ('QUEUED', 'ASSIGNED', 'DOWNLOADING', 'PRINTING')
-           )
-         LIMIT 100`,
-        [shopId, retentionHours]
-      );
-      const expiredFiles = filesRes.rows;
-      if (expiredFiles.length > 0) {
-        const objectPaths = expiredFiles.map((f: any) => f.object_path).filter(Boolean);
-        if (objectPaths.length > 0) {
-          try {
-            await storageProvider.delete(objectPaths);
-          } catch (delErr) {
-            logger.warn('Failed to delete storage objects during retention cleanup:', { error: deepRedact(delErr) });
-          }
-        }
-        const fileIds = expiredFiles.map((f: any) => f.id);
-        await pool.query(
-          `UPDATE public.uploaded_files SET upload_state = 'DELETED' WHERE id = ANY($1::uuid[])`,
-          [fileIds]
-        );
-        logger.info(`Retention worker deleted ${expiredFiles.length} expired documents for shop ${shopId}`);
-      }
-    }
-  } catch (err) {
-    logger.error('Error during automatic document retention cleanup worker:', { error: deepRedact(err) });
-  } finally {
-    isRetentionCleanupRunning = false;
-  }
-}
-
-// Run automatic document retention cleanup worker every 5 minutes
-setInterval(runAutomaticDocumentRetentionCleanup, 5 * 60 * 1000);
+// Note: Legacy 5-minute retention interval removed. All temporary customer print file
+// cleanup is handled exclusively by the single daily midnight IST cron job
+// (`0 0 * * *`, Asia/Kolkata) registered via registerMidnightStorageCleanupCron().
 
 // ============================================================================
 // STEP 1: BACKEND - CREATE RAZORPAY ORDER API
@@ -3996,27 +3891,138 @@ setInterval(runAutomaticDocumentRetentionCleanup, 5 * 60 * 1000);
 // ============================================================================
 app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(30, 60_000, { bucketKey: 'payment-create-order' }), async (req: Request, res: Response) => {
   try {
-    let { amount, currency = 'INR', receipt, notes, printJobId, shopId, keyId, flow } = req.body;
+    let {
+      amount,
+      currency = 'INR',
+      receipt,
+      notes,
+      printJobId,
+      stagedJobId,
+      checkoutSessionId,
+      forceNewOrder,
+      shopId,
+      keyId,
+      flow
+    } = req.body;
 
-    if (amount === undefined || amount === null) {
+    const isSubscriptionFlow = flow === 'subscription' || (!shopId || shopId === 'platform');
+    const cleanCheckoutSessionId =
+      typeof checkoutSessionId === 'string' && checkoutSessionId.trim() ? checkoutSessionId.trim() : undefined;
+    const cleanStagedJobId =
+      typeof stagedJobId === 'string' && stagedJobId.trim() ? stagedJobId.trim() : undefined;
+
+    if ((amount === undefined || amount === null) && !cleanCheckoutSessionId && !cleanStagedJobId) {
       return res.status(400).json({
         success: false,
         error: 'Missing required field: amount'
       });
     }
 
-    const numericAmount = typeof amount === 'number' ? amount : parseFloat(amount);
-    if (isNaN(numericAmount) || numericAmount <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid payment amount specified.'
-      });
+    let amountInPaise = 0;
+    if (amount !== undefined && amount !== null) {
+      const numericAmount = typeof amount === 'number' ? amount : parseFloat(amount);
+      if (isNaN(numericAmount) || numericAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid payment amount specified.'
+        });
+      }
+      // Minimum amount: 100 paise (₹1.00)
+      amountInPaise = Math.round(numericAmount);
+      if (numericAmount < 100 && req.path.includes('/payment/create-order')) {
+        amountInPaise = Math.round(numericAmount * 100);
+      }
     }
 
-    // Minimum amount: 100 paise (₹1.00)
-    let amountInPaise = Math.round(numericAmount);
-    if (numericAmount < 100 && req.path.includes('/payment/create-order')) {
-      amountInPaise = Math.round(numericAmount * 100);
+    const orderReceipt = sanitizeRazorpayReceipt(receipt);
+    const sanitizedNotes = sanitizeRazorpayNotes(
+      notes,
+      {
+        ...(printJobId ? { printJobId: String(printJobId) } : {}),
+        ...(cleanCheckoutSessionId ? { checkoutSessionId: cleanCheckoutSessionId } : {}),
+        ...(cleanStagedJobId ? { stagedJobId: cleanStagedJobId } : {})
+      }
+    );
+
+    // Authoritative check for staged customer checkout jobs (Pre-Staging Enforcement & Price Integrity)
+    let effectiveShopId = shopId;
+    let resolvedStagedJob: any = null;
+
+    if (!isSubscriptionFlow && (cleanCheckoutSessionId || cleanStagedJobId)) {
+      if (!isSharedPoolConfigured()) {
+        return res.status(503).json({ success: false, error: 'Database is required for customer checkout orders.' });
+      }
+      resolvedStagedJob = cleanStagedJobId
+        ? await getPrintAgentJob(cleanStagedJobId)
+        : await getStagedPrintJobByCheckoutSession(String(shopId), cleanCheckoutSessionId!);
+
+      if (!resolvedStagedJob || !Array.isArray(resolvedStagedJob.files) || resolvedStagedJob.files.length === 0) {
+        return res.status(400).json({
+          success: false,
+          code: 'STAGE_REQUIRED',
+          error: 'Print files must be staged cleanly before creating a payment order.'
+        });
+      }
+
+      if (resolvedStagedJob.paymentStatus === 'SUCCESS') {
+        return res.status(409).json({
+          success: false,
+          code: 'CHECKOUT_ALREADY_PAID',
+          error: 'This checkout session has already been paid. Start a new upload for a fresh order.'
+        });
+      }
+
+      const [canonReqShop, canonStagedShop] = await Promise.all([
+        resolvePrintFlowShopId(String(shopId)),
+        resolvePrintFlowShopId(String(resolvedStagedJob.shopId))
+      ]);
+      if (canonReqShop !== canonStagedShop) {
+        return res.status(403).json({
+          success: false,
+          code: 'SHOP_MISMATCH',
+          error: 'Staged files do not belong to this shop.'
+        });
+      }
+      effectiveShopId = canonStagedShop;
+
+      // Verify staged storage files still exist cleanly when Supabase Storage is configured
+      const storageProvider = getStorageProvider();
+      if (storageProvider.isConfigured()) {
+        for (const f of resolvedStagedJob.files) {
+          if (f.objectPath) {
+            const exists = await storageProvider.verifyObjectExists(f.objectPath);
+            if (!exists) {
+              return res.status(410).json({
+                success: false,
+                code: 'STAGED_FILE_MISSING',
+                error: `Staged file "${f.fileName}" is missing or expired. Please re-stage your files.`
+              });
+            }
+          }
+        }
+      }
+
+      // Compute server-authoritative print price and reject tampered client amounts
+      const authoritativePricing = await calculateAuthoritativeCustomerPrintTotal({
+        shopId: effectiveShopId,
+        files: resolvedStagedJob.files.map((f: any) => ({
+          pageCount: Number(f.pageCount) || 1,
+          copies: Number(f.copies) || 1,
+          colorMode: f.colorMode === 'COLOR' ? 'COLOR' : 'BW',
+          paperSize: f.paperSize || 'A4',
+          duplex: Boolean(f.duplex),
+          pagesToPrint: f.pagesToPrint
+        }))
+      });
+
+      if (amountInPaise > 0 && Math.abs(amountInPaise - authoritativePricing.amountMinor) > 100) {
+        return res.status(400).json({
+          success: false,
+          code: 'AMOUNT_MISMATCH',
+          error: `Submitted amount (${(amountInPaise / 100).toFixed(2)}) does not match server-verified print total (₹${authoritativePricing.totalRupees}).`
+        });
+      }
+      amountInPaise = authoritativePricing.amountMinor;
     }
 
     if (amountInPaise < 100) {
@@ -4026,11 +4032,7 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
       });
     }
 
-    const orderReceipt = sanitizeRazorpayReceipt(receipt);
-    const sanitizedNotes = sanitizeRazorpayNotes(notes, printJobId ? { printJobId: String(printJobId) } : {});
-
     // Authoritative check if printJobId is provided and Neon is configured
-    let effectiveShopId = shopId;
     if (printJobId && isSharedPoolConfigured()) {
       try {
         const dbJob = (await getBusinessRepository().getPrintJobById(printJobId)) as any;
@@ -4186,6 +4188,46 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
       targetMode = shopIntegration.mode;
     }
 
+    // Reuse an existing unpaid CREATED order ONLY within the same checkoutSessionId & stagedJobId when amount & key match
+    if (!isPlatformOrder && cleanCheckoutSessionId && !forceNewOrder && isSharedPoolConfigured()) {
+      const canonicalShopId = await resolvePrintFlowShopId(targetSubShopId || effectiveShopId || '');
+      const reusableOrder = await getPaymentRepository().getUnpaidOrderByCheckoutSession(
+        cleanCheckoutSessionId,
+        canonicalShopId
+      );
+      if (
+        reusableOrder &&
+        reusableOrder.status === 'CREATED' &&
+        reusableOrder.amountMinor === amountInPaise &&
+        reusableOrder.providerAccountRef === targetKeyId &&
+        (!resolvedStagedJob || !reusableOrder.stagedJobId || reusableOrder.stagedJobId === resolvedStagedJob.id)
+      ) {
+        if (resolvedStagedJob) {
+          await linkRazorpayOrderToStagedJob({
+            stagedJobId: resolvedStagedJob.id,
+            checkoutSessionId: cleanCheckoutSessionId,
+            shopId: canonicalShopId,
+            orderId: reusableOrder.providerOrderId
+          }).catch(() => {});
+        }
+        return res.json({
+          success: true,
+          reused: true,
+          order_id: reusableOrder.providerOrderId,
+          orderId: reusableOrder.providerOrderId,
+          id: reusableOrder.providerOrderId,
+          amount: reusableOrder.amountMinor,
+          currency: reusableOrder.currency,
+          key_id: targetKeyId,
+          mode: targetMode,
+          flow: 'counter_print',
+          checkoutSessionId: cleanCheckoutSessionId,
+          stagedJobId: resolvedStagedJob?.id || reusableOrder.stagedJobId || undefined,
+          receipt: orderReceipt
+        });
+      }
+    }
+
     // Initialize authenticated Razorpay SDK instance
     const activeRzp = new Razorpay({
       key_id: targetKeyId,
@@ -4207,15 +4249,16 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
         orderId: razorpayOrder.id,
         amount: amountInPaise,
         mode: targetMode,
-        isPlatformOrder
+        isPlatformOrder,
+        checkoutSessionId: cleanCheckoutSessionId
       });
 
       // Track order in Neon PostgreSQL durably (Neon is the sole authoritative store)
       if (!isSharedPoolConfigured()) {
         return res.status(503).json({ success: false, error: 'Database is required for payment orders.' });
       }
+      const canonicalShopId = await resolvePrintFlowShopId(targetSubShopId || effectiveShopId || '');
       try {
-        const canonicalShopId = await resolvePrintFlowShopId(targetSubShopId || effectiveShopId || '');
         await getPaymentRepository().createPaymentOrder({
           jobId: printJobId || undefined,
           shopId: canonicalShopId,
@@ -4225,15 +4268,28 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
           amountMinor: amountInPaise,
           currency: String(currency || 'INR').toUpperCase(),
           idempotencyKey: crypto.randomUUID(),
+          checkoutSessionId: cleanCheckoutSessionId,
+          stagedJobId: resolvedStagedJob?.id || cleanStagedJobId,
           metadata: {
             receipt: orderReceipt,
             notes: Object.keys(sanitizedNotes).length > 0 ? sanitizedNotes : undefined,
             allowPendingJob: !printJobId,
             planId: targetPlanId || undefined,
             billingPeriod: isPlatformOrder ? billingPeriod : undefined,
-            shopId: canonicalShopId
+            shopId: canonicalShopId,
+            checkoutSessionId: cleanCheckoutSessionId,
+            stagedJobId: resolvedStagedJob?.id || cleanStagedJobId
           }
         });
+
+        if (resolvedStagedJob?.id) {
+          await linkRazorpayOrderToStagedJob({
+            stagedJobId: resolvedStagedJob.id,
+            checkoutSessionId: cleanCheckoutSessionId,
+            shopId: canonicalShopId,
+            orderId: razorpayOrder.id
+          });
+        }
       } catch (dbOrderErr) {
         logger.error('Failed to persist payment order into Neon public.payment_orders', {
           orderId: razorpayOrder.id,
@@ -4282,6 +4338,8 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
       key_id: targetKeyId,
       mode: targetMode,
       flow: isPlatformOrder ? 'subscription' : 'counter_print',
+      checkoutSessionId: cleanCheckoutSessionId,
+      stagedJobId: resolvedStagedJob?.id || cleanStagedJobId,
       receipt: orderReceipt
     });
   } catch (error: any) {
@@ -5251,7 +5309,7 @@ app.post('/api/admin/audit-logs/purge', createRateLimiter(5, 60_000, { bucketKey
 // ============================================================================
 // 3. RAZORPAY WEBHOOK HANDLER (IDEMPOTENT & SIGNATURE-VERIFIED)
 // ============================================================================
-app.post(['/api/payment/webhook', '/api/payments/webhook', '/api/webhooks/razorpay'], createRateLimiter(180, 60_000, { bucketKey: 'payment-webhook' }), async (req: Request, res: Response) => {
+app.post('/api/payment/webhook', createRateLimiter(180, 60_000, { bucketKey: 'payment-webhook' }), async (req: Request, res: Response) => {
   try {
     const signature = req.headers['x-razorpay-signature'] as string;
     const eventId = req.headers['x-razorpay-event-id'] as string;
@@ -5886,6 +5944,8 @@ interface BackendPrintJob {
   orderId: string;
   paymentId: string;
   shopId: string;
+  checkoutSessionId?: string;
+  stagingStatus?: string;
   customerName: string;
   customerPhone?: string;
   files: Array<{
@@ -5893,6 +5953,9 @@ interface BackendPrintJob {
     fileName: string;
     fileUrl?: string;
     downloadUrl?: string;
+    objectPath?: string;
+    sha256?: string;
+    sizeBytes?: number;
     pageCount: number;
     copies: number;
     colorMode: 'BW' | 'COLOR';
@@ -5902,8 +5965,8 @@ interface BackendPrintJob {
     mime?: string;
   }>;
   totalAmount: number;
-  paymentStatus: 'SUCCESS';
-  printStatus: 'QUEUED' | 'ASSIGNED' | 'DOWNLOADING' | 'PRINTING' | 'COMPLETED' | 'FAILED' | 'REQUIRES_ATTENTION';
+  paymentStatus: 'SUCCESS' | 'PENDING';
+  printStatus: 'STAGED' | 'QUEUED' | 'ASSIGNED' | 'DOWNLOADING' | 'PRINTING' | 'COMPLETED' | 'FAILED' | 'REQUIRES_ATTENTION';
   printerName?: string;
   claimedBy?: string;
   claimedAt?: string;
@@ -5914,44 +5977,320 @@ interface BackendPrintJob {
   pagesPrinted?: number;
 }
 
+// Bounded ephemeral buffer store used ONLY when Supabase Storage service-role key is not configured (e.g., offline sandbox dev)
+const stagedBufferFallbackMap = new Map<string, { buffer: Buffer; mime: string; filename: string; expiresAt: number }>();
+
+async function processAndStoreStagedFile(params: {
+  buffer: Buffer;
+  fileName: string;
+  declaredMime?: string;
+  shopId: string;
+  checkoutSessionId: string;
+}) {
+  const { buffer, fileName, declaredMime, shopId, checkoutSessionId } = params;
+  const canonicalShopId = await resolvePrintFlowShopId(shopId);
+
+  const validation = validateUploadFile({
+    buffer,
+    filename: fileName,
+    declaredMime,
+    shopId: canonicalShopId,
+    jobId: checkoutSessionId
+  });
+  if (!validation.isValid || !validation.detectedMime || !validation.sanitizedFilename) {
+    return {
+      ok: false as const,
+      status: 400,
+      payload: {
+        success: false,
+        code: validation.code || 'INVALID_FILE',
+        title: validation.userFacingTitle || 'Invalid Document',
+        message: validation.userFacingMessage || validation.error || 'File failed security validation.',
+        error: validation.error || 'File failed security validation.',
+        filename: fileName,
+        detectedType: validation.detectedType,
+        supportedFormats: validation.supportedFormats
+      }
+    };
+  }
+
+  const inspection = inspectDocument(buffer, validation.sanitizedFilename);
+  if (!inspection.isValid || !inspection.pageCount) {
+    return {
+      ok: false as const,
+      status: 400,
+      payload: {
+        success: false,
+        code: inspection.isEncrypted ? 'CORRUPT_DOCUMENT' : 'INVALID_CONTENT',
+        title: inspection.isEncrypted ? 'Encrypted PDF Not Supported' : 'Invalid or Corrupt Document',
+        message: inspection.error || 'Document failed structural inspection.',
+        error: inspection.error || 'Document failed structural inspection.',
+        filename: fileName
+      }
+    };
+  }
+
+  const quotaCheck = await reserveStorageQuota(canonicalShopId, buffer.length);
+  if (!quotaCheck.success) {
+    return {
+      ok: false as const,
+      status: 403,
+      payload: {
+        success: false,
+        code: quotaCheck.code || 'STORAGE_QUOTA_EXCEEDED',
+        title: 'Storage Quota Exceeded',
+        message: quotaCheck.error || 'Shop storage quota limit reached.',
+        error: quotaCheck.error || 'Shop storage quota limit reached.'
+      }
+    };
+  }
+
+  const fileId = `stf_${crypto.randomBytes(10).toString('hex')}`;
+  const ext = path.extname(validation.sanitizedFilename) || '.pdf';
+  const sha256 = inspection.sha256 || crypto.createHash('sha256').update(buffer).digest('hex');
+  const storageProvider = getStorageProvider();
+
+  let objectPath = buildObjectPath(canonicalShopId, checkoutSessionId, fileId, ext);
+  let storageBucket = 'print-documents';
+  let storageVerified = false;
+
+  try {
+    if (storageProvider.isConfigured()) {
+      const uploadRes = await storageProvider.upload({
+        shopId: canonicalShopId,
+        jobId: checkoutSessionId,
+        fileId,
+        extension: ext,
+        buffer,
+        contentType: validation.detectedMime
+      });
+      objectPath = uploadRes.objectPath;
+      storageBucket = uploadRes.bucket;
+      storageVerified = await storageProvider.verifyObjectExists(objectPath);
+      if (!storageVerified) {
+        throw new Error(`Uploaded object could not be verified at ${objectPath}`);
+      }
+    } else {
+      // Offline/sandbox dev fallback when Supabase credentials are not injected
+      storageBucket = 'fallback-buffer';
+      stagedBufferFallbackMap.set(fileId, {
+        buffer,
+        mime: validation.detectedMime,
+        filename: validation.sanitizedFilename,
+        expiresAt: Date.now() + 24 * 60 * 60 * 1000
+      });
+      if (stagedBufferFallbackMap.size > 100) {
+        const firstKey = stagedBufferFallbackMap.keys().next().value;
+        if (firstKey) stagedBufferFallbackMap.delete(firstKey);
+      }
+    }
+
+    const record = await upsertStagedCheckoutFile({
+      id: fileId,
+      checkoutSessionId,
+      shopId: canonicalShopId,
+      originalFilename: validation.sanitizedFilename,
+      mimeType: validation.detectedMime,
+      sizeBytes: buffer.length,
+      sha256,
+      verifiedPageCount: inspection.pageCount,
+      storageBucket,
+      objectPath,
+      storageVerified
+    });
+
+    await commitStorageUpload(canonicalShopId, buffer.length);
+
+    return {
+      ok: true as const,
+      status: 201,
+      payload: {
+        success: true,
+        stagedFileId: record.id,
+        checkoutSessionId: record.checkoutSessionId,
+        shopId: record.shopId,
+        fileName: record.originalFilename,
+        mimeType: record.mimeType,
+        sizeBytes: record.sizeBytes,
+        sha256: record.sha256,
+        verifiedPageCount: record.verifiedPageCount,
+        objectPath: record.objectPath,
+        storageBucket: record.storageBucket,
+        storageVerified: record.storageVerified,
+        expiresAt: record.expiresAt
+      }
+    };
+  } catch (err: any) {
+    await releaseStorageReservation(canonicalShopId, buffer.length).catch(() => {});
+    throw err;
+  }
+}
+
+// Fast binary file pre-upload for customer checkout staging (eliminates 33% base64 overhead on Pay Now click)
+app.post(
+  '/api/customer/staged-files/binary',
+  createRateLimiter(60, 60_000, { bucketKey: 'customer-staged-files-upload' }),
+  express.raw({ type: 'application/octet-stream', limit: '55mb' }),
+  async (req: Request, res: Response) => {
+    try {
+      if (!isNeonDatabaseConfigured() || !isSharedPoolConfigured()) {
+        return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
+      }
+      const shopId = String(req.headers['x-shop-id'] || req.query.shopId || '').trim();
+      const checkoutSessionId = String(req.headers['x-checkout-session-id'] || req.query.checkoutSessionId || '').trim();
+      const rawFileName = String(req.headers['x-file-name'] || req.query.fileName || 'document.pdf');
+      let decodedFileName = rawFileName;
+      try {
+        decodedFileName = decodeURIComponent(rawFileName);
+      } catch {}
+      const declaredMime = String(req.headers['x-file-type'] || req.query.fileType || '') || undefined;
+      const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+
+      if (!shopId || !checkoutSessionId || checkoutSessionId.length > 128 || buffer.length === 0) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_UPLOAD_REQUEST',
+          error: 'Valid shopId, checkoutSessionId, and non-empty binary file payload are required.'
+        });
+      }
+
+      const result = await processAndStoreStagedFile({
+        buffer,
+        fileName: decodedFileName,
+        declaredMime,
+        shopId,
+        checkoutSessionId
+      });
+      return res.status(result.status).json(result.payload);
+    } catch (err: any) {
+      logger.error('Failed binary staged file upload', { error: deepRedact(err) });
+      return res.status(500).json({
+        success: false,
+        code: 'STORAGE_UPLOAD_FAILED',
+        error: err?.message || 'Could not upload print file to staging storage.'
+      });
+    }
+  }
+);
+
+// JSON fallback endpoint for pre-uploading a staged checkout file
+app.post(
+  '/api/customer/staged-files',
+  createRateLimiter(60, 60_000, { bucketKey: 'customer-staged-files-upload' }),
+  async (req: Request, res: Response) => {
+    try {
+      if (!isNeonDatabaseConfigured() || !isSharedPoolConfigured()) {
+        return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
+      }
+      const { shopId, checkoutSessionId, fileName, fileType, fileBase64 } = req.body || {};
+      if (
+        typeof shopId !== 'string' ||
+        !shopId.trim() ||
+        typeof checkoutSessionId !== 'string' ||
+        !checkoutSessionId.trim() ||
+        typeof fileName !== 'string' ||
+        typeof fileBase64 !== 'string' ||
+        !fileBase64.length
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_UPLOAD_REQUEST',
+          error: 'Valid shopId, checkoutSessionId, fileName, and fileBase64 are required.'
+        });
+      }
+      const cleanBase64 = fileBase64.replace(/^data:[^;]+;base64,/, '');
+      const buffer = Buffer.from(cleanBase64, 'base64');
+      const result = await processAndStoreStagedFile({
+        buffer,
+        fileName,
+        declaredMime: typeof fileType === 'string' ? fileType : undefined,
+        shopId: shopId.trim(),
+        checkoutSessionId: checkoutSessionId.trim()
+      });
+      return res.status(result.status).json(result.payload);
+    } catch (err: any) {
+      logger.error('Failed JSON staged file upload', { error: deepRedact(err) });
+      return res.status(500).json({
+        success: false,
+        code: 'STORAGE_UPLOAD_FAILED',
+        error: err?.message || 'Could not upload print file to staging storage.'
+      });
+    }
+  }
+);
+
 // ============================================================================
-// PRE-PAYMENT PRINT JOB STAGING (STORES FILES BEFORE RAZORPAY MODAL OPENS)
+// PRE-PAYMENT PRINT JOB STAGING (STORES FILES & QUOTES BEFORE RAZORPAY ORDER)
+// Supports both lightweight stagedFileId references and legacy inline fileBase64.
 // ============================================================================
 app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey: 'customer-stage-order' }), async (req: Request, res: Response) => {
   try {
   if (!isNeonDatabaseConfigured() || !isSharedPoolConfigured()) {
     return res.status(503).json({ success: false, error: 'Authoritative database is required and currently unavailable.' });
   }
-  const { orderId, shopId, customerName, customerPhone, totalAmount, files } = req.body || {};
+  const { orderId, checkoutSessionId, shopId, customerName, customerPhone, files } = req.body || {};
+  const cleanOrderId = typeof orderId === 'string' && orderId.trim() ? orderId.trim() : undefined;
+  const cleanCheckoutSessionId =
+    typeof checkoutSessionId === 'string' && checkoutSessionId.trim()
+      ? checkoutSessionId.trim()
+      : undefined;
+
   if (
-    typeof orderId !== 'string' ||
-    !orderId.trim() ||
+    (!cleanOrderId && !cleanCheckoutSessionId) ||
     typeof shopId !== 'string' ||
     !shopId.trim() ||
     !Array.isArray(files) ||
     files.length === 0 ||
     files.length > 20
   ) {
-    return res.status(400).json({ success: false, error: 'A valid orderId, shopId, and 1–20 print files are required for staging.' });
+    return res.status(400).json({
+      success: false,
+      code: 'INVALID_STAGING_REQUEST',
+      error: 'A valid checkoutSessionId (or orderId), shopId, and 1–20 print files are required for staging.'
+    });
   }
 
+  const canonicalShopId = await resolvePrintFlowShopId(shopId.trim());
+  const storageProvider = getStorageProvider();
   const id = `PRT-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+
   const preparedFiles: Array<{
     id: string;
     fileName: string;
     fileUrl: string;
     downloadUrl: string;
+    objectPath: string;
+    mime: string;
+    sha256: string;
+    sizeBytes: number;
     pageCount: number;
     copies: number;
     colorMode: 'BW' | 'COLOR';
     paperSize: 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal';
     duplex: boolean;
     pagesToPrint?: string;
-    storageKey: string;
-    buffer: Buffer;
-    mime: string;
+    buffer?: Buffer;
     sanitizedFilename: string;
+    stagedFileId?: string;
   }> = [];
+
+  // Batch fetch any pre-uploaded staged files for this checkoutSessionId
+  const requestedStagedIds = files
+    .map((f: any) => (typeof f?.stagedFileId === 'string' ? f.stagedFileId.trim() : ''))
+    .filter(Boolean);
+
+  const preUploadedMap = new Map<string, any>();
+  if (requestedStagedIds.length > 0 && cleanCheckoutSessionId) {
+    const records = await getStagedCheckoutFilesByIds({
+      stagedFileIds: requestedStagedIds,
+      checkoutSessionId: cleanCheckoutSessionId,
+      shopId: canonicalShopId
+    });
+    for (const rec of records) {
+      preUploadedMap.set(rec.id, rec);
+    }
+  }
+
   let totalBytes = 0;
 
   for (const input of files) {
@@ -5959,17 +6298,12 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
       typeof input?.pagesToPrint === 'string' && input.pagesToPrint.trim().length > 0
         ? input.pagesToPrint.trim()
         : undefined;
+
     if (
       !input ||
-      typeof input.fileName !== 'string' ||
-      typeof input.fileBase64 !== 'string' ||
-      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.fileBase64) ||
       !Number.isInteger(input.copies) ||
       input.copies < 1 ||
       input.copies > 999 ||
-      !Number.isInteger(input.pageCount) ||
-      input.pageCount < 1 ||
-      input.pageCount > 10000 ||
       !['BW', 'COLOR'].includes(input.colorMode) ||
       !['A4', 'A3', 'A5', 'Letter', 'Legal'].includes(input.paperSize) ||
       typeof input.duplex !== 'boolean' ||
@@ -5977,7 +6311,82 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
         (cleanPagesToPrint.length > 200 ||
           !/^\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*$/.test(cleanPagesToPrint)))
     ) {
-      return res.status(400).json({ success: false, error: 'One or more print file settings are invalid.' });
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_PRINT_SETTINGS',
+        error: 'One or more print file settings are invalid.'
+      });
+    }
+
+    const stagedFileId = typeof input.stagedFileId === 'string' && input.stagedFileId.trim() ? input.stagedFileId.trim() : undefined;
+
+    if (stagedFileId) {
+      const stagedRec = preUploadedMap.get(stagedFileId);
+      if (!stagedRec) {
+        return res.status(422).json({
+          success: false,
+          code: 'STAGED_FILE_MISSING',
+          error: `Uploaded file reference "${stagedFileId}" was not found for this shop session. Please re-upload the document.`
+        });
+      }
+      if (new Date(stagedRec.expiresAt) <= new Date()) {
+        return res.status(410).json({
+          success: false,
+          code: 'STAGED_FILE_EXPIRED',
+          error: `Uploaded file "${stagedRec.originalFilename}" expired before checkout. Please re-upload it.`
+        });
+      }
+      if (storageProvider.isConfigured()) {
+        const exists = await storageProvider.verifyObjectExists(stagedRec.objectPath);
+        if (!exists) {
+          return res.status(410).json({
+            success: false,
+            code: 'STAGED_FILE_MISSING',
+            error: `Uploaded file "${stagedRec.originalFilename}" is missing from cloud storage. Please re-upload it.`
+          });
+        }
+      }
+
+      totalBytes += stagedRec.sizeBytes;
+      if (totalBytes > 50 * 1024 * 1024) {
+        return res.status(413).json({ success: false, error: 'The combined print files exceed the 50 MB limit.' });
+      }
+
+      const fallbackEntry = stagedBufferFallbackMap.get(stagedRec.id);
+      const downloadUrl = `/api/agent/jobs/${encodeURIComponent(id)}/file?fileId=${encodeURIComponent(stagedRec.id)}`;
+      preparedFiles.push({
+        id: stagedRec.id,
+        stagedFileId: stagedRec.id,
+        fileName: stagedRec.originalFilename,
+        fileUrl: downloadUrl,
+        downloadUrl,
+        objectPath: stagedRec.objectPath,
+        mime: stagedRec.mimeType,
+        sha256: stagedRec.sha256,
+        sizeBytes: stagedRec.sizeBytes,
+        pageCount: stagedRec.verifiedPageCount,
+        copies: input.copies,
+        colorMode: input.colorMode,
+        paperSize: input.paperSize,
+        duplex: input.duplex,
+        pagesToPrint: cleanPagesToPrint,
+        buffer: fallbackEntry?.buffer,
+        sanitizedFilename: stagedRec.originalFilename
+      });
+      continue;
+    }
+
+    // Legacy inline base64 staging fallback
+    if (
+      typeof input.fileName !== 'string' ||
+      typeof input.fileBase64 !== 'string' ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(input.fileBase64)
+    ) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_STAGING_FILE',
+        error: 'Each file must provide a valid stagedFileId or base64 payload.'
+      });
     }
 
     const buffer = Buffer.from(input.fileBase64, 'base64');
@@ -5990,7 +6399,7 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
       buffer,
       filename: input.fileName,
       declaredMime: typeof input.fileType === 'string' ? input.fileType : undefined,
-      shopId,
+      shopId: canonicalShopId,
       jobId: id
     });
     if (!validation.isValid || !validation.storageKey || !validation.detectedMime || !validation.sanitizedFilename) {
@@ -6006,27 +6415,62 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
       });
     }
 
+    const inspection = inspectDocument(buffer, validation.sanitizedFilename);
+    if (!inspection.isValid || !inspection.pageCount) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_CONTENT',
+        error: inspection.error || 'A print file failed structural document inspection.',
+        filename: input.fileName
+      });
+    }
+
     const fileId = `file_${crypto.randomBytes(8).toString('hex')}`;
+    const ext = path.extname(validation.sanitizedFilename) || '.pdf';
+    let objectPath = buildObjectPath(canonicalShopId, id, fileId, ext);
+    if (storageProvider.isConfigured()) {
+      const uploadRes = await storageProvider.upload({
+        shopId: canonicalShopId,
+        jobId: id,
+        fileId,
+        extension: ext,
+        buffer,
+        contentType: validation.detectedMime
+      });
+      objectPath = uploadRes.objectPath;
+      const verified = await storageProvider.verifyObjectExists(objectPath);
+      if (!verified) {
+        return res.status(503).json({
+          success: false,
+          code: 'STORAGE_VERIFICATION_FAILED',
+          error: `Could not verify cloud storage upload for "${validation.sanitizedFilename}".`
+        });
+      }
+    }
+
     const downloadUrl = `/api/agent/jobs/${encodeURIComponent(id)}/file?fileId=${encodeURIComponent(fileId)}`;
     preparedFiles.push({
       id: fileId,
       fileName: validation.sanitizedFilename,
       fileUrl: downloadUrl,
       downloadUrl,
-      pageCount: input.pageCount,
+      objectPath,
+      mime: validation.detectedMime,
+      sha256: inspection.sha256 || crypto.createHash('sha256').update(buffer).digest('hex'),
+      sizeBytes: buffer.length,
+      pageCount: inspection.pageCount,
       copies: input.copies,
       colorMode: input.colorMode,
       paperSize: input.paperSize,
       duplex: input.duplex,
       pagesToPrint: cleanPagesToPrint,
-      storageKey: validation.storageKey,
-      buffer,
-      mime: validation.detectedMime,
+      buffer: storageProvider.isConfigured() ? undefined : buffer,
       sanitizedFilename: validation.sanitizedFilename
     });
   }
 
-  const printerMatch = await validateJobAgainstRegisteredPrinters(shopId, preparedFiles);
+  // Validate print requirements against registered online printers in this shop
+  const printerMatch = await validateJobAgainstRegisteredPrinters(canonicalShopId, preparedFiles);
   if (!printerMatch.eligible) {
     return res.status(422).json({
       success: false,
@@ -6035,60 +6479,74 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
     });
   }
 
+  // Compute server-authoritative pricing
+  let authoritativePricing;
+  try {
+    authoritativePricing = await calculateAuthoritativeCustomerPrintTotal({
+      shopId: canonicalShopId,
+      files: preparedFiles.map((f) => ({
+        pageCount: f.pageCount,
+        copies: f.copies,
+        colorMode: f.colorMode,
+        paperSize: f.paperSize,
+        duplex: f.duplex,
+        pagesToPrint: f.pagesToPrint
+      }))
+    });
+  } catch (pricingErr: any) {
+    return res.status(400).json({
+      success: false,
+      code: 'INVALID_PAGE_RANGE',
+      error: pricingErr?.message || 'Invalid page range or pricing configuration.'
+    });
+  }
+
   const now = new Date().toISOString();
   const stagedPayload: any = {
     id,
     orderCode: id,
     trackingToken: `tr_${crypto.randomBytes(8).toString('hex')}`,
-    orderId: orderId.trim(),
+    orderId: cleanOrderId || `stg_${cleanCheckoutSessionId || id}`,
     paymentId: '',
-    shopId,
+    shopId: canonicalShopId,
+    checkoutSessionId: cleanCheckoutSessionId,
     customerName: typeof customerName === 'string' ? customerName.trim() || 'Guest Customer' : 'Guest Customer',
     customerPhone: typeof customerPhone === 'string' ? customerPhone.trim() : '',
-    files: preparedFiles.map(({ storageKey, buffer, sanitizedFilename, ...file }) => file),
-    totalAmount: Number(totalAmount) || 0,
+    files: preparedFiles.map(({ buffer, sanitizedFilename, stagedFileId, ...file }) => ({
+      ...file,
+      // Keep jobId placeholder synchronized if staging updated an existing jobId cleanly below
+      downloadUrl: file.downloadUrl,
+      fileUrl: file.fileUrl
+    })),
+    totalAmount: authoritativePricing.totalRupees,
     paymentStatus: 'PENDING',
     printStatus: 'STAGED',
+    stagingStatus: 'STAGED',
     printerName: printerMatch.matchedPrinterName,
     createdAt: now,
     updatedAt: now
   };
 
   try {
-    const stagedJob = await stagePrintAgentJob(
-      stagedPayload,
-      preparedFiles.map((file) => ({
-        id: file.id,
-        mime: file.mime,
-        filename: file.sanitizedFilename,
-        buffer: file.buffer
-      }))
-    );
+    const inlineByteaFiles = preparedFiles
+      .filter((f) => Buffer.isBuffer(f.buffer) && f.buffer.length > 0)
+      .map((f) => ({
+        id: f.id,
+        mime: f.mime,
+        filename: f.sanitizedFilename,
+        buffer: f.buffer!
+      }));
 
+    const stagedJob = await stagePrintAgentJob(stagedPayload, inlineByteaFiles);
     if (!stagedJob) {
-      return res.status(503).json({ success: false, error: 'Could not stage print job.' });
+      return res.status(503).json({ success: false, code: 'STAGE_PERSIST_FAILED', error: 'Could not stage print job in database.' });
     }
 
-    // Mirror customer documents to Supabase Object Storage asynchronously (BYTEA in print_agent_job_files is primary)
-    const storageProvider = getStorageProvider();
-    if (storageProvider.isConfigured()) {
-      void (async () => {
-        for (const file of preparedFiles) {
-          try {
-            const ext = path.extname(file.sanitizedFilename) || '.pdf';
-            await storageProvider.upload({
-              shopId,
-              jobId: stagedJob.id,
-              fileId: file.id,
-              extension: ext,
-              buffer: file.buffer,
-              contentType: file.mime
-            });
-          } catch {
-            // Non-fatal; BYTEA in print_agent_job_files is primary
-          }
-        }
-      })();
+    if (requestedStagedIds.length > 0) {
+      await markStagedCheckoutFilesLinked({
+        stagedFileIds: requestedStagedIds,
+        linkedJobId: stagedJob.id
+      }).catch(() => {});
     }
 
     return res.status(200).json({
@@ -6096,18 +6554,29 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
       staged: true,
       jobId: stagedJob.id,
       orderId: stagedJob.orderId,
-      trackingToken: stagedJob.trackingToken
+      checkoutSessionId: cleanCheckoutSessionId,
+      trackingToken: stagedJob.trackingToken,
+      authoritativeTotalAmount: authoritativePricing.totalRupees,
+      authoritativeAmountMinor: authoritativePricing.amountMinor
     });
-  } catch (err) {
-    logger.error('Failed to stage customer print order', { orderId, shopId, error: deepRedact(err) });
+  } catch (err: any) {
+    logger.error('Failed to stage customer print order', { orderId: cleanOrderId, checkoutSessionId: cleanCheckoutSessionId, shopId: canonicalShopId, error: deepRedact(err) });
     if (!res.headersSent) {
-      return res.status(503).json({ success: false, error: 'Could not stage print files before payment.' });
+      return res.status(503).json({
+        success: false,
+        code: 'STAGE_PERSIST_FAILED',
+        error: err?.message || 'Could not stage print files before payment.'
+      });
     }
   }
-  } catch (outerErr) {
+  } catch (outerErr: any) {
     logger.error('Unexpected error in /api/customer/stage-order', { error: deepRedact(outerErr) });
     if (!res.headersSent) {
-      return res.status(500).json({ success: false, error: 'Could not stage print files before payment.' });
+      return res.status(500).json({
+        success: false,
+        code: 'STAGE_INTERNAL_ERROR',
+        error: outerErr?.message || 'Could not stage print files before payment.'
+      });
     }
   }
 });
@@ -6416,15 +6885,13 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     try {
       const shopIntegration = await getShopPaymentIntegration(shopId);
       if (shopIntegration && shopIntegration.isConfigured && shopIntegration.isActive && shopIntegration.keyId && shopIntegration.keySecret) {
-        const targetKeyId = shopIntegration.keyId;
-        const targetKeySecret = shopIntegration.keySecret;
-
         const activeRzp = new Razorpay({
-          key_id: targetKeyId,
-          key_secret: targetKeySecret
+          key_id: shopIntegration.keyId,
+          key_secret: shopIntegration.keySecret
         });
         const payEntity: any = await activeRzp.payments.fetch(paymentId);
-        if (payEntity && (payEntity.status === 'captured' || payEntity.status === 'authorized')) {
+        const orderMatches = !payEntity?.order_id || payEntity.order_id === orderId;
+        if (payEntity && orderMatches && (payEntity.status === 'captured' || payEntity.status === 'authorized')) {
           isPaymentVerified = true;
           verifiedAmountMinor = payEntity.amount;
           if (isSharedPoolConfigured()) {
@@ -6447,12 +6914,6 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     }
   }
 
-  // Production Domain Fallback: If valid Razorpay payment ID is present, treat as verified to prevent false dispatch rejections
-  if (!isPaymentVerified && paymentId && typeof paymentId === 'string' && paymentId.startsWith('pay_')) {
-    isPaymentVerified = true;
-    verifiedAmountMinor = Math.round(Number(req.body.totalAmount || 0) * 100) || 200;
-  }
-
   if (!isPaymentVerified) {
     return res.status(403).json({ success: false, error: 'A verified payment for this shop is required before dispatch.' });
   }
@@ -6466,7 +6927,7 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
   }
 
   const totalAmount = Number(req.body.totalAmount);
-  if (!Number.isFinite(totalAmount) || (Math.abs(Math.round(totalAmount * 100) - verifiedAmountMinor) > 500 && (!paymentId || !paymentId.startsWith('pay_')))) {
+  if (!Number.isFinite(totalAmount) || Math.abs(Math.round(totalAmount * 100) - verifiedAmountMinor) > 100) {
     return res.status(400).json({ success: false, error: 'The print total does not match the verified payment amount.' });
   }
   if (
@@ -6476,12 +6937,14 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     return res.status(400).json({ success: false, error: 'Customer details are invalid.' });
   }
 
+  const canonicalShopId = await resolvePrintFlowShopId(shopId);
   const id = `PRT-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
   const preparedFiles: Array<{
     id: string;
     fileName: string;
     fileUrl: string;
     downloadUrl: string;
+    objectPath: string;
     pageCount: number;
     copies: number;
     colorMode: 'BW' | 'COLOR';
@@ -6531,7 +6994,7 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
       buffer,
       filename: input.fileName,
       declaredMime: typeof input.fileType === 'string' ? input.fileType : undefined,
-      shopId,
+      shopId: canonicalShopId,
       jobId: id
     });
     if (!validation.isValid || !validation.storageKey || !validation.detectedMime || !validation.sanitizedFilename) {
@@ -6548,12 +7011,14 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     }
 
     const fileId = `file_${crypto.randomBytes(8).toString('hex')}`;
+    const ext = path.extname(validation.sanitizedFilename) || '.pdf';
     const downloadUrl = `/api/agent/jobs/${encodeURIComponent(id)}/file?fileId=${encodeURIComponent(fileId)}`;
     preparedFiles.push({
       id: fileId,
       fileName: validation.sanitizedFilename,
       fileUrl: downloadUrl,
       downloadUrl,
+      objectPath: buildObjectPath(canonicalShopId, id, fileId, ext),
       pageCount: input.pageCount,
       copies: input.copies,
       colorMode: input.colorMode,
@@ -6567,9 +7032,9 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     });
   }
 
-  // Validate print requirements against registered online printers in this shop
-  const printerMatch = await validateJobAgainstRegisteredPrinters(shopId, preparedFiles);
-  if (!printerMatch.eligible) {
+  // Validate print requirements against registered printers; once payment IS verified, queue safely even if printer temporarily offline
+  const printerMatch = await validateJobAgainstRegisteredPrinters(canonicalShopId, preparedFiles);
+  if (!printerMatch.eligible && printerMatch.code !== 'PRINTERS_OFFLINE') {
     return res.status(422).json({
       success: false,
       code: printerMatch.code || 'INCOMPATIBLE_PRINTER',
@@ -6584,7 +7049,7 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     trackingToken: `tr_${crypto.randomBytes(8).toString('hex')}`,
     orderId,
     paymentId,
-    shopId,
+    shopId: canonicalShopId,
     customerName: typeof customerName === 'string' ? customerName.trim() || 'Guest Customer' : 'Guest Customer',
     customerPhone: typeof customerPhone === 'string' ? customerPhone : '',
     files: preparedFiles.map(({ storageKey, buffer, sanitizedFilename, ...file }) => file),
@@ -8192,13 +8657,36 @@ app.get('/api/agent/jobs/:id/file', createRateLimiter(60, 60_000, { bucketKey: '
         ? job.files.find((item) => item.id === requestedFileId)
         : job.files.length === 1 ? job.files[0] : undefined;
       if (targetFile) {
-        try {
-          const ext = path.extname(targetFile.fileName) || '.pdf';
-          const objectPath = buildObjectPath(job.shopId, job.id, targetFile.id, ext);
-          const buffer = await getStorageProvider().download(objectPath);
+        const ext = path.extname(targetFile.fileName) || '.pdf';
+        const canonicalJobShopId = await resolvePrintFlowShopId(job.shopId).catch(() => job!.shopId);
+        const candidatePaths = Array.from(
+          new Set(
+            [
+              (targetFile as any).objectPath,
+              buildObjectPath(canonicalJobShopId, job.id, targetFile.id, ext),
+              buildObjectPath(job.shopId, job.id, targetFile.id, ext),
+              ...(job.checkoutSessionId
+                ? [
+                    buildObjectPath(canonicalJobShopId, job.checkoutSessionId, targetFile.id, ext),
+                    buildObjectPath(job.shopId, job.checkoutSessionId, targetFile.id, ext)
+                  ]
+                : [])
+            ].filter((p): p is string => Boolean(p))
+          )
+        );
 
-          // Authoritative binary signature inspection on downloaded buffer
-          const sig = verifyFileSignature(buffer);
+        let downloadedBuffer: Buffer | null = null;
+        for (const candidatePath of candidatePaths) {
+          try {
+            downloadedBuffer = await getStorageProvider().download(candidatePath);
+            if (downloadedBuffer) break;
+          } catch {
+            // Try next candidate path
+          }
+        }
+
+        if (downloadedBuffer) {
+          const sig = verifyFileSignature(downloadedBuffer);
           let mime = sig.isValid && sig.mimeType ? sig.mimeType : undefined;
           if (!mime && (targetFile as any).mime) {
             mime = (targetFile as any).mime;
@@ -8218,10 +8706,8 @@ app.get('/api/agent/jobs/:id/file', createRateLimiter(60, 60_000, { bucketKey: '
           storedFile = {
             mime,
             filename: targetFile.fileName,
-            buffer
+            buffer: downloadedBuffer
           };
-        } catch {
-          // Fall through to BYTEA lookup
         }
       }
     }
@@ -8233,6 +8719,16 @@ app.get('/api/agent/jobs/:id/file', createRateLimiter(60, 60_000, { bucketKey: '
         : job.files.length === 1 ? job.files[0] : undefined;
       if (file) {
         storedFile = await getPrintAgentJobFile(job.id, file.id);
+        if (!storedFile) {
+          const fallbackMem = stagedBufferFallbackMap.get(file.id);
+          if (fallbackMem) {
+            storedFile = {
+              mime: fallbackMem.mime,
+              filename: fallbackMem.filename,
+              buffer: fallbackMem.buffer
+            };
+          }
+        }
         if (storedFile && storedFile.buffer) {
           const sig = verifyFileSignature(storedFile.buffer);
           if (sig.isValid && sig.mimeType) {
@@ -9382,47 +9878,99 @@ app.get('/api/guest/checkout/:jobId', createRateLimiter(60, 60_000, { bucketKey:
 });
 
 /**
- * POST /api/admin/storage/cleanup
- * Purges expired temporary storage objects.
+ * POST /api/internal/cron/midnight-storage-cleanup
+ * Authenticated M2M trigger endpoint for external schedulers (e.g., Supabase pg_cron,
+ * Render Cron, GitHub Actions) using Bearer CRON_SECRET with constant-time comparison.
+ * Shares the same advisory lock and engine as the built-in singleton midnight IST cron job.
  */
-app.post('/api/admin/storage/cleanup', createRateLimiter(10, 60_000, { bucketKey: 'admin-storage-cleanup' }), requireAdminRole, async (req: Request, res: Response) => {
+app.post('/api/internal/cron/midnight-storage-cleanup', createRateLimiter(10, 60_000, { bucketKey: 'internal-cron-midnight-cleanup' }), async (req: Request, res: Response) => {
   try {
-    const olderThanHours = parseInt(req.body?.olderThanHours, 10) || 24;
-    logger.info('Running storage cleanup routine', { olderThanHours });
-
-    let purgedCount = 0;
-    const storageProvider = getStorageProvider();
-    if (storageProvider.isConfigured() && isNeonDatabaseConfigured() && isSharedPoolConfigured()) {
-      const pool = requireSharedPool();
-      const resQuery = await pool.query(
-        `SELECT id, object_path FROM public.uploaded_files
-         WHERE upload_state != 'DELETED' AND (retention_expires_at <= NOW() OR created_at < NOW() - INTERVAL '1 hour' * $1)
-         LIMIT 500`,
-        [olderThanHours]
-      );
-      const expiredFiles = resQuery.rows;
-      if (expiredFiles.length > 0) {
-        const objectPaths = expiredFiles.map((f: any) => f.object_path);
-        try {
-          await storageProvider.delete(objectPaths);
-        } catch (delErr) {
-          logger.warn('Failed to delete some storage objects during manual cleanup:', { error: deepRedact(delErr) });
-        }
-        const fileIds = expiredFiles.map((f: any) => f.id);
-        await pool.query(
-          `UPDATE public.uploaded_files
-           SET upload_state = 'DELETED'
-           WHERE id = ANY($1::uuid[])`,
-          [fileIds]
-        );
-        purgedCount = expiredFiles.length;
-      }
+    const expectedSecret = (process.env.CRON_SECRET || '').trim();
+    if (!expectedSecret) {
+      return res.status(503).json({
+        success: false,
+        error: 'CRON_SECRET is not configured on the server.'
+      });
     }
 
-    return res.json({ success: true, purgedCount, olderThanHours });
+    const authHeader = String(req.headers.authorization || '').trim();
+    const providedToken = authHeader.toLowerCase().startsWith('bearer ')
+      ? authHeader.slice(7).trim()
+      : String(req.headers['x-cron-secret'] || '').trim();
+
+    const expectedBuf = Buffer.from(expectedSecret, 'utf8');
+    const providedBuf = Buffer.from(providedToken, 'utf8');
+    const isAuthorized =
+      providedBuf.length === expectedBuf.length &&
+      crypto.timingSafeEqual(expectedBuf, providedBuf);
+
+    if (!isAuthorized) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized cron trigger request.'
+      });
+    }
+
+    const result = await executeMidnightStorageCleanup({
+      triggerSource: 'AUTHENTICATED_CRON_HTTP',
+      pool: resolveCleanupDatabasePool(),
+      storageProvider: getStorageProvider()
+    });
+
+    const httpStatus = result.status === 'FAILED' ? 500 : 200;
+    return res.status(httpStatus).json({
+      success: result.status !== 'FAILED',
+      result
+    });
+  } catch (error: any) {
+    logger.error('Authenticated midnight storage cleanup cron trigger failed', { error: deepRedact(error) });
+    return res.status(500).json({ success: false, error: 'Midnight storage cleanup execution failed.' });
+  }
+});
+
+/**
+ * POST /api/admin/storage/cleanup
+ * Manual Super Admin trigger delegating to the unified midnight IST storage cleanup engine.
+ * Preserves active paid/printing jobs and protected non-print storage files.
+ */
+app.post('/api/admin/storage/cleanup', createRateLimiter(10, 60_000, { bucketKey: 'admin-storage-cleanup' }), requireAdminRole, async (_req: Request, res: Response) => {
+  try {
+    logger.info('Running manual Super Admin midnight storage cleanup routine');
+    const result = await executeMidnightStorageCleanup({
+      triggerSource: 'MANUAL_ADMIN',
+      pool: resolveCleanupDatabasePool(),
+      storageProvider: getStorageProvider()
+    });
+
+    const httpStatus = result.status === 'FAILED' ? 500 : 200;
+    return res.status(httpStatus).json({
+      success: result.status !== 'FAILED',
+      purgedCount: result.totalDeleted,
+      result
+    });
   } catch (error: any) {
     logger.error('Storage cleanup failed', { error: deepRedact(error) });
     return res.status(500).json({ success: false, error: 'Storage cleanup failed.' });
+  }
+});
+
+/**
+ * GET /api/admin/storage/cleanup-logs
+ * Returns the single midnight IST cron configuration and recent execution audit logs.
+ */
+app.get('/api/admin/storage/cleanup-logs', createRateLimiter(60, 60_000, { bucketKey: 'admin-storage-cleanup-logs' }), requireAdminRole, async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Math.max(1, parseInt(String(req.query.limit || '30'), 10) || 30), 100);
+    const pool = resolveCleanupDatabasePool();
+    const logs = pool ? await listRecentCleanupRuns(pool, limit) : [];
+    return res.json({
+      success: true,
+      schedule: getMidnightCleanupCronStatus(),
+      logs
+    });
+  } catch (error: any) {
+    logger.error('Failed to fetch storage cleanup audit logs', { error: deepRedact(error) });
+    return res.status(500).json({ success: false, error: 'Failed to retrieve storage cleanup logs.' });
   }
 });
 
@@ -10103,7 +10651,10 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
     );
   }
 
-  // Inject rich route-specific semantic HTML inside #root for initial HTTP crawlers
+  // Always keep #root clean so JS-enabled browsers never flash unstyled fallback text before React mounts.
+  html = html.replace(/<div id="root">[\s\S]*?<\/div>/i, '<div id="root"></div>');
+
+  // Inject route-specific semantic fallback strictly inside <noscript> for non-JS clients/crawlers.
   const navLinksHtml = [
     '<a href="/">Home</a>',
     '<a href="/features">Features</a>',
@@ -10118,6 +10669,7 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
     '<a href="/faq">FAQ</a>'
   ].join(' ');
 
+  let noscriptReplacement = '';
   if (seo.h1 && seo.ssrSummary) {
     const bulletsHtml =
       seo.ssrBullets && seo.ssrBullets.length > 0
@@ -10137,11 +10689,15 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
           ).join('')}</ul></section>`
         : '';
 
-    const ssrBlock = `<main><h1>${escapeHtmlAttr(seo.h1)}</h1><p>${escapeHtmlAttr(seo.ssrSummary)}</p>${bulletsHtml}${blogLinksHtml}${faqHtml}<nav aria-label="Primary Public Pages">${navLinksHtml}</nav></main>`;
-    html = html.replace(/<div id="root">[\s\S]*?<\/div>/i, `<div id="root">${ssrBlock}</div>`);
+    noscriptReplacement = `<noscript id="seo-noscript"><main><h1>${escapeHtmlAttr(seo.h1)}</h1><p>${escapeHtmlAttr(seo.ssrSummary)}</p>${bulletsHtml}${blogLinksHtml}${faqHtml}<nav aria-label="Primary Public Pages">${navLinksHtml}</nav></main></noscript>`;
   } else if (seo.isNotFound) {
-    const notFoundBlock = `<main><h1>Page Not Found (404) – EasyToPrint</h1><p>The requested URL could not be found. Return to the <a href="/">EasyToPrint Homepage</a>.</p><nav aria-label="Primary Public Pages">${navLinksHtml}</nav></main>`;
-    html = html.replace(/<div id="root">[\s\S]*?<\/div>/i, `<div id="root">${notFoundBlock}</div>`);
+    noscriptReplacement = `<noscript id="seo-noscript"><main><h1>Page Not Found (404) – EasyToPrint</h1><p>The requested URL could not be found. Return to the <a href="/">EasyToPrint Homepage</a>.</p><nav aria-label="Primary Public Pages">${navLinksHtml}</nav></main></noscript>`;
+  }
+
+  if (/<noscript\s+id="seo-noscript">[\s\S]*?<\/noscript>/i.test(html)) {
+    html = html.replace(/<noscript\s+id="seo-noscript">[\s\S]*?<\/noscript>/i, noscriptReplacement);
+  } else if (noscriptReplacement) {
+    html = html.replace(/<div id="root"><\/div>/i, `<div id="root"></div>${noscriptReplacement}`);
   }
 
   return { html, statusCode, robotsHeader };

@@ -97,38 +97,52 @@ declare global {
   }
 }
 
+let razorpayScriptLoadPromise: Promise<boolean> | null = null;
+
 /**
  * Ensures the Razorpay checkout script is loaded into the document.
+ * Deduplicates concurrent calls so preloading and Pay Now share a single promise.
  */
 export const loadRazorpayScript = (): Promise<boolean> => {
-  return new Promise((resolve) => {
-    if (typeof window !== 'undefined' && window.Razorpay) {
-      resolve(true);
-      return;
-    }
+  if (typeof window !== 'undefined' && window.Razorpay) {
+    return Promise.resolve(true);
+  }
+  if (razorpayScriptLoadPromise) {
+    return razorpayScriptLoadPromise;
+  }
+
+  razorpayScriptLoadPromise = new Promise((resolve) => {
+    const finish = (loaded: boolean) => {
+      if (!loaded) {
+        razorpayScriptLoadPromise = null;
+      }
+      resolve(loaded);
+    };
 
     // Check if script tag is already in head/body
     const existingScript = document.querySelector('script[src*="checkout.razorpay.com"]');
     if (existingScript) {
       if (window.Razorpay) {
-        resolve(true);
+        finish(true);
         return;
       }
-      existingScript.addEventListener('load', () => resolve(true), { once: true });
-      existingScript.addEventListener('error', () => resolve(false), { once: true });
+      existingScript.addEventListener('load', () => finish(true), { once: true });
+      existingScript.addEventListener('error', () => finish(false), { once: true });
       return;
     }
 
     const script = document.createElement('script');
     script.src = 'https://checkout.razorpay.com/v1/checkout.js';
     script.async = true;
-    script.onload = () => resolve(true);
+    script.onload = () => finish(true);
     script.onerror = () => {
       console.warn('Failed to load Razorpay checkout script from CDN');
-      resolve(false);
+      finish(false);
     };
     document.head.appendChild(script);
   });
+
+  return razorpayScriptLoadPromise;
 };
 
 /**
@@ -196,10 +210,127 @@ export const generateRazorpayOrderId = (): string => {
   return `order_${rand}`;
 };
 
+export interface StagedFileUploadResult {
+  success: boolean;
+  stagedFileId?: string;
+  checkoutSessionId?: string;
+  shopId?: string;
+  fileName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  sha256?: string;
+  verifiedPageCount?: number;
+  objectPath?: string;
+  storageBucket?: string;
+  storageVerified?: boolean;
+  expiresAt?: string;
+  code?: string;
+  title?: string;
+  message?: string;
+  error?: string;
+}
+
+const fileToBase64Internal = async (file: File): Promise<string> => {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+  }
+  return btoa(chunks.join(''));
+};
+
 /**
- * STEP 1: Calls backend to create a Razorpay Order.
+ * Uploads a validated print file as a raw octet-stream before payment initiation
+ * so clicking "Pay Now" only sends lightweight stagedFileId references.
+ */
+export const uploadStagedFileBinary = async (params: {
+  shopId: string;
+  checkoutSessionId: string;
+  file: File;
+  timeoutMs?: number;
+}): Promise<StagedFileUploadResult> => {
+  const adaptiveTimeout = params.timeoutMs ?? Math.min(90000, Math.max(25000, Math.round((params.file.size / 65536) * 1000)));
+
+  const parseUploadResponse = async (res: Response): Promise<StagedFileUploadResult> => {
+    const data = await safeParseJson(res);
+    if (res.ok && data.success && data.stagedFileId) {
+      return {
+        success: true,
+        stagedFileId: data.stagedFileId,
+        checkoutSessionId: data.checkoutSessionId,
+        shopId: data.shopId,
+        fileName: data.fileName,
+        mimeType: data.mimeType,
+        sizeBytes: data.sizeBytes,
+        sha256: data.sha256,
+        verifiedPageCount: data.verifiedPageCount,
+        objectPath: data.objectPath,
+        storageBucket: data.storageBucket,
+        storageVerified: data.storageVerified,
+        expiresAt: data.expiresAt
+      };
+    }
+    return {
+      success: false,
+      code: data.code,
+      title: data.title,
+      message: data.message,
+      error: data.error || data.message || `Failed to upload "${params.file.name}" for staging.`
+    };
+  };
+
+  try {
+    const buffer = await params.file.arrayBuffer();
+    const res = await fetchWithRetry(
+      '/api/customer/staged-files/binary',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'x-shop-id': params.shopId,
+          'x-checkout-session-id': params.checkoutSessionId,
+          'x-file-name': encodeURIComponent(params.file.name),
+          'x-file-type': params.file.type || 'application/octet-stream'
+        },
+        body: buffer
+      },
+      { maxAttempts: 2, timeoutMs: adaptiveTimeout, backoffDelaysMs: [1000] }
+    );
+
+    // Fallback to JSON base64 upload only if binary proxy/body parser rejects 415
+    if (res.status === 415) {
+      const jsonRes = await fetchWithRetry(
+        '/api/customer/staged-files',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            shopId: params.shopId,
+            checkoutSessionId: params.checkoutSessionId,
+            fileName: params.file.name,
+            fileType: params.file.type || 'application/octet-stream',
+            fileBase64: await fileToBase64Internal(params.file)
+          })
+        },
+        { maxAttempts: 2, timeoutMs: adaptiveTimeout, backoffDelaysMs: [1000] }
+      );
+      return await parseUploadResponse(jsonRes);
+    }
+
+    return await parseUploadResponse(res);
+  } catch (err: any) {
+    return {
+      success: false,
+      code: 'STORAGE_UPLOAD_FAILED',
+      error: err?.message || `Could not upload "${params.file.name}". Please check your connection and try again.`
+    };
+  }
+};
+
+/**
+ * STEP 2: Calls backend to create a Razorpay Order AFTER print files are staged.
  * Endpoint: POST /api/create-order
- * Request: { amount (paise), currency, receipt }
+ * Request: { amount (paise), currency, receipt, checkoutSessionId, stagedJobId }
  * Return: { order_id, amount, currency, key_id }
  * Minimum amount: 100 paise
  */
@@ -209,9 +340,21 @@ export const createRazorpayOrder = async (params: {
   currency?: string;
   receipt?: string;
   printJobId?: string;
+  stagedJobId?: string;
+  checkoutSessionId?: string;
+  forceNewOrder?: boolean;
   shopId?: string;
   notes?: Record<string, string>;
-}): Promise<{ success: boolean; order_id?: string; orderId?: string; amount?: number; currency?: string; key_id?: string; error?: string }> => {
+}): Promise<{
+  success: boolean;
+  order_id?: string;
+  orderId?: string;
+  amount?: number;
+  currency?: string;
+  key_id?: string;
+  code?: string;
+  error?: string;
+}> => {
   try {
     const paise = params.amountInPaise !== undefined
       ? Math.round(params.amountInPaise)
@@ -227,11 +370,14 @@ export const createRazorpayOrder = async (params: {
           currency: params.currency || 'INR',
           receipt: clampReceipt(params.receipt),
           printJobId: params.printJobId,
+          stagedJobId: params.stagedJobId,
+          checkoutSessionId: params.checkoutSessionId,
+          forceNewOrder: params.forceNewOrder,
           shopId: params.shopId,
           notes: normalizeNotes(params.notes)
         })
       },
-      { maxAttempts: 3, timeoutMs: 15000, backoffDelaysMs: [1000, 2000, 4000] }
+      { maxAttempts: 2, timeoutMs: 12000, backoffDelaysMs: [800] }
     );
 
     const data = await safeParseJson(res);
@@ -246,7 +392,11 @@ export const createRazorpayOrder = async (params: {
         key_id: data.key_id
       };
     }
-    return { success: false, error: data.error || data.message || 'Failed to create Razorpay order' };
+    return {
+      success: false,
+      code: data.code,
+      error: data.error || data.message || 'Failed to create Razorpay order'
+    };
   } catch (err: any) {
     return {
       success: false,
@@ -256,20 +406,21 @@ export const createRazorpayOrder = async (params: {
 };
 
 /**
- * STEP 2: Stages customer print files on the backend before opening Razorpay Checkout.
- * Ensures that as soon as payment is verified on the server, the print job can be
- * atomically dispatched without requiring a second file upload after payment.
+ * STEP 1: Stages customer print files and validates pricing/printers on the backend
+ * BEFORE creating a Razorpay order or opening Checkout.
  */
 export const stageCustomerPrintOrder = async (params: {
-  orderId: string;
+  checkoutSessionId?: string;
+  orderId?: string;
   shopId: string;
   customerName?: string;
   customerPhone?: string;
   totalAmount?: number;
   files: Array<{
-    fileName: string;
-    fileType: string;
-    fileBase64: string;
+    stagedFileId?: string;
+    fileName?: string;
+    fileType?: string;
+    fileBase64?: string;
     pageCount: number;
     copies: number;
     colorMode: string;
@@ -280,8 +431,13 @@ export const stageCustomerPrintOrder = async (params: {
 }): Promise<{
   success: boolean;
   staged?: boolean;
+  jobId?: string;
+  orderId?: string;
+  checkoutSessionId?: string;
   pickupCode?: string;
   trackingToken?: string;
+  authoritativeTotalAmount?: number;
+  authoritativeAmountMinor?: number;
   job?: DispatchedPrintJobSummary;
   error?: string;
   code?: string;
@@ -293,7 +449,7 @@ export const stageCustomerPrintOrder = async (params: {
 }> => {
   try {
     const payloadJson = JSON.stringify(params);
-    const adaptiveTimeoutMs = Math.min(120000, Math.max(45000, Math.round((payloadJson.length / 80000) * 1000)));
+    const adaptiveTimeoutMs = Math.min(90000, Math.max(20000, Math.round((payloadJson.length / 80000) * 1000)));
     const res = await fetchWithRetry(
       '/api/customer/stage-order',
       {
@@ -301,15 +457,20 @@ export const stageCustomerPrintOrder = async (params: {
         headers: { 'Content-Type': 'application/json' },
         body: payloadJson
       },
-      { maxAttempts: 2, timeoutMs: adaptiveTimeoutMs, backoffDelaysMs: [1500] }
+      { maxAttempts: 2, timeoutMs: adaptiveTimeoutMs, backoffDelaysMs: [1000] }
     );
     const data = await safeParseJson(res);
     if (res.ok && data.success) {
       return {
         success: true,
         staged: Boolean(data.staged),
-        pickupCode: data.pickupCode || data.job?.id,
+        jobId: data.jobId || data.job?.id,
+        orderId: data.orderId,
+        checkoutSessionId: data.checkoutSessionId || params.checkoutSessionId,
+        pickupCode: data.pickupCode || data.jobId || data.job?.id,
         trackingToken: data.trackingToken || data.job?.trackingToken,
+        authoritativeTotalAmount: typeof data.authoritativeTotalAmount === 'number' ? data.authoritativeTotalAmount : undefined,
+        authoritativeAmountMinor: typeof data.authoritativeAmountMinor === 'number' ? data.authoritativeAmountMinor : undefined,
         job: data.job
       };
     }

@@ -53,6 +53,7 @@ import {
   generateRazorpayPaymentId,
   createRazorpayOrder,
   stageCustomerPrintOrder,
+  uploadStagedFileBinary,
   verifyRazorpayPayment,
   checkRazorpayOrderStatus,
   reconcileRazorpayPayment,
@@ -62,6 +63,27 @@ import {
 import { apiUrl, fetchWithRetry } from '../../lib/apiConfig';
 import { CustomerErrorModal } from './CustomerErrorModal';
 import { validateClientDocument, DocumentValidationError } from '../../lib/validation/documentValidation';
+
+export type CheckoutLifecycleStatus =
+  | 'IDLE'
+  | 'UPLOADING'
+  | 'READY_FOR_PAYMENT'
+  | 'STAGING_FILES'
+  | 'CREATING_ORDER'
+  | 'PAYMENT_CHECKOUT_OPEN'
+  | 'PAYMENT_PROCESSING'
+  | 'VERIFYING_PAYMENT'
+  | 'PAID'
+  | 'PAYMENT_FAILED'
+  | 'STAGING_FAILED'
+  | 'CANCELLED';
+
+const createCheckoutSessionId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `chk_${crypto.randomUUID().replace(/-/g, '')}`;
+  }
+  return `chk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+};
 
 interface CustomerPrintFlowProps {
   shopSlug: string;
@@ -176,47 +198,115 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     [shopCapabilities]
   );
 
-  const fetchCapabilities = React.useCallback(async (targetSlugOrId?: string) => {
-    const queryTarget = targetSlugOrId || shopSlug || remoteShop?.slug || activeShop?.slug || activeShop?.id;
-    if (!queryTarget) return;
-    try {
-      const res = await fetch(apiUrl(`/api/public/shops/${encodeURIComponent(queryTarget)}/capabilities`));
-      const data = await res.json();
-      if (data.success && data.capabilities) {
-        setShopCapabilities(data.capabilities);
-      }
-    } catch {
-      // Fail gracefully
-    }
-  }, [shopSlug, remoteShop?.slug, activeShop?.slug, activeShop?.id]);
+  const shopQueryTargetRef = React.useRef<string>('');
+  shopQueryTargetRef.current = shopSlug || remoteShop?.slug || activeShop?.slug || activeShop?.id || '';
 
-  const checkAgentAvailability = React.useCallback(async (targetSlugOrId?: string) => {
-    const queryTarget = targetSlugOrId || shopSlug || remoteShop?.slug || activeShop?.slug || activeShop?.id;
-    if (!queryTarget) return null;
-    setIsCheckingAgentStatus(true);
-    try {
-      void fetchCapabilities(queryTarget);
-      const res = await fetch(apiUrl(`/api/public/shops/${encodeURIComponent(queryTarget)}/agent-status`));
-      const data = await res.json();
-      if (data.success && data.availability) {
-        setAgentStatus(data.availability);
-        return data.availability;
-      }
-    } catch {
-      // Fail gracefully
-    } finally {
-      setIsCheckingAgentStatus(false);
+  const agentStatusRef = React.useRef(agentStatus);
+  agentStatusRef.current = agentStatus;
+
+  const lastStatusFetchAtRef = React.useRef<number>(0);
+  const lastAgentStatusKeyRef = React.useRef<string>('');
+  const lastCapabilitiesKeyRef = React.useRef<string>('');
+  const inFlightStatusPromiseRef = React.useRef<Promise<typeof agentStatus> | null>(null);
+  const inFlightCapabilitiesPromiseRef = React.useRef<Promise<void> | null>(null);
+
+  const fetchCapabilities = React.useCallback(async (targetSlugOrId?: string) => {
+    const queryTarget = targetSlugOrId || shopQueryTargetRef.current;
+    if (!queryTarget) return;
+    if (inFlightCapabilitiesPromiseRef.current && !targetSlugOrId) {
+      return inFlightCapabilitiesPromiseRef.current;
     }
-    return null;
-  }, [shopSlug, remoteShop?.slug, activeShop?.slug, activeShop?.id, fetchCapabilities]);
+    const task = (async () => {
+      try {
+        const res = await fetch(apiUrl(`/api/public/shops/${encodeURIComponent(queryTarget)}/capabilities`));
+        const data = await res.json();
+        if (data.success && data.capabilities) {
+          const nextKey = JSON.stringify(data.capabilities);
+          if (nextKey !== lastCapabilitiesKeyRef.current) {
+            lastCapabilitiesKeyRef.current = nextKey;
+            setShopCapabilities(data.capabilities);
+          }
+        }
+      } catch {
+        // Fail gracefully
+      } finally {
+        if (!targetSlugOrId) {
+          inFlightCapabilitiesPromiseRef.current = null;
+        }
+      }
+    })();
+    if (!targetSlugOrId) {
+      inFlightCapabilitiesPromiseRef.current = task;
+    }
+    return task;
+  }, []);
+
+  const checkAgentAvailability = React.useCallback(
+    async (targetSlugOrId?: string, options?: { showSpinner?: boolean }) => {
+      const queryTarget = targetSlugOrId || shopQueryTargetRef.current;
+      if (!queryTarget) return null;
+
+      if (inFlightStatusPromiseRef.current && !targetSlugOrId) {
+        return inFlightStatusPromiseRef.current;
+      }
+
+      const showSpinner = Boolean(options?.showSpinner);
+      if (showSpinner) {
+        setIsCheckingAgentStatus(true);
+      }
+
+      const task = (async () => {
+        try {
+          void fetchCapabilities(queryTarget);
+          const res = await fetch(apiUrl(`/api/public/shops/${encodeURIComponent(queryTarget)}/agent-status`));
+          const data = await res.json();
+          if (data.success && data.availability) {
+            lastStatusFetchAtRef.current = Date.now();
+            const nextKey = JSON.stringify(data.availability);
+            if (nextKey !== lastAgentStatusKeyRef.current) {
+              lastAgentStatusKeyRef.current = nextKey;
+              agentStatusRef.current = data.availability;
+              setAgentStatus(data.availability);
+            }
+            return data.availability;
+          }
+        } catch {
+          // Fail gracefully
+        } finally {
+          if (showSpinner) {
+            setIsCheckingAgentStatus(false);
+          }
+          if (!targetSlugOrId) {
+            inFlightStatusPromiseRef.current = null;
+          }
+        }
+        return agentStatusRef.current;
+      })();
+
+      if (!targetSlugOrId) {
+        inFlightStatusPromiseRef.current = task;
+      }
+      return task;
+    },
+    [fetchCapabilities]
+  );
+
+  const refreshAgentAvailabilityIfStale = React.useCallback(
+    (maxAgeMs = 8000) => {
+      if (Date.now() - lastStatusFetchAtRef.current >= maxAgeMs) {
+        void checkAgentAvailability(undefined, { showSpinner: false });
+      }
+    },
+    [checkAgentAvailability]
+  );
 
   const handleManualRefreshStatus = async () => {
     if (isManualCheckingStatus || isCheckingAgentStatus) return;
     setIsManualCheckingStatus(true);
     try {
-      const minDelay = new Promise((resolve) => setTimeout(resolve, 2000));
+      const minDelay = new Promise((resolve) => setTimeout(resolve, 250));
       const [freshStatus] = await Promise.all([
-        checkAgentAvailability(),
+        checkAgentAvailability(undefined, { showSpinner: true }),
         minDelay
       ]);
       if (freshStatus && freshStatus.isAvailable) {
@@ -230,12 +320,14 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
   };
 
   useEffect(() => {
-    void checkAgentAvailability();
+    lastStatusFetchAtRef.current = 0;
+    void checkAgentAvailability(undefined, { showSpinner: false });
     const timer = setInterval(() => {
-      void checkAgentAvailability();
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void checkAgentAvailability(undefined, { showSpinner: false });
     }, 10000);
     return () => clearInterval(timer);
-  }, [checkAgentAvailability]);
+  }, [shopSlug, checkAgentAvailability]);
 
   // Load alternative online shops if current shop is offline
   useEffect(() => {
@@ -340,11 +432,36 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
   // 3-step state: 1. Upload, 2. Review, 3. Pay, 4. Tracking
   const [currentStep, setCurrentStep] = useState<number>(1);
+  const [navigatingTargetStep, setNavigatingTargetStep] = useState<null | 2 | 3>(null);
+  const navigatingStepRef = React.useRef<boolean>(false);
   const [files, setFiles] = useState<FilePrintConfig[]>([]);
   const sourceFilesRef = React.useRef(new Map<string, File>());
+  const stagedFileMapRef = React.useRef(
+    new Map<string, { stagedFileId: string; verifiedPageCount: number; shopId: string; sessionId: string }>()
+  );
+  const uploadPromisesRef = React.useRef(
+    new Map<string, Promise<{ stagedFileId?: string; verifiedPageCount?: number; error?: string; code?: string }>>()
+  );
+  const stagedJobIdRef = React.useRef<string | null>(null);
+  const preStagedOrderRef = React.useRef<{
+    fingerprint: string;
+    stageRes: Awaited<ReturnType<typeof stageCustomerPrintOrder>>;
+  } | null>(null);
+  const inFlightStageRef = React.useRef<{
+    fingerprint: string;
+    promise: Promise<Awaited<ReturnType<typeof stageCustomerPrintOrder>>>;
+  } | null>(null);
   const dispatchingOrdersRef = React.useRef(new Set<string>());
   const completedOrdersRef = React.useRef(new Set<string>());
+  const checkoutCompletedRef = React.useRef<boolean>(false);
   const payAttemptLockRef = React.useRef(false);
+
+  const [checkoutSessionId, setCheckoutSessionId] = useState<string>(() => createCheckoutSessionId());
+  const checkoutSessionIdRef = React.useRef<string>(checkoutSessionId);
+  useEffect(() => {
+    checkoutSessionIdRef.current = checkoutSessionId;
+  }, [checkoutSessionId]);
+  const [checkoutStatus, setCheckoutStatus] = useState<CheckoutLifecycleStatus>('IDLE');
 
   // Upload loading queue
   const [uploadingQueue, setUploadingQueue] = useState<UploadingItem[]>([]);
@@ -366,8 +483,13 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
   // Payment processing & transaction state
   const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
-  const [paymentProcessingLabel, setPaymentProcessingLabel] = useState<string>('Creating payment...');
+  const [paymentProcessingLabel, setPaymentProcessingLabel] = useState<string>('Preparing Secure Payment...');
   const [activeJob, setActiveJob] = useState<PrintJob | null>(null);
+  const [stagingFailedState, setStagingFailedState] = useState<{
+    title: string;
+    message: string;
+    code?: string;
+  } | null>(null);
   const [paymentFailedState, setPaymentFailedState] = useState<{
     status: 'FAILED' | 'CANCELLED';
     message: string;
@@ -391,6 +513,8 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
   const saveOrderSession = React.useCallback(
     (session: {
       orderId: string;
+      checkoutSessionId?: string;
+      status?: 'CREATED' | 'PENDING' | 'PAID' | 'FAILED';
       paymentId?: string;
       shopId: string;
       customerPhone?: string;
@@ -412,6 +536,8 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
   const loadOrderSession = React.useCallback((): {
     orderId: string;
+    checkoutSessionId?: string;
+    status?: string;
     paymentId?: string;
     shopId?: string;
     customerPhone?: string;
@@ -423,6 +549,10 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed.orderId !== 'string') return null;
+      if (parsed.status === 'PAID') {
+        localStorage.removeItem(orderSessionStorageKey);
+        return null;
+      }
       // Expire after 24 hours
       if (parsed.createdAt && Date.now() - Number(parsed.createdAt) > 24 * 60 * 60 * 1000) {
         localStorage.removeItem(orderSessionStorageKey);
@@ -440,31 +570,44 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     } catch {}
   }, [orderSessionStorageKey]);
 
+  // Preload Razorpay script silently only after user advances past Step 1 (keeps landing page LCP untouched)
   useEffect(() => {
+    if (currentStep >= 2 && currentStep <= 3) {
+      void loadRazorpayScript();
+    }
+  }, [currentStep]);
+
+  // Restore strictly unpaid incomplete session across full page refresh
+  useEffect(() => {
+    if (checkoutCompletedRef.current || activeJob || currentStep === 4) return;
     const saved = loadOrderSession();
-    if (saved?.orderId && !activeOrderId) {
+    if (saved?.orderId && saved.status !== 'PAID' && !completedOrdersRef.current.has(saved.orderId) && !activeOrderId) {
       setActiveOrderId(saved.orderId);
+      if (saved.checkoutSessionId) {
+        checkoutSessionIdRef.current = saved.checkoutSessionId;
+        setCheckoutSessionId(saved.checkoutSessionId);
+      }
       if (saved.customerPhone && !customerPhone) {
         setCustomerPhone(saved.customerPhone);
       }
     }
-  }, [loadOrderSession, activeOrderId, customerPhone]);
+  }, [loadOrderSession, activeOrderId, customerPhone, activeJob, currentStep]);
 
   const pollingTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const activeRzpInstanceRef = React.useRef<any>(null);
 
-  const stopPolling = () => {
+  const stopPolling = React.useCallback(() => {
     if (pollingTimerRef.current) {
       clearInterval(pollingTimerRef.current);
       pollingTimerRef.current = null;
     }
-  };
+  }, []);
 
   useEffect(() => {
     return () => {
       stopPolling();
     };
-  }, []);
+  }, [stopPolling]);
 
   useEffect(() => {
     if (
@@ -516,17 +659,14 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
   const fileInputId = 'customer-file-upload-input';
 
-  const stepVariants = {
-    initial: { opacity: 0, y: 10 },
-    animate: { opacity: 1, y: 0, transition: { duration: 0.2 } },
-    exit: { opacity: 0, y: -8, transition: { duration: 0.15 } }
-  };
+  const calculateUnitPrice = React.useCallback(
+    (size: PaperSize, color: 'BW' | 'COLOR', sides: 'SINGLE' | 'DOUBLE') => {
+      return resolveUnitPrice(effectivePricingRules, shop?.id || EMPTY_SHOP.id, size, color, sides);
+    },
+    [effectivePricingRules, shop?.id]
+  );
 
-  const calculateUnitPrice = (size: PaperSize, color: 'BW' | 'COLOR', sides: 'SINGLE' | 'DOUBLE') => {
-    return resolveUnitPrice(effectivePricingRules, shop?.id || EMPTY_SHOP.id, size, color, sides);
-  };
-
-  const countPages = (config: Partial<FilePrintConfig>) => {
+  const countPages = React.useCallback((config: Partial<FilePrintConfig>) => {
     if (config.pageSelection === 'CUSTOM' && config.customRange) {
       const check = validatePageRange(config.customRange, config.estimatedPages || 1);
       if (check.isValid && check.parsedPages && check.parsedPages.length > 0) {
@@ -534,16 +674,143 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       }
     }
     return config.estimatedPages || 1;
-  };
+  }, []);
 
-  const calculateFileTotal = (config: Partial<FilePrintConfig>) => {
-    const pages = countPages(config);
-    const copies = config.copies || 1;
-    const rate = config.unitPrice || 2.0;
-    return Math.round(pages * copies * rate);
-  };
+  const calculateFileTotal = React.useCallback(
+    (config: Partial<FilePrintConfig>) => {
+      const pages = countPages(config);
+      const copies = config.copies || 1;
+      const rate = config.unitPrice || 2.0;
+      return Math.round(pages * copies * rate);
+    },
+    [countPages]
+  );
 
-  // Prepare selected documents for secure upload after payment verification.
+  // Complete session reset for genuinely new uploads / checkouts (prevents old payment state from leaking)
+  const resetForNewCheckout = React.useCallback(
+    (options?: { preserveFiles?: boolean }) => {
+      stopPolling();
+      if (activeRzpInstanceRef.current) {
+        try {
+          activeRzpInstanceRef.current.close();
+        } catch {}
+        activeRzpInstanceRef.current = null;
+      }
+      const nextSessionId = createCheckoutSessionId();
+      checkoutSessionIdRef.current = nextSessionId;
+      setCheckoutSessionId(nextSessionId);
+
+      checkoutCompletedRef.current = false;
+      payAttemptLockRef.current = false;
+      dispatchingOrdersRef.current.clear();
+      stagedJobIdRef.current = null;
+      preStagedOrderRef.current = null;
+      inFlightStageRef.current = null;
+      stagedFileMapRef.current.clear();
+      uploadPromisesRef.current.clear();
+
+      if (!options?.preserveFiles) {
+        sourceFilesRef.current.clear();
+        setFiles([]);
+        setExpandedFileIds({});
+        setUploadingQueue([]);
+      }
+
+      clearOrderSession();
+      setActiveJob(null);
+      setActiveOrderId(null);
+      setPaymentPendingState(null);
+      setPaymentFailedState(null);
+      setStagingFailedState(null);
+      setStepError(null);
+      setRazorpayError(null);
+      setIsProcessingPayment(false);
+      setPaymentProcessingLabel('Preparing Secure Payment...');
+      setIsCheckingStatus(false);
+      setCheckingStatusLabel('Verifying payment with Razorpay...');
+      setShowRecoveryInput(false);
+      setRecoveryLookupInput('');
+      setCheckoutStatus('IDLE');
+    },
+    [clearOrderSession, stopPolling]
+  );
+
+  // Reset checkout session automatically when switching shops
+  const previousShopSlugRef = React.useRef<string>(shopSlug);
+  useEffect(() => {
+    if (previousShopSlugRef.current !== shopSlug) {
+      previousShopSlugRef.current = shopSlug;
+      resetForNewCheckout();
+      setCurrentStep(1);
+    }
+  }, [shopSlug, resetForNewCheckout]);
+
+  const invalidateUnpaidDraftOrder = React.useCallback(() => {
+    if (checkoutCompletedRef.current) return;
+    stagedJobIdRef.current = null;
+    preStagedOrderRef.current = null;
+    inFlightStageRef.current = null;
+    setStagingFailedState(null);
+    setPaymentFailedState(null);
+    setPaymentPendingState(null);
+    setActiveOrderId(null);
+    clearOrderSession();
+    setCheckoutStatus((prev) => (prev === 'UPLOADING' ? 'UPLOADING' : 'READY_FOR_PAYMENT'));
+  }, [clearOrderSession]);
+
+  const startBackgroundFilePreUpload = React.useCallback(
+    (fileId: string, file: File, targetShopId: string, sessionId: string) => {
+      if (!targetShopId || targetShopId === EMPTY_SHOP.id) return Promise.resolve({});
+      const uploadTask = (async () => {
+        const res = await uploadStagedFileBinary({
+          shopId: targetShopId,
+          checkoutSessionId: sessionId,
+          file
+        });
+        if (
+          res.success &&
+          res.stagedFileId &&
+          checkoutSessionIdRef.current === sessionId &&
+          sourceFilesRef.current.has(fileId)
+        ) {
+          const verifiedPages = Number(res.verifiedPageCount) || 1;
+          stagedFileMapRef.current.set(fileId, {
+            stagedFileId: res.stagedFileId,
+            verifiedPageCount: verifiedPages,
+            shopId: targetShopId,
+            sessionId
+          });
+          setFiles((prev) =>
+            prev.map((item) => {
+              if (item.id !== fileId) return item;
+              if (item.estimatedPages === verifiedPages) return item;
+              const effectivePages =
+                item.pageSelection === 'CUSTOM' && item.customRange
+                  ? (() => {
+                      const check = validatePageRange(item.customRange, verifiedPages);
+                      return check.isValid && check.parsedPages?.length ? check.parsedPages.length : verifiedPages;
+                    })()
+                  : verifiedPages;
+              const rate = item.unitPrice || 2.0;
+              return {
+                ...item,
+                estimatedPages: verifiedPages,
+                totalPrice: Math.round(effectivePages * (item.copies || 1) * rate)
+              };
+            })
+          );
+          return { stagedFileId: res.stagedFileId, verifiedPageCount: verifiedPages };
+        }
+        return { error: res.error, code: res.code };
+      })();
+
+      uploadPromisesRef.current.set(fileId, uploadTask);
+      return uploadTask;
+    },
+    []
+  );
+
+  // Selected documents are validated, page-counted, and streamed to pre-payment staging in background.
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (maintenanceMode) {
       showToast('Maintenance Active', 'System is under maintenance. File uploads are disabled.', 'error', 4000);
@@ -558,19 +825,40 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     const selectedFiles = e.target.files;
     if (!selectedFiles || selectedFiles.length === 0) return;
 
-    const validFiles: File[] = [];
-    for (let i = 0; i < selectedFiles.length; i++) {
-      const file = selectedFiles[i];
+    // Bug B guarantee: If a previous order already completed, clear its completed state before adding new files
+    if (checkoutCompletedRef.current || activeJob) {
+      resetForNewCheckout();
+    } else if (files.length === 0) {
+      invalidateUnpaidDraftOrder();
+    } else {
+      stagedJobIdRef.current = null;
+      setStagingFailedState(null);
+      setPaymentFailedState(null);
+      setActiveOrderId(null);
+      clearOrderSession();
+    }
 
-      // Perform deep client-side binary magic byte & format validation
-      const validation = await validateClientDocument(file);
+    const selectedArray = Array.from(selectedFiles);
+    const validationResults = await Promise.all(
+      selectedArray.map(async (file) => ({
+        file,
+        validation: await validateClientDocument(file)
+      }))
+    );
+
+    const validFiles: File[] = [];
+    let firstValidationError: DocumentValidationError | null = null;
+    for (const { file, validation } of validationResults) {
       if (!validation.isValid && validation.error) {
-        setCustomerErrorModal(validation.error);
-        // Do not upload or add to queue, but allow other valid selected files to proceed
+        if (!firstValidationError) {
+          firstValidationError = validation.error;
+        }
         continue;
       }
-
       validFiles.push(file);
+    }
+    if (firstValidationError) {
+      setCustomerErrorModal(firstValidationError);
     }
 
     if (validFiles.length === 0) {
@@ -578,75 +866,95 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       return;
     }
 
-    // Set initial loading queue
+    const activeSessionId = checkoutSessionIdRef.current;
+    const targetShopId = shop.id;
+
+    setCheckoutStatus('UPLOADING');
     const queueItems: UploadingItem[] = validFiles.map((file, i) => ({
       id: `up_${Date.now()}_${i}`,
       name: file.name,
       size: file.size,
-      progress: 35
+      progress: 45
     }));
     setUploadingQueue(queueItems);
 
-    // Keep the preview preparation state responsive while document details are collected.
-    setTimeout(() => {
-      setUploadingQueue((prev) =>
-        prev.map((item) => ({ ...item, progress: 85 }))
-      );
-    }, 280);
-
-    // Finalize document metadata and previews with exact PDF.js page counting.
-    (async () => {
-      const newConfigs: FilePrintConfig[] = [];
-      const newExpanded: Record<string, boolean> = { ...expandedFileIds };
-
-      for (let i = 0; i < validFiles.length; i++) {
-        const file = validFiles[i];
-        const isPdf = file.type === 'application/pdf' || file.name.endsWith('.pdf');
-        let exactPages = 1;
-
-        if (isPdf) {
-          try {
-            const arrayBuffer = await file.arrayBuffer();
-            const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
-            const pdfDoc = await loadingTask.promise;
-            exactPages = pdfDoc.numPages || 1;
-          } catch (err) {
-            console.error('Failed to parse PDF page count:', err);
-            exactPages = 1;
-          }
-        }
-
-        const fileId = `f_${Date.now()}_${i}`;
-        sourceFilesRef.current.set(fileId, file);
-
-        const defaultConfig: FilePrintConfig = {
-          id: fileId,
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type || 'application/octet-stream',
-          previewUrl: file.type.startsWith('image/') || isPdf ? URL.createObjectURL(file) : undefined,
-          estimatedPages: exactPages,
-          paperSize: 'A4',
-          color: 'BW',
-          sides: 'SINGLE',
-          orientation: 'PORTRAIT',
-          copies: 1,
-          pageSelection: 'ALL',
-          pagesPerSheet: 1,
-          unitPrice: 2.0,
-          totalPrice: 2.0 * exactPages
-        };
-
-        defaultConfig.unitPrice = calculateUnitPrice(defaultConfig.paperSize, defaultConfig.color || 'BW', defaultConfig.sides);
-        defaultConfig.totalPrice = calculateFileTotal(defaultConfig);
-
-        newConfigs.push(defaultConfig);
-        newExpanded[fileId] = true;
+    let processingFinished = false;
+    const progressTimer = setTimeout(() => {
+      if (!processingFinished) {
+        setUploadingQueue((prev) =>
+          prev.map((item) => ({ ...item, progress: 85 }))
+        );
       }
+    }, 220);
 
-      setFiles((prev) => [...prev, ...newConfigs]);
-      setExpandedFileIds(newExpanded);
-      setUploadingQueue([]);
+    // Preload Razorpay SDK in the background as soon as customer selects files
+    void loadRazorpayScript();
+
+    (async () => {
+      try {
+        const processed = await Promise.all(
+          validFiles.map(async (file, i) => {
+            const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+            let exactPages = 1;
+
+            if (isPdf) {
+              try {
+                const arrayBuffer = await file.arrayBuffer();
+                const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+                const pdfDoc = await loadingTask.promise;
+                exactPages = pdfDoc.numPages || 1;
+                void loadingTask.destroy();
+              } catch (err) {
+                console.error('Failed to parse PDF page count:', err);
+                exactPages = 1;
+              }
+            }
+
+            const fileId = `f_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`;
+            sourceFilesRef.current.set(fileId, file);
+
+            const unitPrice = calculateUnitPrice('A4', 'BW', 'SINGLE');
+            const defaultConfig: FilePrintConfig = {
+              id: fileId,
+              fileName: file.name,
+              fileSize: file.size,
+              fileType: file.type || 'application/octet-stream',
+              previewUrl: file.type.startsWith('image/') || isPdf ? URL.createObjectURL(file) : undefined,
+              estimatedPages: exactPages,
+              paperSize: 'A4',
+              color: 'BW',
+              sides: 'SINGLE',
+              orientation: 'PORTRAIT',
+              copies: 1,
+              pageSelection: 'ALL',
+              pagesPerSheet: 1,
+              unitPrice,
+              totalPrice: Math.round(exactPages * unitPrice)
+            };
+
+            // Kick off fast binary pre-upload in background so Step 3 & Pay Now are instant
+            void startBackgroundFilePreUpload(fileId, file, targetShopId, activeSessionId);
+
+            return defaultConfig;
+          })
+        );
+
+        processingFinished = true;
+        clearTimeout(progressTimer);
+        setFiles((prev) => [...prev, ...processed]);
+        setExpandedFileIds((prev) => {
+          const next = { ...prev };
+          for (const cfg of processed) {
+            next[cfg.id] = true;
+          }
+          return next;
+        });
+        setUploadingQueue([]);
+        setCheckoutStatus('READY_FOR_PAYMENT');
+      } finally {
+        processingFinished = true;
+        clearTimeout(progressTimer);
+      }
     })();
 
     e.target.value = '';
@@ -654,6 +962,10 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
 
   const removeFile = (id: string) => {
+    sourceFilesRef.current.delete(id);
+    stagedFileMapRef.current.delete(id);
+    uploadPromisesRef.current.delete(id);
+    invalidateUnpaidDraftOrder();
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
@@ -665,6 +977,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
   };
 
   const updateFileConfig = (fileId: string, updates: Partial<FilePrintConfig>) => {
+    invalidateUnpaidDraftOrder();
     setFiles((prev) =>
       prev.map((f) => {
         if (f.id === fileId) {
@@ -678,22 +991,271 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     );
   };
 
-  // Pricing breakdown: Customers pay strictly actual printing charges calculated from pricing rules (zero platform/service fee)
-  const subtotal = files.reduce((acc, f) => acc + f.totalPrice, 0);
+  // Memoized pricing breakdown: Customers pay strictly actual printing charges calculated from pricing rules
+  const subtotal = React.useMemo(
+    () => files.reduce((acc, f) => acc + f.totalPrice, 0),
+    [files]
+  );
   const serviceFee = 0;
   const grandTotal = subtotal;
 
-  // Proceed from Upload (Step 1) to Review (Step 2)
+  // Deterministic order fingerprint for deduplicated background pre-staging on Step 3
+  const orderStageFingerprint = React.useMemo(() => {
+    if (files.length === 0 || !shop?.id || shop.id === EMPTY_SHOP.id) return '';
+    const filesSig = files
+      .map(
+        (f) =>
+          `${f.id}:${f.estimatedPages}:${f.copies}:${f.color || 'BW'}:${f.paperSize}:${f.sides}:${f.pageSelection}:${(f.customRange || f.customPageRange || '').trim()}`
+      )
+      .join('|');
+    return `${shop.id}::${checkoutSessionId}::${customerPhone.trim()}::${filesSig}`;
+  }, [shop?.id, checkoutSessionId, customerPhone, files]);
+
+  // Shared deduplicated staging helper used by background Step 3 pre-staging AND handlePayNow
+  const ensureStagedFileRefs = React.useCallback(
+    async (activeSessionId: string, forceReupload = false): Promise<Array<{
+      stagedFileId?: string;
+      fileName: string;
+      fileType: string;
+      pageCount: number;
+      copies: number;
+      colorMode: string;
+      paperSize: string;
+      duplex: boolean;
+      pagesToPrint?: string;
+    }>> => {
+      const uploadedEntries = await Promise.all(
+        files.map(async (file) => {
+          const sourceFile = sourceFilesRef.current.get(file.id);
+          if (!sourceFile) {
+            throw Object.assign(
+              new Error(`The original file for "${file.fileName}" is unavailable. Please re-upload it before paying.`),
+              { stagingCode: 'SOURCE_FILE_MISSING', stagingTitle: 'File Missing From Browser' }
+            );
+          }
+
+          const cached = !forceReupload ? stagedFileMapRef.current.get(file.id) : undefined;
+          if (cached && cached.shopId === shop.id && cached.sessionId === activeSessionId) {
+            return { file, sourceFile, stagedFileId: cached.stagedFileId, verifiedPages: cached.verifiedPageCount };
+          }
+
+          if (!forceReupload) {
+            const inflight = uploadPromisesRef.current.get(file.id);
+            if (inflight) {
+              const inflightRes = await inflight;
+              const resolvedCached = stagedFileMapRef.current.get(file.id);
+              if (resolvedCached && resolvedCached.shopId === shop.id && resolvedCached.sessionId === activeSessionId) {
+                return {
+                  file,
+                  sourceFile,
+                  stagedFileId: resolvedCached.stagedFileId,
+                  verifiedPages: resolvedCached.verifiedPageCount
+                };
+              }
+              if (
+                inflightRes?.code === 'STORAGE_QUOTA_EXCEEDED' ||
+                inflightRes?.code === 'INVALID_FILE' ||
+                inflightRes?.code === 'INVALID_CONTENT'
+              ) {
+                throw Object.assign(new Error(inflightRes.error || `Upload blocked for "${file.fileName}".`), {
+                  stagingCode: inflightRes.code
+                });
+              }
+            }
+          }
+
+          const uploadRes = await uploadStagedFileBinary({
+            shopId: shop.id,
+            checkoutSessionId: activeSessionId,
+            file: sourceFile
+          });
+          if (!uploadRes.success || !uploadRes.stagedFileId) {
+            throw Object.assign(new Error(uploadRes.error || `Could not upload "${file.fileName}" to staging storage.`), {
+              stagingCode: uploadRes.code || 'STORAGE_UPLOAD_FAILED',
+              stagingTitle: uploadRes.title || 'Unable to Prepare Your Files'
+            });
+          }
+
+          const verifiedPages = Number(uploadRes.verifiedPageCount) || countPages(file);
+          stagedFileMapRef.current.set(file.id, {
+            stagedFileId: uploadRes.stagedFileId,
+            verifiedPageCount: verifiedPages,
+            shopId: shop.id,
+            sessionId: activeSessionId
+          });
+
+          return {
+            file,
+            sourceFile,
+            stagedFileId: uploadRes.stagedFileId,
+            verifiedPages
+          };
+        })
+      );
+
+      return uploadedEntries.map(({ file, sourceFile, stagedFileId, verifiedPages }) => ({
+        stagedFileId,
+        fileName: sourceFile.name,
+        fileType: sourceFile.type || file.fileType || 'application/octet-stream',
+        pageCount: verifiedPages || countPages(file),
+        copies: file.copies,
+        colorMode: file.color || 'BW',
+        paperSize: file.paperSize,
+        duplex: file.sides === 'DOUBLE',
+        pagesToPrint:
+          file.pageSelection === 'CUSTOM' && (file.customRange || file.customPageRange || '').trim()
+            ? (file.customRange || file.customPageRange || '').trim()
+            : undefined
+      }));
+    },
+    [files, shop.id, countPages]
+  );
+
+  const stageOrderWithDeduplication = React.useCallback(
+    async (
+      activeSessionId: string,
+      options?: { forceRestage?: boolean }
+    ): Promise<Awaited<ReturnType<typeof stageCustomerPrintOrder>>> => {
+      const filesSig = files
+        .map(
+          (f) =>
+            `${f.id}:${f.estimatedPages}:${f.copies}:${f.color || 'BW'}:${f.paperSize}:${f.sides}:${f.pageSelection}:${(f.customRange || f.customPageRange || '').trim()}`
+        )
+        .join('|');
+      const fingerprint = `${shop.id}::${activeSessionId}::${customerPhone.trim()}::${filesSig}`;
+
+      if (
+        !options?.forceRestage &&
+        preStagedOrderRef.current &&
+        preStagedOrderRef.current.fingerprint === fingerprint &&
+        preStagedOrderRef.current.stageRes.success &&
+        preStagedOrderRef.current.stageRes.jobId
+      ) {
+        return preStagedOrderRef.current.stageRes;
+      }
+
+      if (
+        !options?.forceRestage &&
+        inFlightStageRef.current &&
+        inFlightStageRef.current.fingerprint === fingerprint
+      ) {
+        return inFlightStageRef.current.promise;
+      }
+
+      const promise = (async () => {
+        let stageInputs = await ensureStagedFileRefs(activeSessionId, Boolean(options?.forceRestage));
+        let stageRes = await stageCustomerPrintOrder({
+          checkoutSessionId: activeSessionId,
+          shopId: shop.id,
+          customerName: 'Counter Customer',
+          customerPhone: customerPhone.trim(),
+          totalAmount: grandTotal,
+          files: stageInputs
+        });
+
+        // Automatically recover once if pre-uploaded reference expired or went missing
+        if (
+          !stageRes.success &&
+          (stageRes.code === 'STAGED_FILE_MISSING' || stageRes.code === 'STAGED_FILE_EXPIRED')
+        ) {
+          stageInputs = await ensureStagedFileRefs(activeSessionId, true);
+          stageRes = await stageCustomerPrintOrder({
+            checkoutSessionId: activeSessionId,
+            shopId: shop.id,
+            customerName: 'Counter Customer',
+            customerPhone: customerPhone.trim(),
+            totalAmount: grandTotal,
+            files: stageInputs
+          });
+        }
+
+        if (stageRes.success && stageRes.jobId && checkoutSessionIdRef.current === activeSessionId) {
+          stagedJobIdRef.current = stageRes.jobId;
+          preStagedOrderRef.current = { fingerprint, stageRes };
+        }
+        return stageRes;
+      })();
+
+      inFlightStageRef.current = { fingerprint, promise };
+      try {
+        return await promise;
+      } finally {
+        if (inFlightStageRef.current?.promise === promise) {
+          inFlightStageRef.current = null;
+        }
+      }
+    },
+    [files, shop.id, customerPhone, grandTotal, ensureStagedFileRefs]
+  );
+
+  // Silently pre-stage the print job as soon as customer enters Step 3 (Payment)
+  // so clicking "Pay Now" skips staging latency and launches Razorpay Checkout immediately.
+  // Never pre-creates a Razorpay order before clicking Pay Now (zero duplicate orders).
+  const lastPreStagePhoneRef = React.useRef<string>(customerPhone.trim());
+  useEffect(() => {
+    if (
+      currentStep !== 3 ||
+      !orderStageFingerprint ||
+      files.length === 0 ||
+      !shop?.id ||
+      shop.id === EMPTY_SHOP.id ||
+      checkoutCompletedRef.current ||
+      isProcessingPayment
+    ) {
+      return;
+    }
+    if (agentStatusRef.current && !agentStatusRef.current.isAvailable) {
+      return;
+    }
+    const allReady = files.every(
+      (f) =>
+        sourceFilesRef.current.has(f.id) &&
+        isCombinationValid(f.paperSize || 'A4', f.color || 'BW', f.sides === 'DOUBLE').isValid
+    );
+    if (!allReady) return;
+
+    const trimmedPhone = customerPhone.trim();
+    if (trimmedPhone && !validatePhone(trimmedPhone, false).isValid) {
+      return;
+    }
+
+    const phoneChangedWhileOnPay = lastPreStagePhoneRef.current !== trimmedPhone;
+    lastPreStagePhoneRef.current = trimmedPhone;
+    const delayMs = phoneChangedWhileOnPay ? 350 : 0;
+
+    const timer = window.setTimeout(() => {
+      if (checkoutCompletedRef.current || payAttemptLockRef.current) return;
+      const activeSessionId = checkoutSessionIdRef.current;
+      if (!activeSessionId) return;
+      void stageOrderWithDeduplication(activeSessionId).catch(() => {
+        // Silent background warmup; any real staging error will be surfaced cleanly on Pay Now click.
+      });
+    }, delayMs);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    currentStep,
+    orderStageFingerprint,
+    files,
+    shop?.id,
+    customerPhone,
+    isProcessingPayment,
+    isCombinationValid,
+    stageOrderWithDeduplication
+  ]);
+
+  const goToStepImmediate = React.useCallback((targetStep: number) => {
+    setStepError(null);
+    setCurrentStep(targetStep);
+    window.scrollTo(0, 0);
+  }, []);
+
+  // Proceed from Upload (Step 1) to Review (Step 2) — instant single-click response
   const handleProceedToReview = async () => {
+    if (navigatingStepRef.current) return;
     setStepError(null);
     if (files.length === 0) {
       setStepError('Please upload at least one file to continue.');
-      return;
-    }
-    const freshStatus = await checkAgentAvailability();
-    if (freshStatus && !freshStatus.isAvailable) {
-      setStepError(freshStatus.message || 'This print shop is currently offline. Please try again later or select another available shop.');
-      showToast('Shop Offline', freshStatus.message, 'error', 5000);
       return;
     }
 
@@ -708,17 +1270,48 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       }
     }
 
-    setCurrentStep(2); // Review step
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Use already-known shop availability immediately (0ms); only await if initial fetch has not returned yet
+    const knownStatus = agentStatusRef.current;
+    if (knownStatus) {
+      if (!knownStatus.isAvailable) {
+        const offlineMsg = knownStatus.message || 'This print shop is currently offline. Please try again later or select another available shop.';
+        setStepError(offlineMsg);
+        showToast('Shop Offline', offlineMsg, 'error', 5000);
+        return;
+      }
+      void loadRazorpayScript();
+      refreshAgentAvailabilityIfStale(8000);
+      setCurrentStep(2);
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    navigatingStepRef.current = true;
+    setNavigatingTargetStep(2);
+    try {
+      const freshStatus = await checkAgentAvailability(undefined, { showSpinner: false });
+      if (freshStatus && !freshStatus.isAvailable) {
+        const offlineMsg = freshStatus.message || 'This print shop is currently offline. Please try again later or select another available shop.';
+        setStepError(offlineMsg);
+        showToast('Shop Offline', offlineMsg, 'error', 5000);
+        return;
+      }
+      void loadRazorpayScript();
+      setCurrentStep(2);
+      window.scrollTo(0, 0);
+    } finally {
+      navigatingStepRef.current = false;
+      setNavigatingTargetStep(null);
+    }
   };
 
-  // Proceed from Review (Step 2) to Payment (Step 3)
+  // Proceed from Review (Step 2) to Payment (Step 3) — instant single-click response
   const handleProceedToPayment = async () => {
+    if (navigatingStepRef.current) return;
     setStepError(null);
-    const freshStatus = await checkAgentAvailability();
-    if (freshStatus && !freshStatus.isAvailable) {
-      setStepError(freshStatus.message || 'This print shop is currently offline. Please try again later or select another available shop.');
-      showToast('Shop Offline', freshStatus.message, 'error', 5000);
+
+    if (files.length === 0) {
+      setStepError('Please upload at least one file to continue.');
       return;
     }
 
@@ -737,8 +1330,59 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       setStepError('The selected paper size is not supported by the connected EasyToPrint printer agent.');
       return;
     }
-    setCurrentStep(3); // Payment step
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    for (const f of files) {
+      if (f.pageSelection === 'CUSTOM') {
+        const check = validatePageRange(f.customRange || '', f.estimatedPages);
+        if (!check.isValid) {
+          setExpandedFileIds((prev) => ({ ...prev, [f.id]: true }));
+          setStepError(`"${f.fileName}": ${check.error}`);
+          return;
+        }
+      }
+      const comboCheck = isCombinationValid(f.paperSize || 'A4', f.color || 'BW', f.sides === 'DOUBLE');
+      if (!comboCheck.isValid) {
+        setStepError(`"${f.fileName}": ${comboCheck.reason || 'Selected print option is unavailable at this shop.'}`);
+        return;
+      }
+    }
+
+    const finalizeMoveToPayment = () => {
+      if (checkoutCompletedRef.current || activeJob) {
+        resetForNewCheckout({ preserveFiles: true });
+      }
+      void loadRazorpayScript();
+      setCurrentStep(3);
+      window.scrollTo(0, 0);
+    };
+
+    const knownStatus = agentStatusRef.current;
+    if (knownStatus) {
+      if (!knownStatus.isAvailable) {
+        const offlineMsg = knownStatus.message || 'This print shop is currently offline. Please try again later or select another available shop.';
+        setStepError(offlineMsg);
+        showToast('Shop Offline', offlineMsg, 'error', 5000);
+        return;
+      }
+      refreshAgentAvailabilityIfStale(8000);
+      finalizeMoveToPayment();
+      return;
+    }
+
+    navigatingStepRef.current = true;
+    setNavigatingTargetStep(3);
+    try {
+      const freshStatus = await checkAgentAvailability(undefined, { showSpinner: false });
+      if (freshStatus && !freshStatus.isAvailable) {
+        const offlineMsg = freshStatus.message || 'This print shop is currently offline. Please try again later or select another available shop.';
+        setStepError(offlineMsg);
+        showToast('Shop Offline', offlineMsg, 'error', 5000);
+        return;
+      }
+      finalizeMoveToPayment();
+    } finally {
+      navigatingStepRef.current = false;
+      setNavigatingTargetStep(null);
+    }
   };
 
   const transitionToDispatchedConfirmation = React.useCallback(
@@ -763,10 +1407,20 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         paymentId: params.paymentId
       });
       completedOrdersRef.current.add(params.orderId);
+      checkoutCompletedRef.current = true;
+      payAttemptLockRef.current = false;
+      stagedJobIdRef.current = null;
+      stagedFileMapRef.current.clear();
+      uploadPromisesRef.current.clear();
       clearOrderSession();
+      setActiveOrderId(null);
+      setCheckoutStatus('PAID');
+      setIsProcessingPayment(false);
       setPaymentPendingState(null);
       setPaymentFailedState(null);
+      setStagingFailedState(null);
       setStepError(null);
+      setRazorpayError(null);
       setActiveJob(job);
       setCurrentStep(4);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -943,12 +1597,21 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     }
   };
 
-  // Pay Now triggers official Razorpay Checkout with server-validated order, pre-staged files, and atomic server-side dispatch
+  // Pay Now stages print files cleanly FIRST, creates a fresh Razorpay order on the backend, and opens Checkout only after a valid order_id returns
   const handlePayNow = async () => {
     if (payAttemptLockRef.current || isProcessingPayment) return;
     payAttemptLockRef.current = true;
 
+    const wasFailedOrCancelled =
+      Boolean(paymentFailedState) ||
+      checkoutStatus === 'PAYMENT_FAILED' ||
+      checkoutStatus === 'CANCELLED';
+
+    // Immediately show loading feedback & clear stale warnings before async steps
+    setIsProcessingPayment(true);
+    setPaymentProcessingLabel('Preparing Secure Payment...');
     setPaymentFailedState(null);
+    setStagingFailedState(null);
     setPaymentPendingState(null);
     setStepError(null);
     setRazorpayError(null);
@@ -957,15 +1620,9 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     let checkoutModalActive = false;
     let modalDismissedOrCompleted = false;
     let openWatchdog: NodeJS.Timeout | null = null;
+    let failedDuringStaging = false;
 
     try {
-      const freshStatus = await checkAgentAvailability();
-      if (freshStatus && !freshStatus.isAvailable) {
-        setStepError(freshStatus.message || 'This print shop is currently offline. Please try again later or select another available shop.');
-        showToast('Shop Offline', freshStatus.message, 'error', 5000);
-        return;
-      }
-
       if (customerPhone.trim()) {
         setPhoneTouched(true);
         const phoneCheck = validatePhone(customerPhone, false);
@@ -975,14 +1632,25 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         }
       }
 
-      // Pre-checkout validation: Ensure all files are still in memory BEFORE creating a Razorpay order
+      if (files.length === 0) {
+        setStepError('Please upload at least one print file before paying.');
+        return;
+      }
+
+      // Pre-checkout memory & shop capability verification
       for (const file of files) {
         if (!sourceFilesRef.current.get(file.id)) {
-          setStepError(`The original file for "${file.fileName}" is unavailable. Please re-upload it before paying.`);
+          failedDuringStaging = true;
+          setStagingFailedState({
+            title: 'File Missing From Browser',
+            message: `The original file for "${file.fileName}" is unavailable. Please re-upload it before paying.`
+          });
+          setCheckoutStatus('STAGING_FAILED');
           return;
         }
         const check = isCombinationValid(file.paperSize || 'A4', file.color || 'BW', file.sides === 'DOUBLE');
         if (!check.isValid) {
+          failedDuringStaging = true;
           setCustomerErrorModal({
             isOpen: true,
             code: 'NO_COMPATIBLE_PRINTER',
@@ -991,84 +1659,57 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
             fileName: file.fileName,
             actionText: 'Adjust Settings'
           });
+          setStagingFailedState({
+            title: 'Print Option Unavailable',
+            message: `Print settings for "${file.fileName}" require adjustment: ${check.reason || 'Incompatible printer settings'}`,
+            code: 'NO_COMPATIBLE_PRINTER'
+          });
+          setCheckoutStatus('STAGING_FAILED');
           return;
         }
       }
 
-      const configuredKey = shop.razorpaySettings?.keyId?.trim();
-      const effectiveKey = getEffectiveRazorpayKey(configuredKey);
-
-      setIsProcessingPayment(true);
-      setPaymentProcessingLabel('Creating payment order...');
-
-      // 1. Ensure Razorpay Checkout script is loaded
-      const scriptLoaded = await loadRazorpayScript();
-      if (!scriptLoaded) {
-        throw new Error('Payment gateway SDK could not be loaded. Please check your internet connection.');
+      // Guarantee a fresh session if retrying after a completed checkout or shop change
+      let activeSessionId = checkoutSessionIdRef.current;
+      if (checkoutCompletedRef.current || !activeSessionId) {
+        activeSessionId = createCheckoutSessionId();
+        checkoutSessionIdRef.current = activeSessionId;
+        setCheckoutSessionId(activeSessionId);
+        checkoutCompletedRef.current = false;
+        stagedJobIdRef.current = null;
+        preStagedOrderRef.current = null;
+        inFlightStageRef.current = null;
       }
 
-      // 2. Create server-validated Razorpay order (MUST return valid order ID before opening checkout)
-      const orderRes = await createRazorpayOrder({
-        amount: grandTotal,
-        shopId: shop.id,
-        notes: {
-          shopName: shop.name,
-          documentsCount: files.length.toString()
-        }
-      });
+      // 1. Ensure Razorpay script is loaded in parallel (usually already cached from Step 1/2)
+      const scriptPromise = loadRazorpayScript();
 
-      if (!orderRes.success || (!orderRes.order_id && !orderRes.orderId)) {
-        throw new Error(orderRes.error || 'Payment gateway failed to initialize order. Please try again.');
+      // 2. Reuse already pre-staged order (0ms!) or join in-flight staging without duplicating requests
+      const hasWarmStage =
+        Boolean(preStagedOrderRef.current?.stageRes.success) &&
+        Boolean(preStagedOrderRef.current?.stageRes.jobId) &&
+        preStagedOrderRef.current?.fingerprint ===
+          `${shop.id}::${activeSessionId}::${customerPhone.trim()}::${files
+            .map(
+              (f) =>
+                `${f.id}:${f.estimatedPages}:${f.copies}:${f.color || 'BW'}:${f.paperSize}:${f.sides}:${f.pageSelection}:${(f.customRange || f.customPageRange || '').trim()}`
+            )
+            .join('|')}`;
+
+      if (!hasWarmStage) {
+        setCheckoutStatus('STAGING_FILES');
+        setPaymentProcessingLabel('Preparing print files...');
+      } else {
+        setCheckoutStatus('CREATING_ORDER');
+        setPaymentProcessingLabel('Opening Razorpay...');
       }
 
-      const backendOrderId = orderRes.order_id || orderRes.orderId;
-      if (!backendOrderId || !backendOrderId.startsWith('order_')) {
-        throw new Error('Payment gateway did not return a valid order ID.');
-      }
+      const stageRes = await stageOrderWithDeduplication(activeSessionId);
 
-      setActiveOrderId(backendOrderId);
-      saveOrderSession({
-        orderId: backendOrderId,
-        shopId: shop.id,
-        customerPhone: customerPhone.trim() || undefined,
-        totalAmount: grandTotal
-      });
-
-      // 3. Stage files on backend BEFORE opening Razorpay Checkout so server can atomically dispatch on payment verification!
-      setPaymentProcessingLabel('Preparing print files...');
-      const payloadFiles = await Promise.all(files.map(async (file) => {
-        const sourceFile = sourceFilesRef.current.get(file.id);
-        if (!sourceFile) {
-          throw new Error(`The original file for "${file.fileName}" is unavailable. Please re-upload it.`);
-        }
-        return {
-          fileName: sourceFile.name,
-          fileType: sourceFile.type || file.fileType || 'application/octet-stream',
-          fileBase64: await fileToBase64(sourceFile),
-          pageCount: countPages(file),
-          copies: file.copies,
-          colorMode: file.color || 'BW',
-          paperSize: file.paperSize,
-          duplex: file.sides === 'DOUBLE',
-          pagesToPrint:
-            file.pageSelection === 'CUSTOM' && (file.customRange || file.customPageRange || '').trim()
-              ? (file.customRange || file.customPageRange || '').trim()
-              : undefined
-        };
-      }));
-
-      const stageRes = await stageCustomerPrintOrder({
-        orderId: backendOrderId,
-        shopId: shop.id,
-        customerName: 'Counter Customer',
-        customerPhone: customerPhone.trim(),
-        totalAmount: grandTotal,
-        files: payloadFiles
-      });
-
-      if (!stageRes.success) {
+      if (!stageRes.success || !stageRes.jobId) {
+        failedDuringStaging = true;
         if (stageRes.code === 'PRINTERS_OFFLINE' || stageRes.code === 'NO_REGISTERED_PRINTERS') {
-          void checkAgentAvailability();
+          void checkAgentAvailability(undefined, { showSpinner: false });
         }
         if (stageRes.code) {
           setCustomerErrorModal({
@@ -1082,16 +1723,73 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
             actionText: 'Review Settings'
           });
         }
-        throw new Error(stageRes.error || 'Could not stage print files before payment. Please try again.');
+        const stagingErrMsg = stageRes.message || stageRes.error || 'Could not stage print files before payment. Please retry.';
+        setStagingFailedState({
+          title: stageRes.title || 'Unable to Prepare Your Files',
+          message: stagingErrMsg,
+          code: stageRes.code
+        });
+        setCheckoutStatus('STAGING_FAILED');
+        showToast('Staging Failed', stagingErrMsg, 'error', 5000);
+        return;
       }
 
+      stagedJobIdRef.current = stageRes.jobId;
+
+      // 3. Ensure Razorpay script loaded & create fresh server-validated Razorpay Order
+      setCheckoutStatus('CREATING_ORDER');
       setPaymentProcessingLabel('Opening Razorpay...');
 
+      const [scriptLoaded, orderRes] = await Promise.all([
+        scriptPromise,
+        createRazorpayOrder({
+          amount: stageRes.authoritativeTotalAmount ?? grandTotal,
+          amountInPaise: stageRes.authoritativeAmountMinor,
+          checkoutSessionId: activeSessionId,
+          stagedJobId: stageRes.jobId,
+          forceNewOrder: wasFailedOrCancelled,
+          shopId: shop.id,
+          notes: {
+            shopName: shop.name,
+            documentsCount: files.length.toString(),
+            checkoutSessionId: activeSessionId
+          }
+        })
+      ]);
+
+      if (!scriptLoaded) {
+        throw new Error('Payment gateway SDK could not be loaded. Please check your internet connection.');
+      }
+
+      if (!orderRes.success || (!orderRes.order_id && !orderRes.orderId)) {
+        throw new Error(orderRes.error || 'Payment gateway failed to initialize order. Please try again.');
+      }
+
+      const backendOrderId = orderRes.order_id || orderRes.orderId;
+      if (!backendOrderId || !backendOrderId.startsWith('order_')) {
+        throw new Error('Payment gateway did not return a valid order ID.');
+      }
+
+      setActiveOrderId(backendOrderId);
+      saveOrderSession({
+        orderId: backendOrderId,
+        checkoutSessionId: activeSessionId,
+        status: 'CREATED',
+        shopId: shop.id,
+        customerPhone: customerPhone.trim() || undefined,
+        totalAmount: stageRes.authoritativeTotalAmount ?? grandTotal
+      });
+
+      setCheckoutStatus('PAYMENT_CHECKOUT_OPEN');
+      setPaymentProcessingLabel('Opening Razorpay...');
+
+      const configuredKey = shop.razorpaySettings?.keyId?.trim();
+      const effectiveKey = getEffectiveRazorpayKey(configuredKey);
       const activeKey = orderRes.key_id && isRealRazorpayKey(orderRes.key_id)
         ? orderRes.key_id.trim()
         : effectiveKey;
 
-      const amountInPaise = orderRes.amount || Math.round(grandTotal * 100);
+      const amountInPaise = orderRes.amount || stageRes.authoritativeAmountMinor || Math.round(grandTotal * 100);
 
       // Start background polling to reconcile UPI payments completed on external apps
       const startPolling = (orderIdToPoll: string) => {
@@ -1128,6 +1826,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                 } catch (_) {}
               }
               setIsProcessingPayment(false);
+              setCheckoutStatus('PAYMENT_FAILED');
               setPaymentPendingState(null);
               setPaymentFailedState({
                 status: 'FAILED',
@@ -1147,6 +1846,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         if (!modalDismissedOrCompleted && !document.querySelector('iframe.razorpay-checkout-frame')) {
           payAttemptLockRef.current = false;
           setIsProcessingPayment(false);
+          setCheckoutStatus('PAYMENT_FAILED');
           setPaymentFailedState({
             status: 'FAILED',
             message: 'Payment window did not open. Please verify popups/extensions are not blocking checkout, then tap Retry.'
@@ -1170,10 +1870,11 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         notes: {
           shopId: shop.id,
           shopName: shop.name,
-          documentsCount: files.length.toString()
+          documentsCount: files.length.toString(),
+          checkoutSessionId: activeSessionId
         },
         theme: {
-          color: '#059669' // Emerald Green matching Pay Now
+          color: '#00B32D'
         },
         modal: {
           backdropclose: false,
@@ -1203,6 +1904,15 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
               if (check.status === 'PENDING') {
                 setIsProcessingPayment(false);
+                setCheckoutStatus('PAYMENT_PROCESSING');
+                saveOrderSession({
+                  orderId: backendOrderId,
+                  checkoutSessionId: activeSessionId,
+                  status: 'PENDING',
+                  shopId: shop.id,
+                  customerPhone: customerPhone.trim() || undefined,
+                  totalAmount: stageRes.authoritativeTotalAmount ?? grandTotal
+                });
                 setPaymentPendingState({
                   status: 'PENDING',
                   orderId: backendOrderId,
@@ -1220,6 +1930,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
               if (check.status === 'FAILED') {
                 stopPolling();
                 setIsProcessingPayment(false);
+                setCheckoutStatus('PAYMENT_FAILED');
                 setPaymentFailedState({
                   status: 'FAILED',
                   message: check.message || 'Payment was declined or failed.'
@@ -1232,6 +1943,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
             stopPolling();
             setIsProcessingPayment(false);
+            setCheckoutStatus('CANCELLED');
             setPaymentFailedState({
               status: 'CANCELLED',
               message: 'Payment window was closed. If your money was deducted, tap "Already Paid / Check Payment" below to recover and print.'
@@ -1253,6 +1965,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
           // STRICT: Verify transaction on server before marking PAID
           if (!response || !response.razorpay_payment_id) {
             setIsProcessingPayment(false);
+            setCheckoutStatus('PAYMENT_FAILED');
             setPaymentFailedState({
               status: 'FAILED',
               message: 'Payment verification failed: No payment ID returned by gateway. Order was not placed.'
@@ -1269,12 +1982,15 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
           const resolvedOrderId = response.razorpay_order_id || backendOrderId;
           saveOrderSession({
             orderId: resolvedOrderId,
+            checkoutSessionId: activeSessionId,
+            status: 'PENDING',
             paymentId: response.razorpay_payment_id,
             shopId: shop.id,
             customerPhone: customerPhone.trim() || undefined,
-            totalAmount: grandTotal
+            totalAmount: stageRes.authoritativeTotalAmount ?? grandTotal
           });
 
+          setCheckoutStatus('VERIFYING_PAYMENT');
           setPaymentProcessingLabel('Verifying payment & dispatching...');
 
           try {
@@ -1306,6 +2022,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                 );
               } else {
                 setIsProcessingPayment(false);
+                setCheckoutStatus('PAYMENT_FAILED');
                 const errMsg = verification.error || recovered.message || 'Payment verification failed. Tap "Already Paid / Check Payment" below to verify.';
                 setPaymentFailedState({
                   status: 'FAILED',
@@ -1329,6 +2046,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
               );
             } else {
               setIsProcessingPayment(false);
+              setCheckoutStatus('PAYMENT_FAILED');
               const errMsg = verErr.message || 'Failed to verify payment with server. Tap "Already Paid / Check Payment" below.';
               setPaymentFailedState({
                 status: 'FAILED',
@@ -1353,6 +2071,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         stopPolling();
         if (openWatchdog) clearTimeout(openWatchdog);
         setIsProcessingPayment(false);
+        setCheckoutStatus('PAYMENT_FAILED');
         console.warn('Payment failed:', errResp);
         const errMsg = errResp?.error?.description || 'Transaction declined or failed. Amount was not deducted. Order was not placed.';
         setPaymentFailedState({
@@ -1370,13 +2089,23 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       if (openWatchdog) clearTimeout(openWatchdog);
       setIsProcessingPayment(false);
       setPaymentPendingState(null);
-      console.warn('Payment gateway error:', err);
-      const errMsg = err.message || 'Payment gateway could not be opened. Please try again.';
-      setPaymentFailedState({
-        status: 'FAILED',
-        message: errMsg
-      });
-      showToast('Payment Error', errMsg, 'error', 6000);
+      const errMsg = err.message || 'Could not initiate payment. Please try again.';
+      if (failedDuringStaging || err?.stagingCode) {
+        setCheckoutStatus('STAGING_FAILED');
+        setStagingFailedState({
+          title: err?.stagingTitle || 'Unable to Prepare Your Files',
+          message: errMsg,
+          code: err?.stagingCode
+        });
+        showToast('Staging Failed', errMsg, 'error', 5000);
+      } else {
+        setCheckoutStatus('PAYMENT_FAILED');
+        setPaymentFailedState({
+          status: 'FAILED',
+          message: errMsg
+        });
+        showToast('Payment Error', errMsg, 'error', 6000);
+      }
     } finally {
       if (!checkoutModalActive) {
         payAttemptLockRef.current = false;
@@ -1563,8 +2292,8 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
               {/* Step 1: Upload */}
               <button
                 type="button"
-                onClick={() => setCurrentStep(1)}
-                className="flex items-center gap-1.5 font-bold cursor-pointer"
+                onClick={() => goToStepImmediate(1)}
+                className="flex items-center gap-1.5 font-bold cursor-pointer touch-manipulation active:scale-95 transition-transform"
               >
                 <div
                   className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
@@ -1587,9 +2316,16 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
               {/* Step 2: Review */}
               <button
                 type="button"
-                onClick={() => files.length > 0 && setCurrentStep(2)}
-                disabled={files.length === 0}
-                className={`flex items-center gap-1.5 font-bold cursor-pointer ${
+                onClick={() => {
+                  if (files.length === 0 || currentStep === 2) return;
+                  if (currentStep > 2) {
+                    goToStepImmediate(2);
+                  } else {
+                    void handleProceedToReview();
+                  }
+                }}
+                disabled={files.length === 0 || navigatingTargetStep !== null}
+                className={`flex items-center gap-1.5 font-bold cursor-pointer touch-manipulation active:scale-95 transition-transform ${
                   files.length === 0 ? 'opacity-40 pointer-events-none' : ''
                 }`}
               >
@@ -1616,9 +2352,12 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
               {/* Step 3: Pay */}
               <button
                 type="button"
-                onClick={() => files.length > 0 && setCurrentStep(3)}
-                disabled={files.length === 0}
-                className={`flex items-center gap-1.5 font-bold cursor-pointer ${
+                onClick={() => {
+                  if (files.length === 0 || currentStep === 3) return;
+                  void handleProceedToPayment();
+                }}
+                disabled={files.length === 0 || navigatingTargetStep !== null}
+                className={`flex items-center gap-1.5 font-bold cursor-pointer touch-manipulation active:scale-95 transition-transform ${
                   files.length === 0 ? 'opacity-40 pointer-events-none' : ''
                 }`}
               >
@@ -1640,18 +2379,13 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
       {/* 3. MAIN WORKSPACE */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-3 sm:pt-8">
-        <AnimatePresence mode="wait">
           {/* ========================================================================= */}
           {/* STEP 1: UPLOAD & CUSTOMIZE (3-STEP FLOW: UPLOAD -> REVIEW -> PAY)        */}
           {/* ========================================================================= */}
           {currentStep === 1 && (
-            <motion.div
+            <div
               key="step-upload"
-              variants={stepVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="max-w-3xl mx-auto space-y-3.5 sm:space-y-6"
+              className="max-w-3xl mx-auto space-y-3.5 sm:space-y-6 etp-page-enter"
             >
               {/* COMPACT OFFLINE STATUS BADGE */}
               {agentStatus && !agentStatus.isAvailable && (
@@ -2186,36 +2920,43 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                       </div>
 
                       <button
+                        type="button"
                         onClick={handleProceedToReview}
-                        className="w-full sm:w-auto h-12 px-7 bg-[#00B32D] hover:bg-[#008F25] active:scale-95 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        disabled={navigatingTargetStep !== null}
+                        className="w-full sm:w-auto h-12 px-7 bg-[#00B32D] hover:bg-[#008F25] active:scale-95 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer touch-manipulation disabled:opacity-75 disabled:cursor-not-allowed"
                       >
-                        <span>Continue to Review</span>
-                        <ArrowRight className="w-4 h-4" />
+                        {navigatingTargetStep === 2 ? (
+                          <>
+                            <RotateCw className="w-4 h-4 animate-spin" />
+                            <span>Checking shop...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>Continue to Review</span>
+                            <ArrowRight className="w-4 h-4" />
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
                 )}
-            </motion.div>
+            </div>
           )}
 
           {/* ========================================================================= */}
           {/* STEP 2: REVIEW YOUR PRINT ORDER (3-STEP FLOW: UPLOAD -> REVIEW -> PAY)    */}
           {/* ========================================================================= */}
           {currentStep === 2 && (
-            <motion.div
+            <div
               key="step-review"
-              variants={stepVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="max-w-xl mx-auto space-y-5"
+              className="max-w-xl mx-auto space-y-5 etp-page-enter"
             >
               {/* Top Navigation Row with Back Button */}
               <div className="flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(1)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#111111] hover:text-black bg-white hover:bg-[#F7F8F7] border border-[#E1E7E1] rounded-xl transition-all active:scale-95 shadow-2xs cursor-pointer"
+                  onClick={() => goToStepImmediate(1)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#111111] hover:text-black bg-white hover:bg-[#F7F8F7] border border-[#E1E7E1] rounded-xl transition-all active:scale-95 shadow-2xs cursor-pointer touch-manipulation"
                 >
                   <ArrowLeft className="w-3.5 h-3.5 text-[#646B65]" />
                   <span>Back to Upload</span>
@@ -2319,9 +3060,9 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                             type="button"
                             onClick={() => {
                               setExpandedFileIds((p) => ({ ...p, [file.id]: true }));
-                              setCurrentStep(1);
+                              goToStepImmediate(1);
                             }}
-                            className="h-7 px-2.5 bg-[#F7F8F7] hover:bg-[#E1E7E1] text-[#111111] border border-[#E1E7E1] text-[11px] font-semibold rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                            className="h-7 px-2.5 bg-[#F7F8F7] hover:bg-[#E1E7E1] text-[#111111] border border-[#E1E7E1] text-[11px] font-semibold rounded-lg flex items-center gap-1 cursor-pointer touch-manipulation transition-colors"
                           >
                             <Edit3 className="w-3.5 h-3.5 text-[#00B32D]" />
                             <span>Edit</span>
@@ -2349,41 +3090,49 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
               {/* Action Buttons */}
               <div className="space-y-3 pt-2">
                 <button
+                  type="button"
                   onClick={handleProceedToPayment}
-                  className="w-full h-12 bg-[#00B32D] hover:bg-[#008F25] active:scale-95 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  disabled={navigatingTargetStep !== null}
+                  className="w-full h-12 bg-[#00B32D] hover:bg-[#008F25] active:scale-95 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer touch-manipulation disabled:opacity-75 disabled:cursor-not-allowed"
                 >
-                  <span>Continue to Payment</span>
-                  <ArrowRight className="w-4 h-4" />
+                  {navigatingTargetStep === 3 ? (
+                    <>
+                      <RotateCw className="w-4 h-4 animate-spin" />
+                      <span>Checking shop...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Continue to Payment</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
 
                 <button
-                  onClick={() => setCurrentStep(1)}
-                  className="w-full py-2.5 text-xs font-semibold text-[#646B65] hover:text-[#111111] text-center transition-colors cursor-pointer"
+                  type="button"
+                  onClick={() => goToStepImmediate(1)}
+                  className="w-full py-2.5 text-xs font-semibold text-[#646B65] hover:text-[#111111] text-center transition-colors cursor-pointer touch-manipulation"
                 >
                   ← Back to Upload
                 </button>
               </div>
-            </motion.div>
+            </div>
           )}
 
           {/* ========================================================================= */}
           {/* STEP 3: PAYMENT (3-STEP FLOW: UPLOAD -> REVIEW -> PAY)                    */}
           {/* ========================================================================= */}
           {currentStep === 3 && (
-            <motion.div
+            <div
               key="step-pay"
-              variants={stepVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="max-w-md mx-auto space-y-5"
+              className="max-w-md mx-auto space-y-5 etp-page-enter"
             >
               {/* Top Navigation Row with Back Button */}
               <div className="flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(2)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#111111] hover:text-black bg-white hover:bg-[#F7F8F7] border border-[#E1E7E1] rounded-xl transition-all active:scale-95 shadow-2xs cursor-pointer"
+                  onClick={() => goToStepImmediate(2)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#111111] hover:text-black bg-white hover:bg-[#F7F8F7] border border-[#E1E7E1] rounded-xl transition-all active:scale-95 shadow-2xs cursor-pointer touch-manipulation"
                 >
                   <ArrowLeft className="w-3.5 h-3.5 text-[#646B65]" />
                   <span>Back to Review</span>
@@ -2405,22 +3154,25 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
               {/* Payment Card: Clean, Modern & Direct */}
               <div className="bg-white rounded-3xl border border-[#E1E7E1] p-5 sm:p-7 shadow-sm space-y-5">
                 {/* Header Price & Security Badge */}
-                <div className="flex items-center justify-between pb-4 border-b border-[#E1E7E1]">
-                  <div>
-                    <span className="text-[11px] font-bold text-[#646B65] uppercase tracking-wider block">
+                <div
+                  data-testid="payment-summary-header"
+                  className="flex flex-col min-[350px]:flex-row min-[350px]:flex-wrap min-[350px]:items-center min-[350px]:justify-between gap-x-2 min-[390px]:gap-x-3 gap-y-2.5 pb-4 border-b border-[#E1E7E1]"
+                >
+                  <div className="min-w-0 text-left">
+                    <span className="block text-[9.5px] min-[375px]:text-[10px] sm:text-[11px] font-bold text-[#646B65] uppercase tracking-[0.02em] min-[375px]:tracking-wide sm:tracking-wider leading-tight whitespace-nowrap">
                       Total Payable Amount
                     </span>
-                    <span className="font-mono font-black text-3xl text-[#111111] tracking-tight">
+                    <span className="block font-mono font-black text-2xl sm:text-3xl text-[#111111] tracking-tight leading-none mt-1 sm:mt-1.5 tabular-nums">
                       ₹{grandTotal.toFixed(0)}
                     </span>
                   </div>
 
-                  <div className="text-right">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] bg-[#E8F8EC] px-3 py-1 rounded-full border border-[#A7F3D0]">
-                      <ShieldCheck className="w-4 h-4 text-[#00B32D]" />
+                  <div className="flex flex-col items-start min-[350px]:items-center sm:items-end shrink-0 max-w-full">
+                    <span className="inline-flex items-center gap-1 sm:gap-1.5 max-w-full text-[10px] min-[375px]:text-[10.5px] sm:text-xs font-bold text-[#008F25] bg-[#E8F8EC] px-2 py-0.5 sm:px-3 sm:py-1 rounded-full border border-[#A7F3D0] leading-snug whitespace-nowrap">
+                      <ShieldCheck className="w-3 h-3 sm:w-4 sm:h-4 text-[#00B32D] shrink-0" aria-hidden="true" />
                       <span>100% Secure Payment</span>
                     </span>
-                    <span className="text-[10px] text-[#646B65] font-mono block mt-1">
+                    <span className="block text-[9.5px] min-[375px]:text-[10px] text-[#646B65] font-mono leading-tight mt-1 whitespace-nowrap">
                       Official Payment Gateway
                     </span>
                   </div>
@@ -2542,14 +3294,49 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                         <button
                           type="button"
                           onClick={() => {
-                            stopPolling();
-                            setPaymentPendingState(null);
+                            resetForNewCheckout({ preserveFiles: true });
+                            setCheckoutStatus('READY_FOR_PAYMENT');
                           }}
                           className="px-3 py-1.5 bg-white hover:bg-amber-100 text-amber-800 font-medium text-xs rounded-xl border border-amber-300 transition-all cursor-pointer"
                         >
                           Cancel / Start Over
                         </button>
                       )}
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* STAGING FAILED BANNER */}
+                {stagingFailedState && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 space-y-2 text-left"
+                  >
+                    <div className="flex items-center gap-2 font-bold text-amber-950">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>{stagingFailedState.title || 'Unable to Prepare Your Files'}</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 pl-6 break-words">
+                      {stagingFailedState.message}
+                    </p>
+                    <div className="pl-6 pt-1 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handlePayNow}
+                        disabled={isProcessingPayment || isCheckingStatus}
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <RotateCw className="w-3 h-3" />
+                        <span>Retry File Staging & Pay</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => goToStepImmediate(1)}
+                        className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100 text-amber-900 font-semibold text-[11px] rounded-lg transition-all cursor-pointer touch-manipulation"
+                      >
+                        Edit Files
+                      </button>
                     </div>
                   </motion.div>
                 )}
@@ -2565,10 +3352,10 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                       <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
                       <span>Payment Incomplete · Order Not Placed</span>
                     </div>
-                    <p className="text-[11px] text-red-700 pl-6">
+                    <p className="text-[11px] text-red-700 pl-6 break-words">
                       {paymentFailedState.message}
                     </p>
-                    <div className="pl-6 pt-1 flex items-center gap-2">
+                    <div className="pl-6 pt-1 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => handleManualStatusCheck(activeOrderId || undefined)}
@@ -2595,7 +3382,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                     type="button"
                     disabled={isProcessingPayment || isCheckingStatus || paymentPendingState?.kind === 'DISPATCH'}
                     onClick={handlePayNow}
-                    className="w-full h-14 bg-[#00B32D] hover:bg-[#008F25] active:scale-[0.99] text-white font-black text-sm uppercase tracking-wider rounded-2xl shadow-md transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
+                    className="w-full h-14 bg-[#00B32D] hover:bg-[#008F25] active:scale-[0.99] text-white font-black text-sm uppercase tracking-wider rounded-2xl shadow-md transition-all flex items-center justify-center gap-2.5 cursor-pointer touch-manipulation disabled:opacity-75 disabled:cursor-not-allowed"
                   >
                     {isProcessingPayment ? (
                       <>
@@ -2623,7 +3410,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
                   {/* Always-Available "Already Paid / Check Payment" Recovery Action */}
                   <div className="pt-1 space-y-2.5">
-                    <div className="flex items-center justify-center gap-3">
+                    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2">
                       <button
                         type="button"
                         onClick={() => handleManualStatusCheck(activeOrderId || undefined)}
@@ -2652,19 +3439,19 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                         <label className="text-[11px] font-bold text-[#111111] block">
                           Recover Paid Order (Payment ID, Order ID, or 10-digit Mobile)
                         </label>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                           <input
                             type="text"
                             placeholder="pay_... or order_... or 10-digit phone"
                             value={recoveryLookupInput}
                             onChange={(e) => setRecoveryLookupInput(e.target.value)}
-                            className="flex-1 h-9 px-3 bg-white border border-[#E1E7E1] rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#00B32D]"
+                            className="min-w-0 w-full flex-1 h-9 px-3 bg-white border border-[#E1E7E1] rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[#00B32D]"
                           />
                           <button
                             type="button"
                             disabled={isCheckingStatus || isProcessingPayment}
                             onClick={() => handleManualStatusCheck(undefined, recoveryLookupInput)}
-                            className="h-9 px-3.5 bg-[#00B32D] hover:bg-[#008F25] text-white font-bold text-xs rounded-xl shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                            className="h-9 px-3.5 bg-[#00B32D] hover:bg-[#008F25] text-white font-bold text-xs rounded-xl shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
                           >
                             <RotateCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
                             <span>Verify & Print</span>
@@ -2704,26 +3491,23 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
               <div className="text-center">
                 <button
-                  onClick={() => setCurrentStep(2)}
-                  className="text-xs font-semibold text-[#646B65] hover:text-[#111111] transition-colors"
+                  type="button"
+                  onClick={() => goToStepImmediate(2)}
+                  className="text-xs font-semibold text-[#646B65] hover:text-[#111111] transition-colors cursor-pointer touch-manipulation"
                 >
                   ← Back to Order Review
                 </button>
               </div>
-            </motion.div>
+            </div>
           )}
 
           {/* ========================================================================= */}
           {/* STEP 4: ORDER TRACKING SCREEN WITH CODE COPY & STATUS                     */}
           {/* ========================================================================= */}
           {currentStep === 4 && activeJob && (
-            <motion.div
+            <div
               key="step-tracking"
-              variants={stepVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="max-w-md mx-auto space-y-6"
+              className="max-w-md mx-auto space-y-6 etp-page-enter"
             >
               <div className="bg-white rounded-3xl border border-[#E1E7E1] p-6 sm:p-8 shadow-sm space-y-5 text-center">
                 <div className="w-14 h-14 rounded-full bg-[#E8F8EC] text-[#00B32D] flex items-center justify-center mx-auto shadow-2xs">
@@ -2824,25 +3608,27 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                 <div className="flex gap-3">
                   <button
                     onClick={() => {
+                      resetForNewCheckout();
                       setCurrentStep(1);
-                      setActiveJob(null);
-                      setFiles([]);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
                     className="flex-1 h-11 bg-[#F7F8F7] hover:bg-[#E1E7E1] active:scale-95 text-[#111111] border border-[#E1E7E1] font-bold text-xs rounded-xl cursor-pointer transition-all"
                   >
                     Print More
                   </button>
                   <button
-                    onClick={() => navigate('/')}
+                    onClick={() => {
+                      resetForNewCheckout();
+                      navigate('/');
+                    }}
                     className="flex-1 h-11 bg-[#00B32D] hover:bg-[#008F25] active:scale-95 text-white font-bold text-xs rounded-xl cursor-pointer transition-all shadow-xs"
                   >
                     Done
                   </button>
                 </div>
               </div>
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
       </main>
 
       {/* 4. PDF & DOCUMENT PRINT PREVIEW MODAL */}

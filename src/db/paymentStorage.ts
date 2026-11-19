@@ -15,6 +15,9 @@ import {
   computeEffectiveCapabilities
 } from '../types/printerCapabilities';
 import { generateUniqueShopCode, isValidShopCode } from '../lib/shopCodeService';
+import { resolveUnitPrice } from '../lib/utils/pricing';
+import { validatePageRange } from '../lib/validation';
+import { PricingRule } from '../types';
 
 dotenv.config({ override: true });
 
@@ -107,6 +110,10 @@ export interface StoredPrintAgentJob {
     fileName: string;
     fileUrl?: string;
     downloadUrl?: string;
+    objectPath?: string;
+    mime?: string;
+    sha256?: string;
+    sizeBytes?: number;
     pageCount: number;
     copies: number;
     colorMode: 'BW' | 'COLOR';
@@ -115,6 +122,8 @@ export interface StoredPrintAgentJob {
     pagesToPrint?: string;
   }>;
   totalAmount: number;
+  checkoutSessionId?: string;
+  stagingStatus?: string;
   paymentStatus: 'SUCCESS' | 'PENDING';
   printStatus:
     | 'STAGED'
@@ -874,8 +883,70 @@ export async function initializePaymentTables(maxRetries = 3): Promise<void> {
             ALTER TABLE public.payment_orders DROP CONSTRAINT IF EXISTS payment_orders_check;
             ALTER TABLE public.payment_orders ADD CONSTRAINT payment_orders_check 
               CHECK (((purpose = 'SUBSCRIPTION' AND job_id IS NULL) OR (purpose = 'PRINT_JOB')));
+            ALTER TABLE public.payment_orders ADD COLUMN IF NOT EXISTS checkout_session_id VARCHAR(128);
+            ALTER TABLE public.payment_orders ADD COLUMN IF NOT EXISTS staged_job_id VARCHAR(64);
+            CREATE INDEX IF NOT EXISTS idx_payment_orders_checkout_session
+              ON public.payment_orders (checkout_session_id)
+              WHERE checkout_session_id IS NOT NULL;
+          END IF;
+
+          IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'print_agent_jobs') THEN
+            ALTER TABLE public.print_agent_jobs ADD COLUMN IF NOT EXISTS checkout_session_id VARCHAR(128);
+            ALTER TABLE public.print_agent_jobs ADD COLUMN IF NOT EXISTS staging_status VARCHAR(32) DEFAULT 'READY';
+            CREATE INDEX IF NOT EXISTS idx_print_agent_jobs_checkout_session
+              ON public.print_agent_jobs (checkout_session_id)
+              WHERE checkout_session_id IS NOT NULL;
           END IF;
         END $$;
+
+        CREATE TABLE IF NOT EXISTS public.staged_checkout_files (
+          id VARCHAR(64) PRIMARY KEY,
+          checkout_session_id VARCHAR(128) NOT NULL,
+          shop_id VARCHAR(128) NOT NULL,
+          original_filename VARCHAR(255) NOT NULL,
+          mime_type VARCHAR(128) NOT NULL,
+          size_bytes BIGINT NOT NULL CHECK (size_bytes > 0),
+          sha256 VARCHAR(64) NOT NULL,
+          verified_page_count INT NOT NULL DEFAULT 1 CHECK (verified_page_count > 0),
+          storage_bucket VARCHAR(128) NOT NULL DEFAULT 'print-documents',
+          object_path TEXT NOT NULL,
+          storage_verified BOOLEAN NOT NULL DEFAULT false,
+          upload_status VARCHAR(32) NOT NULL DEFAULT 'UPLOADED',
+          linked_job_id VARCHAR(64),
+          expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '24 hours'),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_staged_checkout_files_session
+          ON public.staged_checkout_files (checkout_session_id, shop_id);
+        CREATE INDEX IF NOT EXISTS idx_staged_checkout_files_expires
+          ON public.staged_checkout_files (expires_at)
+          WHERE upload_status != 'DELETED';
+
+        CREATE TABLE IF NOT EXISTS public.storage_cleanup_runs (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          trigger_source VARCHAR(32) NOT NULL DEFAULT 'SCHEDULED_CRON',
+          cron_expression VARCHAR(32) NOT NULL DEFAULT '0 0 * * *',
+          timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Kolkata',
+          executed_at_ist TEXT NOT NULL,
+          started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at TIMESTAMPTZ,
+          duration_ms INTEGER NOT NULL DEFAULT 0,
+          status VARCHAR(24) NOT NULL DEFAULT 'RUNNING',
+          buckets_scanned JSONB NOT NULL DEFAULT '[]'::jsonb,
+          total_discovered INTEGER NOT NULL DEFAULT 0,
+          total_deleted INTEGER NOT NULL DEFAULT 0,
+          total_skipped INTEGER NOT NULL DEFAULT 0,
+          total_failed INTEGER NOT NULL DEFAULT 0,
+          reclaimed_bytes BIGINT NOT NULL DEFAULT 0,
+          skip_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+          failure_reasons JSONB NOT NULL DEFAULT '[]'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_storage_cleanup_runs_started_at
+          ON public.storage_cleanup_runs (started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_storage_cleanup_runs_status
+          ON public.storage_cleanup_runs (status, started_at DESC);
 
         DO $$
         BEGIN
@@ -1416,6 +1487,318 @@ export async function insertPrintAgentJob<T extends StoredPrintAgentJob>(
   }
 }
 
+export interface StagedCheckoutFileRecord {
+  id: string;
+  checkoutSessionId: string;
+  shopId: string;
+  originalFilename: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  verifiedPageCount: number;
+  storageBucket: string;
+  objectPath: string;
+  storageVerified: boolean;
+  uploadStatus: string;
+  linkedJobId: string | null;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const inMemoryStagedCheckoutFiles = new Map<string, StagedCheckoutFileRecord>();
+
+export async function upsertStagedCheckoutFile(input: {
+  id: string;
+  checkoutSessionId: string;
+  shopId: string;
+  originalFilename: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  verifiedPageCount: number;
+  storageBucket: string;
+  objectPath: string;
+  storageVerified: boolean;
+  expiresAt?: Date;
+}): Promise<StagedCheckoutFileRecord> {
+  const canonicalShopId = await resolvePrintFlowShopId(input.shopId);
+  const expiresAt = input.expiresAt || new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const nowIso = new Date().toISOString();
+
+  if (isNeonDatabaseConfigured()) {
+    const pool = requirePostgresPool();
+    const res = await pool.query(
+      `INSERT INTO public.staged_checkout_files
+         (id, checkout_session_id, shop_id, original_filename, mime_type, size_bytes, sha256,
+          verified_page_count, storage_bucket, object_path, storage_verified, upload_status, expires_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'UPLOADED', $12, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         original_filename = EXCLUDED.original_filename,
+         mime_type = EXCLUDED.mime_type,
+         size_bytes = EXCLUDED.size_bytes,
+         sha256 = EXCLUDED.sha256,
+         verified_page_count = EXCLUDED.verified_page_count,
+         storage_bucket = EXCLUDED.storage_bucket,
+         object_path = EXCLUDED.object_path,
+         storage_verified = EXCLUDED.storage_verified,
+         upload_status = 'UPLOADED',
+         expires_at = EXCLUDED.expires_at,
+         updated_at = NOW()
+       RETURNING *`,
+      [
+        input.id,
+        input.checkoutSessionId,
+        canonicalShopId,
+        input.originalFilename.slice(0, 255),
+        input.mimeType,
+        input.sizeBytes,
+        input.sha256,
+        input.verifiedPageCount,
+        input.storageBucket,
+        input.objectPath,
+        input.storageVerified,
+        expiresAt
+      ]
+    );
+    const row = res.rows[0];
+    return {
+      id: row.id,
+      checkoutSessionId: row.checkout_session_id,
+      shopId: row.shop_id,
+      originalFilename: row.original_filename,
+      mimeType: row.mime_type,
+      sizeBytes: Number(row.size_bytes),
+      sha256: row.sha256,
+      verifiedPageCount: Number(row.verified_page_count),
+      storageBucket: row.storage_bucket,
+      objectPath: row.object_path,
+      storageVerified: Boolean(row.storage_verified),
+      uploadStatus: row.upload_status,
+      linkedJobId: row.linked_job_id || null,
+      expiresAt: new Date(row.expires_at).toISOString(),
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString()
+    };
+  }
+
+  const record: StagedCheckoutFileRecord = {
+    id: input.id,
+    checkoutSessionId: input.checkoutSessionId,
+    shopId: canonicalShopId,
+    originalFilename: input.originalFilename,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    sha256: input.sha256,
+    verifiedPageCount: input.verifiedPageCount,
+    storageBucket: input.storageBucket,
+    objectPath: input.objectPath,
+    storageVerified: input.storageVerified,
+    uploadStatus: 'UPLOADED',
+    linkedJobId: null,
+    expiresAt: expiresAt.toISOString(),
+    createdAt: nowIso,
+    updatedAt: nowIso
+  };
+  inMemoryStagedCheckoutFiles.set(record.id, record);
+  return record;
+}
+
+export async function getStagedCheckoutFilesByIds(params: {
+  stagedFileIds: string[];
+  checkoutSessionId: string;
+  shopId: string;
+}): Promise<StagedCheckoutFileRecord[]> {
+  if (!params.stagedFileIds.length) return [];
+  const candidateShopIds = await getCandidateShopIds(params.shopId);
+
+  if (isNeonDatabaseConfigured()) {
+    const pool = requirePostgresPool();
+    const res = await pool.query(
+      `SELECT * FROM public.staged_checkout_files
+       WHERE id = ANY($1::text[])
+         AND checkout_session_id = $2
+         AND (shop_id = ANY($3::text[]))
+         AND upload_status != 'DELETED'`,
+      [params.stagedFileIds, params.checkoutSessionId, candidateShopIds]
+    );
+    return res.rows.map((row: any) => ({
+      id: row.id,
+      checkoutSessionId: row.checkout_session_id,
+      shopId: row.shop_id,
+      originalFilename: row.original_filename,
+      mimeType: row.mime_type,
+      sizeBytes: Number(row.size_bytes),
+      sha256: row.sha256,
+      verifiedPageCount: Number(row.verified_page_count),
+      storageBucket: row.storage_bucket,
+      objectPath: row.object_path,
+      storageVerified: Boolean(row.storage_verified),
+      uploadStatus: row.upload_status,
+      linkedJobId: row.linked_job_id || null,
+      expiresAt: new Date(row.expires_at).toISOString(),
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString()
+    }));
+  }
+
+  return params.stagedFileIds
+    .map((id) => inMemoryStagedCheckoutFiles.get(id))
+    .filter(
+      (r): r is StagedCheckoutFileRecord =>
+        r !== undefined &&
+        r.checkoutSessionId === params.checkoutSessionId &&
+        candidateShopIds.includes(r.shopId) &&
+        r.uploadStatus !== 'DELETED'
+    );
+}
+
+export async function markStagedCheckoutFilesLinked(params: {
+  stagedFileIds: string[];
+  linkedJobId: string;
+}): Promise<void> {
+  if (!params.stagedFileIds.length) return;
+  if (isNeonDatabaseConfigured()) {
+    const pool = requirePostgresPool();
+    await pool.query(
+      `UPDATE public.staged_checkout_files
+       SET linked_job_id = $2,
+           upload_status = 'STAGED',
+           updated_at = NOW()
+       WHERE id = ANY($1::text[])`,
+      [params.stagedFileIds, params.linkedJobId]
+    );
+    return;
+  }
+  for (const id of params.stagedFileIds) {
+    const existing = inMemoryStagedCheckoutFiles.get(id);
+    if (existing) {
+      inMemoryStagedCheckoutFiles.set(id, {
+        ...existing,
+        linkedJobId: params.linkedJobId,
+        uploadStatus: 'STAGED',
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }
+}
+
+export async function calculateAuthoritativeCustomerPrintTotal(params: {
+  shopId: string;
+  files: Array<{
+    pageCount: number;
+    copies: number;
+    colorMode: 'BW' | 'COLOR';
+    paperSize: string;
+    duplex: boolean;
+    pagesToPrint?: string;
+  }>;
+}): Promise<{
+  totalRupees: number;
+  amountMinor: number;
+  minOrderAmount: number;
+  unitPrices: number[];
+}> {
+  const canonicalShopId = await resolvePrintFlowShopId(params.shopId);
+  const candidateShopIds = await getCandidateShopIds(params.shopId);
+  let rules: PricingRule[] = [];
+  let minOrderAmount = 0;
+
+  if (isNeonDatabaseConfigured()) {
+    const pool = requirePostgresPool();
+    try {
+      const rulesRes = await pool.query(
+        `SELECT id::text, shop_id::text, paper_size, color_mode, sides, price_per_page::float AS price_per_page, COALESCE(is_active, true) AS is_active
+         FROM public.pricing_rules
+         WHERE (shop_id::text = ANY($1::text[]) OR shop_id::text = $2)
+           AND COALESCE(is_active, true) = true`,
+        [candidateShopIds, canonicalShopId]
+      );
+      rules = rulesRes.rows.map((r: any) => ({
+        id: r.id,
+        shopId: canonicalShopId,
+        paperSize: r.paper_size,
+        color: r.color_mode === 'COLOR' ? 'COLOR' : 'BW',
+        colorMode: r.color_mode === 'COLOR' ? 'COLOR' : 'BW',
+        sides: r.sides === 'DOUBLE' ? 'DOUBLE' : 'SINGLE',
+        pricePerPage: Number(r.price_per_page),
+        isActive: Boolean(r.is_active)
+      }));
+
+      // Fallback to app state pricing_rules if relational table has no rows for this shop
+      if (rules.length === 0) {
+        const stateRes = await pool.query(
+          `SELECT COALESCE(state_data, payload) AS data
+           FROM public.printflow_app_state
+           WHERE scope_id = ANY($1::text[]) AND data_key = 'pricing_rules'
+           LIMIT 1`,
+          [candidateShopIds]
+        );
+        const stateRules = stateRes.rows[0]?.data;
+        if (Array.isArray(stateRules)) {
+          rules = stateRules.map((r: any, idx: number) => ({
+            id: r.id || `state_rule_${idx}`,
+            shopId: canonicalShopId,
+            paperSize: r.paperSize || 'A4',
+            color: (r.color || r.colorMode) === 'COLOR' ? 'COLOR' : 'BW',
+            colorMode: (r.color || r.colorMode) === 'COLOR' ? 'COLOR' : 'BW',
+            sides: r.sides === 'DOUBLE' ? 'DOUBLE' : 'SINGLE',
+            pricePerPage: Number(r.pricePerPage || (r.pricePerPageMinor ? r.pricePerPageMinor / 100 : 2.0)),
+            isActive: r.isActive !== false
+          }));
+        }
+      }
+
+      const shopRes = await pool.query(
+        `SELECT min_order_amount::float AS min_order_amount
+         FROM public.shops
+         WHERE id::text = $1 OR id::text = ANY($2::text[]) OR slug = ANY($2::text[])
+         LIMIT 1`,
+        [canonicalShopId, candidateShopIds]
+      );
+      if (shopRes.rowCount && shopRes.rows[0]?.min_order_amount) {
+        minOrderAmount = Number(shopRes.rows[0].min_order_amount) || 0;
+      }
+    } catch (err: any) {
+      if (!isDatabaseNetworkError(err)) {
+        console.warn('[calculateAuthoritativeCustomerPrintTotal] Pricing lookup warning:', err?.message || err);
+      }
+    }
+  }
+
+  let totalRupees = 0;
+  const unitPrices: number[] = [];
+
+  for (const file of params.files) {
+    let effectivePages = Math.max(1, file.pageCount);
+    if (file.pagesToPrint && file.pagesToPrint.trim()) {
+      const check = validatePageRange(file.pagesToPrint, effectivePages);
+      if (!check.isValid || !check.parsedPages || check.parsedPages.length === 0) {
+        throw new Error(check.error || `Invalid custom page range "${file.pagesToPrint}".`);
+      }
+      effectivePages = check.parsedPages.length;
+    }
+
+    const sides: 'SINGLE' | 'DOUBLE' = file.duplex ? 'DOUBLE' : 'SINGLE';
+    const unitPrice = resolveUnitPrice(rules, canonicalShopId, file.paperSize, file.colorMode, sides);
+    unitPrices.push(unitPrice);
+    const copies = Math.max(1, Math.min(999, file.copies || 1));
+    totalRupees += Math.round(effectivePages * copies * unitPrice);
+  }
+
+  if (minOrderAmount > 0 && totalRupees < minOrderAmount) {
+    totalRupees = Math.round(minOrderAmount);
+  }
+
+  totalRupees = Math.max(1, Math.round(totalRupees));
+  return {
+    totalRupees,
+    amountMinor: Math.round(totalRupees * 100),
+    minOrderAmount,
+    unitPrices
+  };
+}
+
 /**
  * Stages a customer print job and its files BEFORE Razorpay checkout opens,
  * with print_status = 'STAGED' and paymentStatus = 'PENDING'.
@@ -1427,9 +1810,15 @@ export async function stagePrintAgentJob<T extends StoredPrintAgentJob>(
 ): Promise<T | null> {
   const canonicalShopId = await resolvePrintFlowShopId(job.shopId);
   const now = new Date().toISOString();
+  const checkoutSessionId = (job as any).checkoutSessionId || undefined;
+  const effectiveOrderId = (job.orderId && job.orderId.trim()) || `stg_${checkoutSessionId || job.id}`;
+
   const stagedJob: T = {
     ...job,
+    orderId: effectiveOrderId,
     shopId: canonicalShopId,
+    checkoutSessionId,
+    stagingStatus: 'STAGED',
     paymentStatus: 'PENDING',
     printStatus: 'STAGED',
     createdAt: (job as any).createdAt || now,
@@ -1440,13 +1829,24 @@ export async function stagePrintAgentJob<T extends StoredPrintAgentJob>(
   try {
     await client.query('BEGIN');
 
-    // Check if an already-paid/dispatched job exists for this orderId
-    const existingRes = await client.query(
-      `SELECT job_id, print_status, job_data FROM print_agent_jobs
+    // Check if a job already exists for this orderId OR for this active checkoutSessionId
+    let existingRes = await client.query(
+      `SELECT job_id, order_id, print_status, job_data FROM print_agent_jobs
        WHERE shop_id = $1 AND order_id = $2
        FOR UPDATE`,
       [canonicalShopId, stagedJob.orderId]
     );
+
+    if ((!existingRes || existingRes.rowCount === 0) && checkoutSessionId) {
+      existingRes = await client.query(
+        `SELECT job_id, order_id, print_status, job_data FROM print_agent_jobs
+         WHERE shop_id = $1 AND checkout_session_id = $2
+         ORDER BY created_at DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [canonicalShopId, checkoutSessionId]
+      );
+    }
 
     if (existingRes.rowCount && existingRes.rowCount > 0) {
       const existingRow = existingRes.rows[0];
@@ -1456,21 +1856,31 @@ export async function stagePrintAgentJob<T extends StoredPrintAgentJob>(
         return decodeStoredJob(existingRow) as T;
       }
 
-      // Replace staged files for this job_id
-      await client.query(`DELETE FROM print_agent_job_files WHERE job_id = $1`, [existingRow.job_id]);
+      const preservedOrderId =
+        job.orderId && job.orderId.trim()
+          ? job.orderId.trim()
+          : existingRow.order_id || stagedJob.orderId;
+
+      if (files.length > 0) {
+        await client.query(`DELETE FROM print_agent_job_files WHERE job_id = $1`, [existingRow.job_id]);
+      }
       const updatedJob: T = {
         ...stagedJob,
         id: existingRow.job_id,
+        orderId: preservedOrderId,
         orderCode: existingRow.job_data?.orderCode || existingRow.job_id,
         trackingToken: existingRow.job_data?.trackingToken || stagedJob.trackingToken
       };
       await client.query(
         `UPDATE print_agent_jobs
-         SET print_status = 'STAGED',
-             job_data = $3::jsonb,
-             updated_at = $4
+         SET order_id = $3,
+             print_status = 'STAGED',
+             checkout_session_id = COALESCE($4, checkout_session_id),
+             staging_status = 'STAGED',
+             job_data = $5::jsonb,
+             updated_at = $6
          WHERE job_id = $1 AND shop_id = $2`,
-        [existingRow.job_id, canonicalShopId, JSON.stringify(updatedJob), now]
+        [existingRow.job_id, canonicalShopId, preservedOrderId, checkoutSessionId || null, JSON.stringify(updatedJob), now]
       );
       for (const file of files) {
         await client.query(
@@ -1485,12 +1895,13 @@ export async function stagePrintAgentJob<T extends StoredPrintAgentJob>(
 
     await client.query(
       `INSERT INTO print_agent_jobs
-         (job_id, order_id, shop_id, print_status, claimed_by, claimed_at, job_data, created_at, updated_at)
-       VALUES ($1, $2, $3, 'STAGED', NULL, NULL, $4::jsonb, $5, $6)`,
+         (job_id, order_id, shop_id, print_status, checkout_session_id, staging_status, claimed_by, claimed_at, job_data, created_at, updated_at)
+       VALUES ($1, $2, $3, 'STAGED', $4, 'STAGED', NULL, NULL, $5::jsonb, $6, $7)`,
       [
         stagedJob.id,
         stagedJob.orderId,
         canonicalShopId,
+        checkoutSessionId || null,
         JSON.stringify(stagedJob),
         stagedJob.createdAt,
         now
@@ -1510,6 +1921,82 @@ export async function stagePrintAgentJob<T extends StoredPrintAgentJob>(
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getStagedPrintJobByCheckoutSession(
+  shopId: string,
+  checkoutSessionId: string
+): Promise<StoredPrintAgentJob | null> {
+  if (!checkoutSessionId) return null;
+  const candidateShopIds = await getCandidateShopIds(shopId);
+  const res = await requirePostgresPool().query(
+    `SELECT job_data, print_status, claimed_by, claimed_at, updated_at
+     FROM print_agent_jobs
+     WHERE checkout_session_id = $1 AND (shop_id = ANY($2::text[]))
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [checkoutSessionId, candidateShopIds]
+  );
+  return res.rowCount ? decodeStoredJob(res.rows[0]) : null;
+}
+
+export async function linkRazorpayOrderToStagedJob(params: {
+  stagedJobId: string;
+  checkoutSessionId?: string;
+  shopId: string;
+  orderId: string;
+}): Promise<StoredPrintAgentJob | null> {
+  const candidateShopIds = await getCandidateShopIds(params.shopId);
+  const client = await requirePostgresPool().connect();
+  try {
+    await client.query('BEGIN');
+    const res = await client.query(
+      `SELECT job_id, shop_id, order_id, print_status, claimed_by, claimed_at, job_data, updated_at
+       FROM print_agent_jobs
+       WHERE (job_id = $1 OR ($2::text IS NOT NULL AND checkout_session_id = $2))
+         AND (shop_id = ANY($3::text[]))
+       ORDER BY created_at DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [params.stagedJobId, params.checkoutSessionId || null, candidateShopIds]
+    );
+    if (!res.rowCount || res.rowCount === 0) {
+      await client.query('COMMIT');
+      return null;
+    }
+
+    const row = res.rows[0];
+    const currentJob = decodeStoredJob(row);
+    if (currentJob.paymentStatus === 'SUCCESS') {
+      await client.query('COMMIT');
+      return currentJob;
+    }
+
+    const now = new Date().toISOString();
+    const updatedJob: StoredPrintAgentJob = {
+      ...currentJob,
+      orderId: params.orderId,
+      stagingStatus: 'ORDER_CREATED',
+      updatedAt: now
+    };
+
+    await client.query(
+      `UPDATE print_agent_jobs
+       SET order_id = $2,
+           staging_status = 'ORDER_CREATED',
+           job_data = $3::jsonb,
+           updated_at = $4
+       WHERE job_id = $1`,
+      [row.job_id, params.orderId, JSON.stringify(updatedJob), now]
+    );
+    await client.query('COMMIT');
+    return updatedJob;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
   } finally {
     client.release();
   }
@@ -1558,6 +2045,33 @@ export async function activateStagedPrintAgentJob(params: {
       );
     }
 
+    // Fallback correlation via payment_orders (staged_job_id / checkout_session_id)
+    if (!queryRes || queryRes.rowCount === 0) {
+      const poLinkRes = await client.query(
+        `SELECT staged_job_id, checkout_session_id, shop_id::text AS shop_id
+         FROM public.payment_orders
+         WHERE provider_order_id = $1
+         LIMIT 1`,
+        [params.orderId]
+      ).catch(() => ({ rowCount: 0, rows: [] as any[] }));
+
+      if (poLinkRes.rowCount && poLinkRes.rows[0]) {
+        const { staged_job_id, checkout_session_id } = poLinkRes.rows[0];
+        if (staged_job_id || checkout_session_id) {
+          queryRes = await client.query(
+            `SELECT job_id, shop_id, order_id, print_status, claimed_by, claimed_at, job_data, updated_at
+             FROM print_agent_jobs
+             WHERE ($1::text IS NOT NULL AND job_id = $1)
+                OR ($2::text IS NOT NULL AND checkout_session_id = $2)
+             ORDER BY created_at DESC
+             LIMIT 1
+             FOR UPDATE`,
+            [staged_job_id || null, checkout_session_id || null]
+          );
+        }
+      }
+    }
+
     if (!queryRes || queryRes.rowCount === 0) {
       await client.query('COMMIT');
       return { dispatched: false, alreadyDispatched: false, job: null };
@@ -1582,19 +2096,23 @@ export async function activateStagedPrintAgentJob(params: {
     const now = new Date().toISOString();
     const updatedJob: StoredPrintAgentJob = {
       ...currentJob,
+      orderId: params.orderId,
       paymentId: params.paymentId || currentJob.paymentId || 'pay_verified',
       paymentStatus: 'SUCCESS',
       printStatus: 'QUEUED',
+      stagingStatus: 'DISPATCHED',
       updatedAt: now
     };
 
     await client.query(
       `UPDATE print_agent_jobs
-       SET print_status = 'QUEUED',
-           job_data = $2::jsonb,
-           updated_at = $3
+       SET order_id = $2,
+           print_status = 'QUEUED',
+           staging_status = 'DISPATCHED',
+           job_data = $3::jsonb,
+           updated_at = $4
        WHERE job_id = $1`,
-      [row.job_id, JSON.stringify(updatedJob), now]
+      [row.job_id, params.orderId, JSON.stringify(updatedJob), now]
     );
 
     // Mirror to public.print_jobs for dashboard visibility
@@ -1644,6 +2162,7 @@ export async function activateStagedPrintAgentJob(params: {
 /**
  * Looks up a recent customer print order by orderId, paymentId, or customerPhone
  * for the "Already Paid / Check Payment" recovery flow.
+ * Strictly tenant-scoped when shopId is supplied.
  */
 export async function findRecentOrderForRecovery(params: {
   orderId?: string;
@@ -1662,16 +2181,19 @@ export async function findRecentOrderForRecovery(params: {
   const cleanPhone = params.customerPhone?.replace(/\D/g, '').slice(-10);
   const candidateShopIds = params.shopId ? await getCandidateShopIds(params.shopId) : null;
 
-  // 1. Direct lookup in print_agent_jobs by orderId, paymentId, or job_id
+  // 1. Direct lookup in print_agent_jobs by orderId, paymentId, or job_id (tenant-scoped)
   if (cleanOrderId || cleanPaymentId) {
     const res = await pool.query(
       `SELECT job_data, print_status, claimed_by, claimed_at, updated_at, order_id, shop_id
        FROM print_agent_jobs
-       WHERE ($1::text IS NOT NULL AND (order_id = $1 OR job_id = $1))
-          OR ($2::text IS NOT NULL AND job_data->>'paymentId' = $2)
+       WHERE (
+         ($1::text IS NOT NULL AND (order_id = $1 OR job_id = $1))
+         OR ($2::text IS NOT NULL AND job_data->>'paymentId' = $2)
+       )
+       AND ($3::text[] IS NULL OR shop_id = ANY($3::text[]))
        ORDER BY created_at DESC
        LIMIT 1`,
-      [cleanOrderId || null, cleanPaymentId || null]
+      [cleanOrderId || null, cleanPaymentId || null, candidateShopIds]
     );
     if (res.rowCount && res.rowCount > 0) {
       const row = res.rows[0];
@@ -1685,7 +2207,7 @@ export async function findRecentOrderForRecovery(params: {
     }
   }
 
-  // 2. Lookup by customerPhone in print_agent_jobs (most recent within 24h)
+  // 2. Lookup by customerPhone in print_agent_jobs (most recent within shop)
   if (cleanPhone && cleanPhone.length === 10) {
     const res = await pool.query(
       `SELECT job_data, print_status, claimed_by, claimed_at, updated_at, order_id, shop_id
@@ -1708,16 +2230,17 @@ export async function findRecentOrderForRecovery(params: {
     }
   }
 
-  // 3. Lookup in payment_transactions / payment_orders by paymentId or orderId
+  // 3. Lookup in payment_transactions / payment_orders by paymentId or orderId (tenant-scoped)
   if (cleanPaymentId) {
     const txRes = await pool.query(
       `SELECT po.provider_order_id, po.shop_id::text AS shop_id, pt.provider_payment_id
        FROM public.payment_transactions pt
        JOIN public.payment_orders po ON po.id = pt.payment_order_id
        WHERE pt.provider_payment_id = $1
+         AND ($2::text[] IS NULL OR po.shop_id::text = ANY($2::text[]))
        ORDER BY pt.verified_at DESC NULLS LAST
        LIMIT 1`,
-      [cleanPaymentId]
+      [cleanPaymentId, candidateShopIds]
     );
     if (txRes.rowCount && txRes.rowCount > 0) {
       const txRow = txRes.rows[0];
@@ -1737,8 +2260,9 @@ export async function findRecentOrderForRecovery(params: {
               (SELECT pt.provider_payment_id FROM public.payment_transactions pt WHERE pt.payment_order_id = po.id LIMIT 1) AS payment_id
        FROM public.payment_orders po
        WHERE po.provider_order_id = $1
+         AND ($2::text[] IS NULL OR po.shop_id::text = ANY($2::text[]))
        LIMIT 1`,
-      [cleanOrderId]
+      [cleanOrderId, candidateShopIds]
     );
     if (poRes.rowCount && poRes.rowCount > 0) {
       const poRow = poRes.rows[0];

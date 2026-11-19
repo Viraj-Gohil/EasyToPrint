@@ -139,7 +139,7 @@ export const LandingPage: React.FC = () => {
                 {/* Badge (Matching reference image green bordered pill with star) */}
                 <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-[#00B32D] text-[#008F25] text-xs font-semibold tracking-wide shadow-2xs">
                   <span className="text-[#00B32D] text-sm">★</span>
-                  <span>Smartest Xerox &amp; Print Shop Automation Platform</span>
+                  <span>Smartest Print Shop Automation</span>
                 </div>
 
                 {/* Main Heading */}
