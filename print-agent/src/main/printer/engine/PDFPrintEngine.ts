@@ -240,20 +240,67 @@ export class PDFPrintEngine {
         if (pPath) renderedImagePaths.push(pPath);
       }
 
+      // If N-up (2 or 4 pages per sheet) is requested, compose sheets matching the browser WYSIWYG preview grid
+      const pagesPerSheet = request.pagesPerSheet === 2 ? 2 : request.pagesPerSheet === 4 ? 4 : 1;
+      let imagesToPrint = renderedImagePaths;
+      if (pagesPerSheet > 1 && renderedImagePaths.length > 0) {
+        const { loadImage } = await import('@napi-rs/canvas');
+        const isLandscape = request.orientation === 'LANDSCAPE';
+        const sheetLongPx = Math.round((297 / 25.4) * targetDpi);
+        const sheetShortPx = Math.round((210 / 25.4) * targetDpi);
+        const sheetW = isLandscape ? sheetLongPx : sheetShortPx;
+        const sheetH = isLandscape ? sheetShortPx : sheetLongPx;
+        const gridCols = pagesPerSheet === 4 ? 2 : isLandscape ? 2 : 1;
+        const gridRows = pagesPerSheet === 4 ? 2 : isLandscape ? 1 : 2;
+        const gutterPx = Math.round((4 / 25.4) * targetDpi);
+        const cellW = (sheetW - gutterPx * (gridCols - 1)) / gridCols;
+        const cellH = (sheetH - gutterPx * (gridRows - 1)) / gridRows;
+
+        const composedPaths: string[] = [];
+        for (let s = 0; s < renderedImagePaths.length; s += pagesPerSheet) {
+          const group = renderedImagePaths.slice(s, s + pagesPerSheet);
+          const sheetCanvas = createCanvas(sheetW, sheetH);
+          const sCtx = sheetCanvas.getContext('2d');
+          sCtx.fillStyle = '#FFFFFF';
+          sCtx.fillRect(0, 0, sheetW, sheetH);
+
+          for (let gIdx = 0; gIdx < group.length; gIdx++) {
+            const img = await loadImage(group[gIdx]);
+            const col = gIdx % gridCols;
+            const row = Math.floor(gIdx / gridCols);
+            const cx = col * (cellW + gutterPx);
+            const cy = row * (cellH + gutterPx);
+            const scale = Math.min(cellW / Math.max(1, img.width), cellH / Math.max(1, img.height));
+            const dw = img.width * scale;
+            const dh = img.height * scale;
+            const dx = cx + (cellW - dw) / 2;
+            const dy = cy + (cellH - dh) / 2;
+            sCtx.drawImage(img as any, dx, dy, dw, dh);
+          }
+
+          const sheetPath = path.join(jobTempDir, `sheet_nup_${String(composedPaths.length + 1).padStart(4, '0')}.png`);
+          fs.writeFileSync(sheetPath, sheetCanvas.toBuffer('image/png'));
+          composedPaths.push(sheetPath);
+          renderedImagePaths.push(sheetPath); // Track for automatic cleanup in finally
+        }
+        imagesToPrint = composedPaths;
+      }
+
       result.stageReached = 'RENDERED';
       request.onProgress?.('SUBMITTING', 60);
 
-      // Submit rendered pages to Windows native printing
+      // Submit rendered sheets to Windows native printing
       const nativeResult = await windowsPrintEngine.executeNativePrint({
         jobId: request.jobId,
         printerName: request.printerName,
-        imagePaths: renderedImagePaths,
+        imagePaths: imagesToPrint,
         copies: request.copies,
         paperSize: request.paperSize,
         orientation: request.orientation,
         colorMode: request.colorMode,
-        duplex: request.copies ? (pagesToRender.length > 1) : false,
+        duplex: Boolean(request.duplex) && imagesToPrint.length > 1,
         scalingMode: request.scalingMode || 'FIT_TO_PAGE',
+        margins: request.margins || 'default',
         timeoutMs: request.timeoutMs
       });
 

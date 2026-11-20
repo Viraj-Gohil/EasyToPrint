@@ -4,6 +4,8 @@ export type PrintOrientation = 'PORTRAIT' | 'LANDSCAPE' | 'AUTO';
 
 export type PrintScalingMode = 'FIT_TO_PAGE' | 'ACTUAL_SIZE' | 'FILL_PAGE';
 
+export type PrintMargins = 'default' | 'narrow' | 'none';
+
 export type UniversalErrorCode =
   | 'FILE_NOT_FOUND'
   | 'UNSUPPORTED_FILE_TYPE'
@@ -30,7 +32,10 @@ export interface UniversalPrintRequest {
   paperSize?: string; // 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal'
   orientation?: PrintOrientation;
   colorMode?: 'BW' | 'COLOR';
+  duplex?: boolean;
   scalingMode?: PrintScalingMode;
+  margins?: PrintMargins;
+  pagesPerSheet?: 1 | 2 | 4;
   pageRange?: string; // e.g. "1-3, 5"
   printQuality?: 'DRAFT' | 'STANDARD' | 'HIGH';
   enableCache?: boolean;

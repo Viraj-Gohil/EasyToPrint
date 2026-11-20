@@ -38,11 +38,13 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { validatePhone, validatePageRange } from '../../lib/validation';
-import { ContinuousPdfViewer } from './ContinuousPdfViewer';
+import { LivePrintPreview } from './LivePrintPreview';
+import { ensurePdfWorkerConfigured } from '../../lib/print/previewRenderer';
+import { buildBackendPrintSettings, type ShopPrintCapabilities } from '../../lib/print/printConfig';
 import * as pdfjsLib from 'pdfjs-dist';
 
 if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  ensurePdfWorkerConfigured();
 }
 import { PDFDocument } from 'pdf-lib';
 import {
@@ -469,8 +471,9 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
   // Expanded files state (which file accordions have settings open)
   const [expandedFileIds, setExpandedFileIds] = useState<Record<string, boolean>>({});
 
-  // Document preview modal
-  const [previewFile, setPreviewFile] = useState<FilePrintConfig | null>(null);
+  // Document preview modal (tracks ID so live setting changes sync immediately)
+  const [previewFileId, setPreviewFileId] = useState<string | null>(null);
+  const [inlinePreviewIds, setInlinePreviewIds] = useState<Record<string, boolean>>({});
 
   // Help modal
   const [helpOpen, setHelpOpen] = useState(false);
@@ -928,6 +931,8 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
               copies: 1,
               pageSelection: 'ALL',
               pagesPerSheet: 1,
+              scaling: 'fit',
+              margins: 'default',
               unitPrice,
               totalPrice: Math.round(exactPages * unitPrice)
             };
@@ -946,6 +951,13 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
           const next = { ...prev };
           for (const cfg of processed) {
             next[cfg.id] = true;
+          }
+          return next;
+        });
+        setInlinePreviewIds((prev) => {
+          const next = { ...prev };
+          if (processed[0] && Object.keys(prev).length === 0) {
+            next[processed[0].id] = true;
           }
           return next;
         });
@@ -999,13 +1011,32 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
   const serviceFee = 0;
   const grandTotal = subtotal;
 
+  // Live-derived active preview file & normalized shop capabilities for LivePrintPreview
+  const previewFile = React.useMemo(
+    () => (previewFileId ? files.find((f) => f.id === previewFileId) || null : null),
+    [files, previewFileId]
+  );
+
+  const livePreviewCapabilities = React.useMemo<ShopPrintCapabilities | null>(() => {
+    if (!shopCapabilities) return null;
+    return {
+      shopId: shop.id,
+      supportedPaperSizes: shopCapabilities.supportedPaperSizes || [],
+      supportsColor: Boolean(shopCapabilities.hasColorPrinter),
+      supportsDuplex: Boolean(shopCapabilities.hasDuplexPrinter),
+      hasOnlinePrinters: Boolean(shopCapabilities.isReadyForPrinting),
+      onlinePrinterCount: shopCapabilities.isReadyForPrinting ? 1 : 0,
+      printers: [],
+    };
+  }, [shopCapabilities, shop.id]);
+
   // Deterministic order fingerprint for deduplicated background pre-staging on Step 3
   const orderStageFingerprint = React.useMemo(() => {
     if (files.length === 0 || !shop?.id || shop.id === EMPTY_SHOP.id) return '';
     const filesSig = files
       .map(
         (f) =>
-          `${f.id}:${f.estimatedPages}:${f.copies}:${f.color || 'BW'}:${f.paperSize}:${f.sides}:${f.pageSelection}:${(f.customRange || f.customPageRange || '').trim()}`
+          `${f.id}:${f.estimatedPages}:${f.copies}:${f.color || 'BW'}:${f.paperSize}:${f.sides}:${f.orientation || 'PORTRAIT'}:${f.scaling || 'fit'}:${f.margins || 'default'}:${f.pagesPerSheet || 1}:${f.pageSelection}:${(f.customRange || f.customPageRange || '').trim()}`
       )
       .join('|');
     return `${shop.id}::${checkoutSessionId}::${customerPhone.trim()}::${filesSig}`;
@@ -1022,7 +1053,12 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       colorMode: string;
       paperSize: string;
       duplex: boolean;
+      orientation?: 'PORTRAIT' | 'LANDSCAPE';
+      scaling?: 'fit' | 'actual' | 'fill';
+      margins?: 'default' | 'narrow' | 'none';
+      pagesPerSheet?: 1 | 2 | 4;
       pagesToPrint?: string;
+      printConfig?: Record<string, any>;
     }>> => {
       const uploadedEntries = await Promise.all(
         files.map(async (file) => {
@@ -1093,20 +1129,19 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         })
       );
 
-      return uploadedEntries.map(({ file, sourceFile, stagedFileId, verifiedPages }) => ({
-        stagedFileId,
-        fileName: sourceFile.name,
-        fileType: sourceFile.type || file.fileType || 'application/octet-stream',
-        pageCount: verifiedPages || countPages(file),
-        copies: file.copies,
-        colorMode: file.color || 'BW',
-        paperSize: file.paperSize,
-        duplex: file.sides === 'DOUBLE',
-        pagesToPrint:
-          file.pageSelection === 'CUSTOM' && (file.customRange || file.customPageRange || '').trim()
-            ? (file.customRange || file.customPageRange || '').trim()
-            : undefined
-      }));
+      return uploadedEntries.map(({ file, sourceFile, stagedFileId, verifiedPages }) => {
+        const backendSettings = buildBackendPrintSettings({
+          ...file,
+          totalPages: verifiedPages || countPages(file),
+        });
+        return {
+          stagedFileId,
+          fileName: sourceFile.name,
+          fileType: sourceFile.type || file.fileType || 'application/octet-stream',
+          pageCount: verifiedPages || countPages(file),
+          ...backendSettings,
+        };
+      });
     },
     [files, shop.id, countPages]
   );
@@ -1119,7 +1154,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       const filesSig = files
         .map(
           (f) =>
-            `${f.id}:${f.estimatedPages}:${f.copies}:${f.color || 'BW'}:${f.paperSize}:${f.sides}:${f.pageSelection}:${(f.customRange || f.customPageRange || '').trim()}`
+            `${f.id}:${f.estimatedPages}:${f.copies}:${f.color || 'BW'}:${f.paperSize}:${f.sides}:${f.orientation || 'PORTRAIT'}:${f.scaling || 'fit'}:${f.margins || 'default'}:${f.pagesPerSheet || 1}:${f.pageSelection}:${(f.customRange || f.customPageRange || '').trim()}`
         )
         .join('|');
       const fingerprint = `${shop.id}::${activeSessionId}::${customerPhone.trim()}::${filesSig}`;
@@ -2648,14 +2683,15 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                               </button>
                             </div>
 
-                            {/* Action Bar: Preview (Left) & Hide settings / Configure (Right) */}
+                            {/* Action Bar: Live Preview (Left) & Hide settings / Configure (Right) */}
                             <div className="px-4 sm:px-5 py-2.5 bg-[#F7F8F7] border-t border-[#E1E7E1] flex items-center justify-between text-xs font-semibold">
                               <button
-                                onClick={() => setPreviewFile(file)}
+                                type="button"
+                                onClick={() => setPreviewFileId(file.id)}
                                 className="text-[#008F25] hover:text-[#00B32D] flex items-center gap-1.5 cursor-pointer font-bold"
                               >
                                 <Eye className="w-3.5 h-3.5" />
-                                <span>Preview</span>
+                                <span>Live Print Preview</span>
                               </button>
 
                               <button
@@ -2828,16 +2864,30 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                                   {/* 5. Orientation */}
                                   <div>
                                     <label className="text-xs font-bold text-[#111111] block mb-1.5">Orientation</label>
-                                    <select
-                                      value={file.orientation || 'PORTRAIT'}
-                                      onChange={(e) =>
-                                        updateFileConfig(file.id, { orientation: e.target.value as any })
-                                      }
-                                      className="w-full h-10 px-3 bg-[#F7F8F7] hover:bg-[#E1E7E1]/50 border border-[#E1E7E1] rounded-xl text-[11px] sm:text-xs font-bold text-[#111111] focus:outline-none focus:ring-1 focus:ring-[#00B32D] cursor-pointer transition-colors"
-                                    >
-                                      <option value="PORTRAIT">Auto (Portrait)</option>
-                                      <option value="LANDSCAPE">Auto (Landscape)</option>
-                                    </select>
+                                    <div className="grid grid-cols-2 gap-1 p-1 bg-[#F7F8F7] border border-[#E1E7E1] rounded-xl">
+                                      <button
+                                        type="button"
+                                        onClick={() => updateFileConfig(file.id, { orientation: 'PORTRAIT' })}
+                                        className={`py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                                          (file.orientation || 'PORTRAIT') === 'PORTRAIT'
+                                            ? 'bg-[#E8F8EC] text-[#008F25] border border-[#00B32D] shadow-2xs font-extrabold'
+                                            : 'text-[#646B65] hover:text-[#111111]'
+                                        }`}
+                                      >
+                                        Portrait
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateFileConfig(file.id, { orientation: 'LANDSCAPE' })}
+                                        className={`py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                                          file.orientation === 'LANDSCAPE'
+                                            ? 'bg-[#E8F8EC] text-[#008F25] border border-[#00B32D] shadow-2xs font-extrabold'
+                                            : 'text-[#646B65] hover:text-[#111111]'
+                                        }`}
+                                      >
+                                        Landscape
+                                      </button>
+                                    </div>
                                   </div>
 
                                   {/* 6. Pages per sheet */}
@@ -2853,6 +2903,38 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                                       <option value={1}>1 page/sheet</option>
                                       <option value={2}>2 pages/sheet (N-up)</option>
                                       <option value={4}>4 pages/sheet</option>
+                                    </select>
+                                  </div>
+
+                                  {/* 6b. Page Scaling */}
+                                  <div>
+                                    <label className="text-xs font-bold text-[#111111] block mb-1.5">Scaling</label>
+                                    <select
+                                      value={file.scaling || 'fit'}
+                                      onChange={(e) =>
+                                        updateFileConfig(file.id, { scaling: e.target.value as 'fit' | 'actual' | 'fill' })
+                                      }
+                                      className="w-full h-10 px-3 bg-[#F7F8F7] hover:bg-[#E1E7E1]/50 border border-[#E1E7E1] rounded-xl text-[11px] sm:text-xs font-bold text-[#111111] focus:outline-none focus:ring-1 focus:ring-[#00B32D] cursor-pointer transition-colors"
+                                    >
+                                      <option value="fit">Fit to Page</option>
+                                      <option value="actual">Actual Size (100%)</option>
+                                      <option value="fill">Fill Page</option>
+                                    </select>
+                                  </div>
+
+                                  {/* 6c. Page Margins */}
+                                  <div>
+                                    <label className="text-xs font-bold text-[#111111] block mb-1.5">Margins</label>
+                                    <select
+                                      value={file.margins || 'default'}
+                                      onChange={(e) =>
+                                        updateFileConfig(file.id, { margins: e.target.value as 'default' | 'narrow' | 'none' })
+                                      }
+                                      className="w-full h-10 px-3 bg-[#F7F8F7] hover:bg-[#E1E7E1]/50 border border-[#E1E7E1] rounded-xl text-[11px] sm:text-xs font-bold text-[#111111] focus:outline-none focus:ring-1 focus:ring-[#00B32D] cursor-pointer transition-colors"
+                                    >
+                                      <option value="default">Default (10 mm)</option>
+                                      <option value="narrow">Narrow (5 mm)</option>
+                                      <option value="none">None (Borderless)</option>
                                     </select>
                                   </div>
 
@@ -2894,11 +2976,47 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                                           className="w-full h-10 px-3.5 bg-white border border-[#E1E7E1] rounded-xl text-xs font-mono focus:outline-none focus:ring-1 focus:ring-[#00B32D]"
                                         />
                                         <p className="text-[10px] text-[#646B65]">
-                                          Specify page ranges separated by commas.
+                                          Specify page ranges separated by commas. Live preview updates automatically.
                                         </p>
                                       </div>
                                     )}
                                   </div>
+                                </div>
+
+                                {/* Embedded Live WYSIWYG Print Preview Section */}
+                                <div className="pt-3 border-t border-[#E1E7E1] space-y-2.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setInlinePreviewIds((prev) => ({ ...prev, [file.id]: !prev[file.id] }))
+                                      }
+                                      className="text-xs font-bold text-[#141715] hover:text-[#008F25] inline-flex items-center gap-1.5 cursor-pointer"
+                                    >
+                                      <Eye className="w-3.5 h-3.5 text-[#00B32D]" />
+                                      <span>
+                                        {inlinePreviewIds[file.id] ? 'Hide Live Print Preview' : 'Show Live Print Preview'}
+                                      </span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setPreviewFileId(file.id)}
+                                      className="text-[11px] font-bold text-[#008F25] hover:text-[#00B32D] cursor-pointer"
+                                    >
+                                      Open Full Screen →
+                                    </button>
+                                  </div>
+
+                                  {inlinePreviewIds[file.id] && (
+                                    <LivePrintPreview
+                                      variant="inline"
+                                      inlineHeightClass="h-[300px] sm:h-[360px]"
+                                      fileConfig={file}
+                                      fileObject={sourceFilesRef.current.get(file.id) || null}
+                                      activePaperSizes={activeShopSizes}
+                                      shopCapabilities={livePreviewCapabilities}
+                                    />
+                                  )}
                                 </div>
                               </div>
                             )}
@@ -3031,7 +3149,13 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                           {file.pagesPerSheet || 1} page/sheet
                         </span>
                         <span className="px-2 py-0.5 bg-[#F7F8F7] border border-[#E1E7E1] rounded-md">
-                          Auto ({file.orientation === 'LANDSCAPE' ? 'Landscape' : 'Portrait'})
+                          {file.orientation === 'LANDSCAPE' ? 'Landscape' : 'Portrait'}
+                        </span>
+                        <span className="px-2 py-0.5 bg-[#F7F8F7] border border-[#E1E7E1] rounded-md">
+                          {file.scaling === 'actual' ? 'Actual Size' : file.scaling === 'fill' ? 'Fill Page' : 'Fit to Page'}
+                        </span>
+                        <span className="px-2 py-0.5 bg-[#F7F8F7] border border-[#E1E7E1] rounded-md">
+                          {file.margins === 'narrow' ? 'Narrow Margins' : file.margins === 'none' ? 'No Margins' : 'Default Margins'}
                         </span>
                         {file.pageSelection === 'CUSTOM' && file.customRange && (
                           <span className="px-2 py-0.5 bg-[#E8F8EC] text-[#008F25] border border-[#A7F3D0] rounded-md font-mono">
@@ -3048,12 +3172,12 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                           <button
                             type="button"
                             onClick={() => {
-                              setPreviewFile(file);
+                              setPreviewFileId(file.id);
                             }}
-                            className="h-7 px-2.5 bg-[#E8F8EC] hover:bg-[#d5f3dc] text-[#008F25] border border-[#A7F3D0] text-[11px] font-bold rounded-lg flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-2xs"
+                            className="h-8 px-3 bg-[#E8F8EC] hover:bg-[#d5f3dc] text-[#008F25] border border-[#A7F3D0] text-[11px] font-bold rounded-lg flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-2xs"
                           >
                             <Eye className="w-3.5 h-3.5 text-[#00B32D]" />
-                            <span>Preview</span>
+                            <span>Live Preview</span>
                           </button>
 
                           <button
@@ -3631,147 +3755,18 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
           )}
       </main>
 
-      {/* 4. PDF & DOCUMENT PRINT PREVIEW MODAL */}
-      <AnimatePresence>
-        {previewFile && (
-          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="bg-white rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl border border-[#E1E7E1] space-y-4 my-auto font-sans"
-            >
-              {/* Modal Header */}
-              <div className="flex items-start justify-between pb-3 border-b border-[#E1E7E1] gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
-                      previewFile.fileType.includes('pdf') || previewFile.fileName.endsWith('.pdf')
-                        ? 'bg-[#E8F8EC] text-[#00B32D]'
-                        : 'bg-emerald-50 text-emerald-600'
-                    }`}
-                  >
-                    {previewFile.fileType.includes('pdf') || previewFile.fileName.endsWith('.pdf') ? (
-                      <FileText className="w-5 h-5 text-[#00B32D]" />
-                    ) : (
-                      <ImageIcon className="w-5 h-5 text-emerald-600" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="font-extrabold text-sm sm:text-base text-[#111111] truncate" title={previewFile.fileName}>
-                      {previewFile.fileName}
-                    </h3>
-                    <p className="text-xs text-[#646B65] mt-0.5 font-medium">
-                      {(previewFile.fileSize / 1024 / 1024).toFixed(1)} MB · {previewFile.estimatedPages} page
-                      {previewFile.estimatedPages > 1 ? 's' : ''}
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setPreviewFile(null)}
-                  className="p-1.5 text-slate-400 hover:text-[#111111] rounded-xl hover:bg-[#F7F8F7] cursor-pointer transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Print Config Summary Chips */}
-              <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
-                <span className="px-2.5 py-1 bg-[#E8F8EC] text-[#008F25] border border-[#A7F3D0] rounded-xl">
-                  {previewFile.color === 'COLOR' ? '🎨 Colour Print' : '⬛ B&W Print'}
-                </span>
-                <span className="px-2.5 py-1 bg-[#F7F8F7] text-[#111111] border border-[#E1E7E1] rounded-xl">
-                  📄 {previewFile.paperSize}
-                </span>
-                <span className="px-2.5 py-1 bg-[#F7F8F7] text-[#111111] border border-[#E1E7E1] rounded-xl">
-                  {previewFile.sides === 'DOUBLE' ? '🔁 Double Sided' : '⏹ Single Sided'}
-                </span>
-                <span className="px-2.5 py-1 bg-[#F7F8F7] text-[#111111] border border-[#E1E7E1] rounded-xl">
-                  {previewFile.orientation === 'LANDSCAPE' ? '↔ Landscape' : '↕ Portrait'}
-                </span>
-                <span className="px-2.5 py-1 bg-[#F7F8F7] text-[#111111] border border-[#E1E7E1] rounded-xl">
-                  {previewFile.pagesPerSheet || 1} page/sheet
-                </span>
-                {previewFile.pageSelection === 'CUSTOM' && previewFile.customRange && (
-                  <span className="px-2.5 py-1 bg-[#E8F8EC] text-[#008F25] border border-[#A7F3D0] rounded-xl font-mono">
-                    Pages: {previewFile.customRange}
-                  </span>
-                )}
-              </div>
-
-              {/* Unified Document Preview Section */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-extrabold text-[#111111] uppercase tracking-wider">
-                    Document Preview
-                  </h4>
-                  <span className="text-[11px] text-[#646B65] font-medium">
-                    {previewFile.estimatedPages} page{previewFile.estimatedPages > 1 ? 's' : ''} · {previewFile.paperSize}
-                  </span>
-                </div>
-
-                <div className="bg-[#F7F8F7] rounded-2xl border border-[#E1E7E1] p-2 sm:p-3 flex items-center justify-center min-h-[340px] max-h-[490px] overflow-hidden w-full">
-                  {previewFile.fileType.startsWith('image/') && previewFile.previewUrl ? (
-                    <div
-                      className={`bg-white p-3 rounded-xl shadow-md border border-[#E1E7E1] max-h-80 overflow-hidden flex items-center justify-center ${
-                        previewFile.color === 'BW' ? 'grayscale contrast-125' : ''
-                      }`}
-                    >
-                      <img
-                        src={previewFile.previewUrl}
-                        alt={previewFile.fileName}
-                        className="max-h-72 w-auto object-contain rounded-lg"
-                      />
-                    </div>
-                  ) : (
-                    <ContinuousPdfViewer
-                      fileBlob={sourceFilesRef.current.get(previewFile.id)}
-                      fileUrl={previewFile.previewUrl}
-                      fileName={previewFile.fileName}
-                      colorMode={previewFile.color}
-                      onClose={() => setPreviewFile(null)}
-                    />
-                  )}
-                </div>
-              </div>
-
-              {/* Modal Footer with Actions */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-                <div className="text-xs text-[#646B65]">
-                  <span>Price for this file: </span>
-                  <span className="font-mono font-extrabold text-[#111111] text-sm">
-                    ₹{previewFile.totalPrice.toFixed(0)}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExpandedFileIds((p) => ({ ...p, [previewFile.id]: true }));
-                      setPreviewFile(null);
-                      setCurrentStep(1);
-                    }}
-                    className="flex-1 sm:flex-none px-4 py-2.5 bg-[#F7F8F7] hover:bg-[#E1E7E1] text-[#111111] border border-[#E1E7E1] text-xs font-bold rounded-xl cursor-pointer transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <Edit3 className="w-3.5 h-3.5 text-[#00B32D]" />
-                    <span>Change Settings</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewFile(null)}
-                    className="flex-1 sm:flex-none px-6 py-2.5 bg-[#00B32D] hover:bg-[#008F25] text-white text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-xs"
-                  >
-                    Done Reviewing
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* 4. LIVE WYSIWYG PRINT PREVIEW MODAL */}
+      {previewFile && (
+        <LivePrintPreview
+          variant="modal"
+          fileConfig={previewFile}
+          fileObject={sourceFilesRef.current.get(previewFile.id) || null}
+          activePaperSizes={activeShopSizes}
+          shopCapabilities={livePreviewCapabilities}
+          onUpdateConfig={(updates) => updateFileConfig(previewFile.id, updates)}
+          onClose={() => setPreviewFileId(null)}
+        />
+      )}
 
       {/* Customer Error Popup Modal */}
       <CustomerErrorModal

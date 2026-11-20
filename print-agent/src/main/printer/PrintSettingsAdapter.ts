@@ -61,6 +61,19 @@ export class PrintSettingsAdapter {
       throw new Error('The requested page range is invalid.');
     }
 
+    // Orientation & Scaling (emitted when explicitly configured to stay backward-compatible)
+    const rawOrient = String(file.orientation || file.printConfig?.orientation || '').toUpperCase();
+    const orientationFlag =
+      rawOrient === 'LANDSCAPE' ? 'landscape' : rawOrient === 'PORTRAIT' ? 'portrait' : undefined;
+    const explicitScaling = file.scaling ?? file.printConfig?.scaling;
+    const rawScaling = explicitScaling ? String(explicitScaling).toLowerCase() : '';
+    const scalingFlag =
+      rawScaling === 'actual' || rawScaling === 'actual_size'
+        ? 'noscale'
+        : rawScaling === 'fit' || rawScaling === 'fill' || rawScaling === 'fit_to_page' || rawScaling === 'fill_page'
+          ? 'fit'
+          : undefined;
+
     const safePath = tempFilePath.replace(/'/g, "''");
     const safePrinter = safePrinterName.replace(/'/g, "''");
     const safeSumatraPath = sumatraPdfPath.replace(/'/g, "''");
@@ -69,7 +82,9 @@ export class PrintSettingsAdapter {
       color ? 'color' : 'monochrome',
       duplexMode,
       `paper=${paperSize}`,
-      `${copies}x`
+      `${copies}x`,
+      orientationFlag,
+      scalingFlag
     ].filter(Boolean).join(',');
 
     const timeoutSeconds = Math.max(30, Math.ceil(timeoutMs / 1000));

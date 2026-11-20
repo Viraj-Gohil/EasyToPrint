@@ -426,7 +426,12 @@ export const stageCustomerPrintOrder = async (params: {
     colorMode: string;
     paperSize: string;
     duplex: boolean;
+    orientation?: 'PORTRAIT' | 'LANDSCAPE';
+    scaling?: 'fit' | 'actual' | 'fill';
+    margins?: 'default' | 'narrow' | 'none';
+    pagesPerSheet?: 1 | 2 | 4;
     pagesToPrint?: string;
+    printConfig?: Record<string, any>;
   }>;
 }): Promise<{
   success: boolean;

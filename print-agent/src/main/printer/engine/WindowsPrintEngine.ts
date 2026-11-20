@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import util from 'util';
 import fs from 'fs';
 import {
+  PrintMargins,
   PrintOrientation,
   PrintScalingMode,
   UniversalErrorCode,
@@ -21,6 +22,7 @@ export interface NativePrintOptions {
   colorMode?: 'BW' | 'COLOR';
   duplex?: boolean;
   scalingMode?: PrintScalingMode;
+  margins?: PrintMargins;
   timeoutMs?: number;
 }
 
@@ -49,6 +51,10 @@ export class WindowsPrintEngine {
     const requestedPaper = (options.paperSize || 'A4').toUpperCase();
     const isLandscape = options.orientation === 'LANDSCAPE';
     const scaling = options.scalingMode || 'FIT_TO_PAGE';
+    const margins = options.margins || 'default';
+    // Shared millimeter margin table matching browser WYSIWYG preview (converted to 1/100th inch for .NET PrintDocument)
+    // default = 10mm (39.37 -> 39), narrow = 5mm (19.68 -> 20), none = 0mm (0)
+    const marginHundredthsInch = margins === 'none' ? 0 : margins === 'narrow' ? 20 : 39;
 
     // Format array of safe image paths for PowerShell
     const pathsArrayString = options.imagePaths
@@ -73,6 +79,8 @@ try {
     $requestedPaper = '${requestedPaper}'
     $isLandscape = ${isLandscape ? '$true' : '$false'}
     $scalingMode = '${scaling}'
+    $marginPreset = '${margins}'
+    $requestedMargin = ${marginHundredthsInch}
 
     # 1. Validate Printer Existence & State
     $printer = Get-CimInstance Win32_Printer -ErrorAction SilentlyContinue |
@@ -123,12 +131,28 @@ try {
     # Apply Orientation
     $doc.DefaultPageSettings.Landscape = $isLandscape
 
+    # Apply Requested Margins (in 1/100th inch, matching WYSIWYG preview default=10mm, narrow=5mm, none=0mm)
+    $doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins($requestedMargin, $requestedMargin, $requestedMargin, $requestedMargin)
+
     # Apply Paper Size
     foreach ($ps in $doc.PrinterSettings.PaperSizes) {
         if ($ps.PaperName.ToUpper().Contains($requestedPaper) -or $requestedPaper.Contains($ps.PaperName.ToUpper())) {
             $doc.DefaultPageSettings.PaperSize = $ps
             break
         }
+    }
+
+    # Prepare Rec. 601 luminance grayscale ColorMatrix when B&W mode is selected
+    $grayscaleAttributes = $null
+    if (-not $isColor) {
+        $cm = New-Object System.Drawing.Imaging.ColorMatrix
+        $cm.Matrix00 = 0.299; $cm.Matrix01 = 0.299; $cm.Matrix02 = 0.299; $cm.Matrix03 = 0; $cm.Matrix04 = 0
+        $cm.Matrix10 = 0.587; $cm.Matrix11 = 0.587; $cm.Matrix12 = 0.587; $cm.Matrix13 = 0; $cm.Matrix14 = 0
+        $cm.Matrix20 = 0.114; $cm.Matrix21 = 0.114; $cm.Matrix22 = 0.114; $cm.Matrix23 = 0; $cm.Matrix24 = 0
+        $cm.Matrix30 = 0;     $cm.Matrix31 = 0;     $cm.Matrix32 = 0;     $cm.Matrix33 = 1; $cm.Matrix34 = 0
+        $cm.Matrix40 = 0;     $cm.Matrix41 = 0;     $cm.Matrix42 = 0;     $cm.Matrix43 = 0; $cm.Matrix44 = 1
+        $grayscaleAttributes = New-Object System.Drawing.Imaging.ImageAttributes
+        $grayscaleAttributes.SetColorMatrix($cm)
     }
 
     # 3. Multi-Page Event Handler
@@ -151,30 +175,37 @@ try {
         $img = [System.Drawing.Image]::FromFile($imagePath)
         $script:loadedImages += $img
 
-        # Determine target printable area (respecting hardware margins)
-        $marginBounds = $e.MarginBounds
+        # Determine target printable area (matching requested margins while respecting hardware non-printable zone)
         $pageBounds = $e.PageBounds
+        $hardX = [float]$e.PageSettings.HardMarginX
+        $hardY = [float]$e.PageSettings.HardMarginY
+        $effMarginX = [Math]::Max([float]$requestedMargin, $hardX)
+        $effMarginY = [Math]::Max([float]$requestedMargin, $hardY)
 
-        $targetWidth = [float]$marginBounds.Width
-        $targetHeight = [float]$marginBounds.Height
-        $targetX = [float]$marginBounds.Left
-        $targetY = [float]$marginBounds.Top
-
-        # If margin bounds are too restrictive, fall back to page bounds with safe minimum margin
-        if ($targetWidth -lt 100 -or $targetHeight -lt 100) {
-            $targetWidth = [float]($pageBounds.Width - 40)
-            $targetHeight = [float]($pageBounds.Height - 40)
-            $targetX = 20.0
-            $targetY = 20.0
-        }
+        $targetX = $effMarginX
+        $targetY = $effMarginY
+        $targetWidth = [Math]::Max(50.0, [float]$pageBounds.Width - ($effMarginX * 2.0))
+        $targetHeight = [Math]::Max(50.0, [float]$pageBounds.Height - ($effMarginY * 2.0))
 
         $srcWidth = [float]$img.Width
         $srcHeight = [float]$img.Height
+        $imgDpiX = if ($img.HorizontalResolution -gt 0) { [float]$img.HorizontalResolution } else { 96.0 }
+        $imgDpiY = if ($img.VerticalResolution -gt 0) { [float]$img.VerticalResolution } else { 96.0 }
 
         if ($scalingMode -eq 'ACTUAL_SIZE') {
-            # Actual Size 100% (centered)
-            $destWidth = $srcWidth
-            $destHeight = $srcHeight
+            # Actual Size 100% physical scale (converted to 1/100th inch printer units, centered & clipped to printable box)
+            $destWidth = ($srcWidth / $imgDpiX) * 100.0
+            $destHeight = ($srcHeight / $imgDpiY) * 100.0
+            $destX = $targetX + (($targetWidth - $destWidth) / 2.0)
+            $destY = $targetY + (($targetHeight - $destHeight) / 2.0)
+        } elseif ($scalingMode -eq 'FILL_PAGE') {
+            # FILL_PAGE (Cover-crop preserving aspect ratio, clipped strictly to printable bounds)
+            $scaleX = $targetWidth / $srcWidth
+            $scaleY = $targetHeight / $srcHeight
+            $scale = [Math]::Max($scaleX, $scaleY)
+
+            $destWidth = $srcWidth * $scale
+            $destHeight = $srcHeight * $scale
             $destX = $targetX + (($targetWidth - $destWidth) / 2.0)
             $destY = $targetY + (($targetHeight - $destHeight) / 2.0)
         } else {
@@ -189,15 +220,22 @@ try {
             $destY = $targetY + (($targetHeight - $destHeight) / 2.0)
         }
 
-        # High Quality Render Hints
+        # High Quality Render Hints & Strict Clipping to Printable Area
+        $clipRect = New-Object System.Drawing.RectangleF($targetX, $targetY, $targetWidth, $targetHeight)
+        $e.Graphics.SetClip($clipRect)
         $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
         $e.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
         $e.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
         $e.Graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
 
-        # Render image to printer graphics context
-        $destRect = New-Object System.Drawing.RectangleF($destX, $destY, $destWidth, $destHeight)
-        $e.Graphics.DrawImage($img, $destRect)
+        # Render image to printer graphics context (with true luminance grayscale ColorMatrix when B&W)
+        if ($grayscaleAttributes -ne $null) {
+            $destRectInt = New-Object System.Drawing.Rectangle([int][Math]::Round($destX), [int][Math]::Round($destY), [int][Math]::Round($destWidth), [int][Math]::Round($destHeight))
+            $e.Graphics.DrawImage($img, $destRectInt, 0, 0, $img.Width, $img.Height, [System.Drawing.GraphicsUnit]::Pixel, $grayscaleAttributes)
+        } else {
+            $destRect = New-Object System.Drawing.RectangleF($destX, $destY, $destWidth, $destHeight)
+            $e.Graphics.DrawImage($img, $destRect)
+        }
 
         $script:currentPageIndex++
         $e.HasMorePages = ($script:currentPageIndex -lt $imagePaths.Count)
@@ -224,6 +262,7 @@ try {
     foreach ($img in $script:loadedImages) {
         if ($img) { $img.Dispose() }
     }
+    if ($grayscaleAttributes) { $grayscaleAttributes.Dispose() }
     $doc.Dispose()
 
     [PSCustomObject]@{
@@ -241,6 +280,9 @@ catch {
         foreach ($img in $script:loadedImages) {
             try { $img.Dispose() } catch {}
         }
+    }
+    if ($grayscaleAttributes) {
+        try { $grayscaleAttributes.Dispose() } catch {}
     }
     if ($doc) {
         try { $doc.Dispose() } catch {}

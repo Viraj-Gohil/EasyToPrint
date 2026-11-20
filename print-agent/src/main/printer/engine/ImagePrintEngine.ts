@@ -107,6 +107,7 @@ export class ImagePrintEngine {
       colorMode: request.colorMode,
       duplex: false, // Single image is always single-sided
       scalingMode: request.scalingMode || 'FIT_TO_PAGE',
+      margins: request.margins || 'default',
       timeoutMs: request.timeoutMs
     });
 

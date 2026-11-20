@@ -155,8 +155,12 @@ export interface PrintFileItem {
   paperSize: 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal';
   duplex: boolean;
   orientation?: 'PORTRAIT' | 'LANDSCAPE' | 'AUTO';
+  scaling?: 'fit' | 'actual' | 'fill';
+  margins?: 'default' | 'narrow' | 'none';
+  pagesPerSheet?: 1 | 2 | 4;
   pageRange?: string;
   pagesToPrint?: string;
+  printConfig?: Record<string, any>;
 }
 
 export interface PrintJobItem {

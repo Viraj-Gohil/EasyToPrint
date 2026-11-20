@@ -187,10 +187,28 @@ export class WindowsSpoolerAdapter implements IPrinterAdapter {
     const { printerName, tempFilePath, fileItem, timeoutMs } = options;
     const effectiveTimeoutMs = Math.max(30000, timeoutMs || 30000);
 
+    const rawScaling = String(fileItem.scaling || fileItem.printConfig?.scaling || 'fit').toLowerCase();
+    const scalingMode =
+      rawScaling === 'actual' || rawScaling === 'actual_size'
+        ? 'ACTUAL_SIZE'
+        : rawScaling === 'fill' || rawScaling === 'fill_page'
+          ? 'FILL_PAGE'
+          : 'FIT_TO_PAGE';
+    const rawMargins = String(fileItem.margins || fileItem.printConfig?.margins || 'default').toLowerCase();
+    const margins: 'default' | 'narrow' | 'none' =
+      rawMargins === 'narrow' ? 'narrow' : rawMargins === 'none' ? 'none' : 'default';
+    const rawNUp = Number(fileItem.pagesPerSheet ?? fileItem.printConfig?.pagesPerSheet ?? 1);
+    const pagesPerSheet: 1 | 2 | 4 = rawNUp === 2 ? 2 : rawNUp === 4 ? 4 : 1;
+
     logger.info('SPOOLER', `[WindowsSpoolerAdapter] Spooling job to printer "${printerName}" via UniversalPrintService`, {
       copies: fileItem.copies,
       paperSize: fileItem.paperSize,
-      color: fileItem.colorMode
+      color: fileItem.colorMode,
+      duplex: Boolean(fileItem.duplex),
+      orientation: fileItem.orientation || 'PORTRAIT',
+      scalingMode,
+      margins,
+      pagesPerSheet
     });
 
     const result = await universalPrintService.printFile({
@@ -201,6 +219,10 @@ export class WindowsSpoolerAdapter implements IPrinterAdapter {
       paperSize: fileItem.paperSize || 'A4',
       orientation: (fileItem.orientation?.toUpperCase() as any) || 'PORTRAIT',
       colorMode: fileItem.colorMode === 'COLOR' ? 'COLOR' : 'BW',
+      duplex: Boolean(fileItem.duplex),
+      scalingMode,
+      margins,
+      pagesPerSheet,
       pageRange: fileItem.pagesToPrint || (fileItem as any).pageRange,
       timeoutMs: effectiveTimeoutMs
     });

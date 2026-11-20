@@ -47,6 +47,8 @@ export type PrintOrientation = 'PORTRAIT' | 'LANDSCAPE';
 export type PageOrientation = PrintOrientation;
 export type PageSelection = 'ALL' | 'CUSTOM';
 export type PagesPerSheet = 1 | 2 | 4 | 6 | 9;
+export type PrintScaling = 'fit' | 'actual' | 'fill';
+export type PrintMargins = 'default' | 'narrow' | 'none';
 
 export interface UserProfile {
   id: string;
@@ -162,6 +164,8 @@ export interface FilePrintConfig {
   customPageRange?: string;
   customRange?: string;
   pagesPerSheet: PagesPerSheet;
+  scaling?: PrintScaling;
+  margins?: PrintMargins;
   unitPrice: number;
   pricePerPage?: number;
   totalPrice: number;

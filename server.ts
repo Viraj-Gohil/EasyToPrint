@@ -6053,7 +6053,12 @@ interface BackendPrintJob {
     colorMode: 'BW' | 'COLOR';
     paperSize: 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal';
     duplex: boolean;
+    orientation?: 'PORTRAIT' | 'LANDSCAPE';
+    scaling?: 'fit' | 'actual' | 'fill';
+    margins?: 'default' | 'narrow' | 'none';
+    pagesPerSheet?: 1 | 2 | 4;
     pagesToPrint?: string;
+    printConfig?: Record<string, any>;
     mime?: string;
   }>;
   totalAmount: number;
@@ -6361,7 +6366,22 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
     colorMode: 'BW' | 'COLOR';
     paperSize: 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal';
     duplex: boolean;
+    orientation: 'PORTRAIT' | 'LANDSCAPE';
+    scaling: 'fit' | 'actual' | 'fill';
+    margins: 'default' | 'narrow' | 'none';
+    pagesPerSheet: 1 | 2 | 4;
     pagesToPrint?: string;
+    printConfig: {
+      orientation: 'portrait' | 'landscape';
+      paperSize: 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal';
+      colorMode: 'color' | 'grayscale';
+      copies: number;
+      pageRange: string;
+      scaling: 'fit' | 'actual' | 'fill';
+      margins: 'default' | 'narrow' | 'none';
+      duplex: boolean;
+      pagesPerSheet: 1 | 2 | 4;
+    };
     buffer?: Buffer;
     sanitizedFilename: string;
     stagedFileId?: string;
@@ -6410,6 +6430,35 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
         error: 'One or more print file settings are invalid.'
       });
     }
+
+    const cleanOrientation: 'PORTRAIT' | 'LANDSCAPE' =
+      String(input?.orientation || input?.printConfig?.orientation || 'PORTRAIT').trim().toUpperCase() === 'LANDSCAPE'
+        ? 'LANDSCAPE'
+        : 'PORTRAIT';
+    const rawScaling = String(input?.scaling || input?.printConfig?.scaling || 'fit').trim().toLowerCase();
+    const cleanScaling: 'fit' | 'actual' | 'fill' =
+      rawScaling === 'actual' || rawScaling === 'actual_size'
+        ? 'actual'
+        : rawScaling === 'fill' || rawScaling === 'fill_page'
+          ? 'fill'
+          : 'fit';
+    const rawMargins = String(input?.margins || input?.printConfig?.margins || 'default').trim().toLowerCase();
+    const cleanMargins: 'default' | 'narrow' | 'none' =
+      rawMargins === 'narrow' ? 'narrow' : rawMargins === 'none' ? 'none' : 'default';
+    const rawNUp = Number(input?.pagesPerSheet ?? input?.printConfig?.pagesPerSheet ?? 1);
+    const cleanPagesPerSheet: 1 | 2 | 4 = rawNUp === 2 ? 2 : rawNUp === 4 ? 4 : 1;
+
+    const normalizedPrintConfig = {
+      orientation: (cleanOrientation === 'LANDSCAPE' ? 'landscape' : 'portrait') as 'portrait' | 'landscape',
+      paperSize: input.paperSize as 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal',
+      colorMode: (input.colorMode === 'COLOR' ? 'color' : 'grayscale') as 'color' | 'grayscale',
+      copies: input.copies,
+      pageRange: cleanPagesToPrint || 'all',
+      scaling: cleanScaling,
+      margins: cleanMargins,
+      duplex: input.duplex,
+      pagesPerSheet: cleanPagesPerSheet
+    };
 
     const stagedFileId = typeof input.stagedFileId === 'string' && input.stagedFileId.trim() ? input.stagedFileId.trim() : undefined;
 
@@ -6462,7 +6511,12 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
         colorMode: input.colorMode,
         paperSize: input.paperSize,
         duplex: input.duplex,
+        orientation: cleanOrientation,
+        scaling: cleanScaling,
+        margins: cleanMargins,
+        pagesPerSheet: cleanPagesPerSheet,
         pagesToPrint: cleanPagesToPrint,
+        printConfig: normalizedPrintConfig,
         buffer: fallbackEntry?.buffer,
         sanitizedFilename: stagedRec.originalFilename
       });
@@ -6562,7 +6616,12 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
       colorMode: input.colorMode,
       paperSize: input.paperSize,
       duplex: input.duplex,
+      orientation: cleanOrientation,
+      scaling: cleanScaling,
+      margins: cleanMargins,
+      pagesPerSheet: cleanPagesPerSheet,
       pagesToPrint: cleanPagesToPrint,
+      printConfig: normalizedPrintConfig,
       buffer: storageProvider.isConfigured() ? undefined : buffer,
       sanitizedFilename: validation.sanitizedFilename
     });
@@ -7049,7 +7108,12 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     colorMode: 'BW' | 'COLOR';
     paperSize: 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal';
     duplex: boolean;
+    orientation: 'PORTRAIT' | 'LANDSCAPE';
+    scaling: 'fit' | 'actual' | 'fill';
+    margins: 'default' | 'narrow' | 'none';
+    pagesPerSheet: 1 | 2 | 4;
     pagesToPrint?: string;
+    printConfig: Record<string, any>;
     storageKey: string;
     buffer: Buffer;
     mime: string;
@@ -7118,6 +7182,23 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     const fileId = `file_${crypto.randomBytes(8).toString('hex')}`;
     const ext = path.extname(validation.sanitizedFilename) || '.pdf';
     const downloadUrl = `/api/agent/jobs/${encodeURIComponent(id)}/file?fileId=${encodeURIComponent(fileId)}`;
+    const cleanOrientation: 'PORTRAIT' | 'LANDSCAPE' =
+      String(input?.orientation || input?.printConfig?.orientation || 'PORTRAIT').trim().toUpperCase() === 'LANDSCAPE'
+        ? 'LANDSCAPE'
+        : 'PORTRAIT';
+    const rawScaling = String(input?.scaling || input?.printConfig?.scaling || 'fit').trim().toLowerCase();
+    const cleanScaling: 'fit' | 'actual' | 'fill' =
+      rawScaling === 'actual' || rawScaling === 'actual_size'
+        ? 'actual'
+        : rawScaling === 'fill' || rawScaling === 'fill_page'
+          ? 'fill'
+          : 'fit';
+    const rawMargins = String(input?.margins || input?.printConfig?.margins || 'default').trim().toLowerCase();
+    const cleanMargins: 'default' | 'narrow' | 'none' =
+      rawMargins === 'narrow' ? 'narrow' : rawMargins === 'none' ? 'none' : 'default';
+    const rawNUp = Number(input?.pagesPerSheet ?? input?.printConfig?.pagesPerSheet ?? 1);
+    const cleanPagesPerSheet: 1 | 2 | 4 = rawNUp === 2 ? 2 : rawNUp === 4 ? 4 : 1;
+
     preparedFiles.push({
       id: fileId,
       fileName: validation.sanitizedFilename,
@@ -7129,7 +7210,22 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
       colorMode: input.colorMode,
       paperSize: input.paperSize,
       duplex: input.duplex,
+      orientation: cleanOrientation,
+      scaling: cleanScaling,
+      margins: cleanMargins,
+      pagesPerSheet: cleanPagesPerSheet,
       pagesToPrint: cleanPagesToPrint,
+      printConfig: {
+        orientation: cleanOrientation === 'LANDSCAPE' ? 'landscape' : 'portrait',
+        paperSize: input.paperSize,
+        colorMode: input.colorMode === 'COLOR' ? 'color' : 'grayscale',
+        copies: input.copies,
+        pageRange: cleanPagesToPrint || 'all',
+        scaling: cleanScaling,
+        margins: cleanMargins,
+        duplex: input.duplex,
+        pagesPerSheet: cleanPagesPerSheet
+      },
       storageKey: validation.storageKey,
       buffer,
       mime: validation.detectedMime,
