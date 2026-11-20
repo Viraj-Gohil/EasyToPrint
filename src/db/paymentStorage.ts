@@ -947,6 +947,14 @@ export async function initializePaymentTables(maxRetries = 3): Promise<void> {
           ON public.storage_cleanup_runs (started_at DESC);
         CREATE INDEX IF NOT EXISTS idx_storage_cleanup_runs_status
           ON public.storage_cleanup_runs (status, started_at DESC);
+        ALTER TABLE public.storage_cleanup_runs
+          ADD COLUMN IF NOT EXISTS execution_type VARCHAR(24) NOT NULL DEFAULT 'AUTOMATIC',
+          ADD COLUMN IF NOT EXISTS triggered_by VARCHAR(160) NOT NULL DEFAULT 'Cron',
+          ADD COLUMN IF NOT EXISTS error_message TEXT;
+        CREATE INDEX IF NOT EXISTS idx_storage_cleanup_runs_execution_type
+          ON public.storage_cleanup_runs (execution_type, started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_storage_cleanup_runs_triggered_by
+          ON public.storage_cleanup_runs (triggered_by, started_at DESC);
 
         DO $$
         BEGIN

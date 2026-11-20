@@ -7,11 +7,9 @@ import {
   Shield,
   Bell,
   HardDrive,
-  Copy,
   CheckCircle2,
   AlertTriangle,
   Save,
-  Key,
   ExternalLink,
   Settings,
   Mail,
@@ -88,28 +86,24 @@ export const AdminPlatformSettings: React.FC = () => {
     }
   };
 
-  // Webhook
-  const [webhookCopied, setWebhookCopied] = useState(false);
-  const webhookUrl = typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks/platform-master` : 'https://api.easytoprint.in/api/webhooks/platform-master';
+  useEffect(() => {
+    setDefaultRetentionHours(platformPolicies.defaultFileRetentionHours || 48);
+    setMaxUploadSizeMb(platformPolicies.maxAllowedUploadSizeMb || 50);
+  }, [platformPolicies.defaultFileRetentionHours, platformPolicies.maxAllowedUploadSizeMb]);
 
-  const handleSavePolicies = (e: React.FormEvent) => {
+  const handleSavePolicies = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingPolicies(true);
-    setTimeout(() => {
-      updatePlatformPolicies({
+    try {
+      await updatePlatformPolicies({
         defaultFileRetentionHours: Number(defaultRetentionHours),
         maxAllowedUploadSizeMb: Number(maxUploadSizeMb)
       });
+    } catch {
+      // Error toast is already displayed by updatePlatformPolicies
+    } finally {
       setIsSavingPolicies(false);
-      showToast('Platform Settings Saved', 'Global platform parameters have been updated successfully.', 'success');
-    }, 300);
-  };
-
-  const copyWebhook = () => {
-    navigator.clipboard.writeText(webhookUrl);
-    setWebhookCopied(true);
-    showToast('Webhook Copied', 'Platform master webhook URL copied to clipboard.', 'info');
-    setTimeout(() => setWebhookCopied(false), 2000);
+    }
   };
 
   return (
@@ -397,36 +391,6 @@ export const AdminPlatformSettings: React.FC = () => {
               <span>{maintenanceMode ? 'Apply Maintenance Mode' : 'Disable Maintenance Mode'}</span>
             </Button>
           </div>
-        </div>
-      </div>
-
-      {/* 6. PLATFORM MASTER WEBHOOK INFORMATION */}
-      <div className="bg-white p-5 sm:p-6 rounded-xl border border-slate-200/90 shadow-2xs space-y-4">
-        <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
-          <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
-            <Key className="w-4 h-4" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900">Platform Master Webhook Endpoint</h2>
-            <p className="text-xs text-slate-500">Configured webhook ingestion endpoint for Razorpay platform-wide events.</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            readOnly
-            value={webhookUrl}
-            className="w-full h-10 px-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-700 select-all"
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={copyWebhook}
-          >
-            <Copy className="w-3.5 h-3.5 text-slate-500" />
-            <span>{webhookCopied ? 'Copied' : 'Copy'}</span>
-          </Button>
         </div>
       </div>
     </div>

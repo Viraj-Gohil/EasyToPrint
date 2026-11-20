@@ -8,7 +8,6 @@ import {
   BarChart3,
   Store,
   Printer,
-  Users,
   HardDrive,
   Crown,
   Layers,
@@ -123,12 +122,6 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
           path: adminPath('shops')
         },
         {
-          id: 'users',
-          label: 'Users Management',
-          icon: Users,
-          path: adminPath('users')
-        },
-        {
           id: 'printers',
           label: 'Printers',
           icon: Printer,
@@ -209,7 +202,6 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
     switch (tab) {
       case 'dashboard': return 'Dashboard Overview';
       case 'shops': return 'Shops Management';
-      case 'users': return 'Users Management';
       case 'printers': return 'Printers Management';
       case 'plans':
       case 'saas-plans':

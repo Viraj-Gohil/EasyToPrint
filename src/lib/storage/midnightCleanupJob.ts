@@ -134,6 +134,8 @@ export interface CleanupFailureDetail {
 export interface MidnightCleanupExecutionResult {
   runId: string;
   triggerSource: CleanupTriggerSource;
+  executionType: 'AUTOMATIC' | 'MANUAL';
+  triggeredBy: string;
   cronExpression: string;
   timezone: string;
   utcEquivalent: string;
@@ -161,6 +163,7 @@ export interface MidnightCleanupExecutionResult {
 
 export interface ExecuteMidnightCleanupOptions {
   triggerSource?: CleanupTriggerSource;
+  triggeredBy?: string;
   storageProvider?: StorageProvider;
   pool?: QueryablePool | null;
   buckets?: string[];
@@ -211,6 +214,32 @@ export function formatIstTimestamp(date: Date = new Date()): string {
   const hourRaw = get('hour');
   const hour = hourRaw === '24' ? '00' : hourRaw;
   return `${get('year')}-${get('month')}-${get('day')} ${hour}:${get('minute')}:${get('second')} IST`;
+}
+
+/**
+ * Computes the next scheduled 12:00 AM Asia/Kolkata (18:30 UTC) execution timestamp.
+ */
+export function computeNextMidnightIstExecution(fromDate: Date = new Date()): {
+  iso: string;
+  ist: string;
+} {
+  // Asia/Kolkata is fixed UTC+05:30 (no DST). Next 00:00 IST is always 18:30 UTC.
+  const istOffsetMs = 5.5 * 60 * 60 * 1000;
+  const shifted = new Date(fromDate.getTime() + istOffsetMs);
+  const nextIstMidnightShifted = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate() + 1,
+    0,
+    0,
+    0,
+    0
+  );
+  const nextUtcDate = new Date(nextIstMidnightShifted - istOffsetMs);
+  return {
+    iso: nextUtcDate.toISOString(),
+    ist: formatIstTimestamp(nextUtcDate)
+  };
 }
 
 /**
@@ -680,23 +709,31 @@ async function persistCleanupRunLog(
   result: MidnightCleanupExecutionResult
 ): Promise<void> {
   if (!pool) return;
+  const errorMessage =
+    result.error ||
+    (result.failureReasons.length > 0
+      ? result.failureReasons.slice(0, 5).map((f) => `${f.objectPath}: ${f.reason}`).join(' | ')
+      : null);
+
   try {
     await pool.query(
       `INSERT INTO public.storage_cleanup_runs (
-         id, trigger_source, cron_expression, timezone, executed_at_ist,
+         id, trigger_source, execution_type, triggered_by, cron_expression, timezone, executed_at_ist,
          started_at, completed_at, duration_ms, status, buckets_scanned,
          total_discovered, total_deleted, total_skipped, total_failed,
-         reclaimed_bytes, skip_summary, failure_reasons
+         reclaimed_bytes, skip_summary, failure_reasons, error_message
        )
        VALUES (
-         $1::uuid, $2, $3, $4, $5,
-         $6::timestamptz, $7::timestamptz, $8, $9, $10::jsonb,
-         $11, $12, $13, $14,
-         $15, $16::jsonb, $17::jsonb
+         $1::uuid, $2, $3, $4, $5, $6, $7,
+         $8::timestamptz, $9::timestamptz, $10, $11, $12::jsonb,
+         $13, $14, $15, $16,
+         $17, $18::jsonb, $19::jsonb, $20
        )`,
       [
         result.runId,
         result.triggerSource,
+        result.executionType,
+        result.triggeredBy,
         result.cronExpression,
         result.timezone,
         result.executedAtIst,
@@ -711,10 +748,52 @@ async function persistCleanupRunLog(
         result.totalFailed,
         result.reclaimedBytes,
         JSON.stringify(result.skipSummary),
-        JSON.stringify(result.failureReasons.slice(0, 100))
+        JSON.stringify(result.failureReasons.slice(0, 100)),
+        errorMessage
       ]
     );
   } catch (err: any) {
+    if (err?.code === '42703') {
+      // Fallback for databases where migration 015 hasn't run yet
+      try {
+        await pool.query(
+          `INSERT INTO public.storage_cleanup_runs (
+             id, trigger_source, cron_expression, timezone, executed_at_ist,
+             started_at, completed_at, duration_ms, status, buckets_scanned,
+             total_discovered, total_deleted, total_skipped, total_failed,
+             reclaimed_bytes, skip_summary, failure_reasons
+           )
+           VALUES (
+             $1::uuid, $2, $3, $4, $5,
+             $6::timestamptz, $7::timestamptz, $8, $9, $10::jsonb,
+             $11, $12, $13, $14,
+             $15, $16::jsonb, $17::jsonb
+           )`,
+          [
+            result.runId,
+            result.triggerSource,
+            result.cronExpression,
+            result.timezone,
+            result.executedAtIst,
+            result.startedAtIso,
+            result.completedAtIso,
+            result.durationMs,
+            result.status,
+            JSON.stringify(result.bucketsScanned),
+            result.totalDiscovered,
+            result.totalDeleted,
+            result.totalSkipped,
+            result.totalFailed,
+            result.reclaimedBytes,
+            JSON.stringify(result.skipSummary),
+            JSON.stringify(result.failureReasons.slice(0, 100))
+          ]
+        );
+        return;
+      } catch {
+        // Ignore fallback failure
+      }
+    }
     if (!isUndefinedTableOrColumnError(err)) {
       logger.warn('Failed to persist midnight storage cleanup audit log row', {
         runId: result.runId,
@@ -731,10 +810,10 @@ export async function listRecentCleanupRuns(pool: QueryablePool, limit = 30): Pr
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
   try {
     const res = await pool.query(
-      `SELECT id, trigger_source, cron_expression, timezone, executed_at_ist,
+      `SELECT id, trigger_source, execution_type, triggered_by, cron_expression, timezone, executed_at_ist,
               started_at, completed_at, duration_ms, status, buckets_scanned,
               total_discovered, total_deleted, total_skipped, total_failed,
-              reclaimed_bytes, skip_summary, failure_reasons, created_at
+              reclaimed_bytes, skip_summary, failure_reasons, error_message, created_at
        FROM public.storage_cleanup_runs
        ORDER BY started_at DESC
        LIMIT $1`,
@@ -759,6 +838,14 @@ export async function executeMidnightStorageCleanup(
 ): Promise<MidnightCleanupExecutionResult> {
   const runId = crypto.randomUUID();
   const triggerSource: CleanupTriggerSource = options.triggerSource || 'SCHEDULED_CRON';
+  const executionType: 'AUTOMATIC' | 'MANUAL' = triggerSource === 'MANUAL_ADMIN' ? 'MANUAL' : 'AUTOMATIC';
+  const triggeredBy =
+    (options.triggeredBy || '').trim() ||
+    (triggerSource === 'MANUAL_ADMIN'
+      ? 'Admin'
+      : triggerSource === 'AUTHENTICATED_CRON_HTTP'
+        ? 'Cron (HTTP)'
+        : 'Cron');
   const startedAt = new Date();
   const startedAtIso = startedAt.toISOString();
   const executedAtIst = formatIstTimestamp(startedAt);
@@ -771,6 +858,8 @@ export async function executeMidnightStorageCleanup(
     return {
       runId,
       triggerSource,
+      executionType,
+      triggeredBy,
       cronExpression: MIDNIGHT_CLEANUP_CRON_EXPRESSION,
       timezone: MIDNIGHT_CLEANUP_TIMEZONE,
       utcEquivalent: MIDNIGHT_CLEANUP_UTC_LABEL,
@@ -1212,6 +1301,7 @@ export function stopMidnightStorageCleanupCron(): void {
  * Returns live status & schedule metadata for the single midnight cleanup cron job.
  */
 export function getMidnightCleanupCronStatus() {
+  const nextRun = computeNextMidnightIstExecution();
   return {
     active: Boolean(singletonMidnightCronTask),
     registeredAtIso: singletonCronRegisteredAtIso,
@@ -1219,6 +1309,8 @@ export function getMidnightCleanupCronStatus() {
     timezone: MIDNIGHT_CLEANUP_TIMEZONE,
     utcCronExpression: MIDNIGHT_CLEANUP_UTC_EXPRESSION,
     utcEquivalent: MIDNIGHT_CLEANUP_UTC_LABEL,
+    nextScheduledExecutionIso: nextRun.iso,
+    nextScheduledExecutionIst: nextRun.ist,
     currentlyRunning: inProcessCleanupRunning,
     designatedBuckets: getDesignatedPrintCleanupBuckets(),
     lastRun: lastCleanupSummary

@@ -96,8 +96,6 @@ interface UploadingItem {
   progress: number;
 }
 
-const MAX_PRINT_JOB_FILE_BYTES = 50 * 1024 * 1024;
-
 const fileToBase64 = async (file: File): Promise<string> => {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const chunks: string[] = [];
@@ -108,7 +106,9 @@ const fileToBase64 = async (file: File): Promise<string> => {
 };
 
 export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }) => {
-  const { shops, activeShop, pricingRules, createPrintJob, updateShopRazorpay, navigate, showToast } = useApp();
+  const { shops, activeShop, pricingRules, platformPolicies, createPrintJob, updateShopRazorpay, navigate, showToast } = useApp();
+  const maxAllowedUploadMb = Math.max(5, Math.min(500, platformPolicies?.maxAllowedUploadSizeMb || 50));
+  const maxPrintJobFileBytes = maxAllowedUploadMb * 1024 * 1024;
 
   const [remoteShop, setRemoteShop] = useState<Shop | null>(null);
   const [remotePricingRules, setRemotePricingRules] = useState<PricingRule[] | null>(null);
@@ -1322,8 +1322,8 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       setStepError('Re-upload any merged or generated document as a PDF or image before continuing to payment.');
       return;
     }
-    if (totalBytes > MAX_PRINT_JOB_FILE_BYTES) {
-      setStepError('The combined size of your print files must be 50 MB or less.');
+    if (totalBytes > maxPrintJobFileBytes) {
+      setStepError(`The combined size of your print files must be ${maxAllowedUploadMb} MB or less.`);
       return;
     }
     if (files.some((file) => !['A4', 'A3', 'A5', 'Letter', 'Legal'].includes(file.paperSize))) {

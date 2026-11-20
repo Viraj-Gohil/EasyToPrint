@@ -58,6 +58,16 @@ export interface BucketRemoveResult {
   failedItems: Array<{ objectPath: string; reason: string }>;
 }
 
+export interface BucketMetadataResult {
+  exists: boolean;
+  name: string;
+  isPublic: boolean | null;
+  fileSizeLimitBytes: number | null;
+  allowedMimeTypes: string[] | null;
+  createdAt: string | null;
+  error?: string;
+}
+
 export interface StorageProvider {
   upload(input: StorageUploadInput): Promise<StorageUploadResult>;
   download(objectPath: string): Promise<Buffer>;
@@ -69,6 +79,7 @@ export interface StorageProvider {
     prefix: string,
     options?: { limit?: number; offset?: number }
   ): Promise<BucketListResult>;
+  getBucketMetadata?(bucket: string): Promise<BucketMetadataResult>;
   removeFromBucket?(bucket: string, objectPaths: string[]): Promise<BucketRemoveResult>;
   getPrimaryBucket?(): string;
   isConfigured(): boolean;
@@ -233,6 +244,48 @@ export class SupabaseStorageService implements StorageProvider {
     } catch {
       return false;
     }
+  }
+
+  async getBucketMetadata(bucket: string): Promise<BucketMetadataResult> {
+    if (!this.client) {
+      return {
+        exists: false,
+        name: bucket,
+        isPublic: null,
+        fileSizeLimitBytes: null,
+        allowedMimeTypes: null,
+        createdAt: null,
+        error: 'Supabase Storage client is not configured.'
+      };
+    }
+
+    const { data, error } = await this.client.storage.getBucket(bucket);
+    if (error || !data) {
+      const msg = error?.message || 'Bucket not found';
+      return {
+        exists: false,
+        name: bucket,
+        isPublic: null,
+        fileSizeLimitBytes: null,
+        allowedMimeTypes: null,
+        createdAt: null,
+        error: msg
+      };
+    }
+
+    return {
+      exists: true,
+      name: data.name || bucket,
+      isPublic: Boolean(data.public),
+      fileSizeLimitBytes:
+        typeof data.file_size_limit === 'number'
+          ? data.file_size_limit
+          : typeof data.file_size_limit === 'string' && data.file_size_limit
+            ? Number(data.file_size_limit)
+            : null,
+      allowedMimeTypes: Array.isArray(data.allowed_mime_types) ? data.allowed_mime_types : null,
+      createdAt: data.created_at || null
+    };
   }
 
   async listDirectoryInBucket(
@@ -518,6 +571,18 @@ export class MockStorageService implements StorageProvider {
     }
 
     return { deletedPaths, alreadyMissingPaths, failedItems };
+  }
+
+  async getBucketMetadata(bucket: string): Promise<BucketMetadataResult> {
+    const exists = this.buckets.has(bucket);
+    return {
+      exists,
+      name: bucket,
+      isPublic: false,
+      fileSizeLimitBytes: 50 * 1024 * 1024,
+      allowedMimeTypes: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+      createdAt: exists ? new Date().toISOString() : null
+    };
   }
 
   async delete(objectPaths: string[]): Promise<void> {

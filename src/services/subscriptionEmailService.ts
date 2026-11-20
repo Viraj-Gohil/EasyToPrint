@@ -21,7 +21,6 @@ export type SubscriptionEmailType =
 
 export interface QueryableDb {
   query: (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
-  connect?: () => Promise<PoolClient>;
 }
 
 export interface EmailTransportResult {

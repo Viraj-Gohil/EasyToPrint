@@ -15,6 +15,7 @@ import type { Pool, PoolClient } from 'pg';
 import { requireSharedPool, isSharedPoolConfigured } from './repositoryFactory.js';
 import { getPlatformPaymentConfig } from './paymentStorage.js';
 import { logger, deepRedact } from '../lib/security.js';
+import { getPlatformPolicies, getCachedPlatformPoliciesSync } from '../services/platformPolicyService.js';
 
 export interface PlanLimits {
   printLimitMonthly: number;
@@ -659,12 +660,18 @@ export class SubscriptionRepository {
   }
 
   /**
-   * Activates a one-time 7-Day Starter Free Trial for an eligible shop
+   * Activates a one-time Starter Free Trial for an eligible shop using live platform trialDurationDays policy
    */
   public async activateTrial(shopId: string, userId?: string): Promise<SubscriptionRecord> {
+    const policies = await getPlatformPolicies();
+    const trialDays = Math.max(0, Math.min(60, Number(policies.trialDurationDays ?? 7)));
+    if (trialDays <= 0) {
+      throw new Error('Free trials are currently disabled by platform subscription policy. Please select a paid plan.');
+    }
+
     const starterPlan = (await this.getPlan('starter')) || CANONICAL_PLANS[0];
     const now = new Date();
-    const trialEnd = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const trialEnd = new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000);
 
     if (isSharedPoolConfigured()) {
       const pool = requireSharedPool();
@@ -673,22 +680,24 @@ export class SubscriptionRepository {
         await client.query('BEGIN');
 
         // 1. Abuse check: Check if shop has EVER activated a trial before
-        const historyCheck = await client.query(`
-          SELECT id, activated_at, expires_at
-          FROM public.trial_history
-          WHERE shop_id = $1
-          LIMIT 1
-        `, [shopId]);
+        if (policies.trialPerShopEligibility !== false) {
+          const historyCheck = await client.query(`
+            SELECT id, activated_at, expires_at
+            FROM public.trial_history
+            WHERE shop_id = $1
+            LIMIT 1
+          `, [shopId]);
 
-        if (historyCheck.rowCount && historyCheck.rows.length > 0) {
-          throw new Error('This shop has already activated its one-time 7-Day Starter Trial. Please subscribe to a plan.');
+          if (historyCheck.rowCount && historyCheck.rows.length > 0) {
+            throw new Error(`This shop has already activated its one-time ${trialDays}-Day Starter Trial. Please subscribe to a plan.`);
+          }
         }
 
         // 2. Check if shop has an active paid subscription
         const activeSubCheck = await client.query(`
           SELECT id, status, plan_id
           FROM public.subscriptions
-          WHERE shop_id = $1 AND status = 'active'
+          WHERE shop_id = $1 AND LOWER(status) = 'active'
           LIMIT 1
         `, [shopId]);
 
@@ -729,7 +738,7 @@ export class SubscriptionRepository {
           VALUES ($1, $2, 'TRIAL_ACTIVATED', $3::jsonb)
         `, [subId, shopId, JSON.stringify({
           planId: starterPlan.id,
-          trialDays: 7,
+          trialDays,
           trialEnd: trialEnd.toISOString()
         })]);
 
@@ -747,8 +756,8 @@ export class SubscriptionRepository {
       }
     } else {
       // In-Memory store check
-      if (inMemoryTrials.has(shopId)) {
-        throw new Error('This shop has already activated its one-time 7-Day Starter Trial. Please subscribe to a plan.');
+      if (policies.trialPerShopEligibility !== false && inMemoryTrials.has(shopId)) {
+        throw new Error(`This shop has already activated its one-time ${trialDays}-Day Starter Trial. Please subscribe to a plan.`);
       }
       inMemoryTrials.set(shopId, {
         activatedAt: now.toISOString(),
@@ -783,22 +792,30 @@ export class SubscriptionRepository {
 
   /**
    * Check if a shop is permitted to accept another print job under its plan limit
+   * and live Global Quota & Subscription Policies (overagePolicy & failedPaymentGracePeriodDays).
    */
   public async checkPrintJobQuota(shopId: string): Promise<{
     allowed: boolean;
-    reason?: 'EXPIRED' | 'SUSPENDED' | 'QUOTA_EXCEEDED';
+    reason?: 'EXPIRED' | 'SUSPENDED' | 'QUOTA_EXCEEDED' | 'PAST_DUE_LOCKED';
+    warning?: 'QUOTA_EXCEEDED_SOFT_WARNING' | 'GRACE_PERIOD_ACTIVE' | 'USAGE_WARNING_THRESHOLD';
     message?: string;
     currentUsage: number;
     limit: number;
   }> {
-    const sub = await this.getShopSubscription(shopId);
+    const [sub, policies] = await Promise.all([
+      this.getShopSubscription(shopId),
+      getPlatformPolicies()
+    ]);
 
-    // Rule 1: Subscription must not be expired or suspended
-    if (sub.status === 'expired') {
+    const nowMs = Date.now();
+    const graceDays = Math.max(0, Number(policies.failedPaymentGracePeriodDays ?? 5));
+
+    // Rule 1: Subscription must not be expired, suspended, or past failed-payment grace period
+    if (sub.status === 'expired' || sub.status === 'cancelled') {
       return {
         allowed: false,
         reason: 'EXPIRED',
-        message: 'Shop subscription has expired. Please upgrade or subscribe to accept customer print jobs.',
+        message: 'Shop subscription has expired or been cancelled. Please upgrade or subscribe to accept customer print jobs.',
         currentUsage: sub.printJobsUsed,
         limit: sub.printJobsLimit
       };
@@ -813,8 +830,42 @@ export class SubscriptionRepository {
       };
     }
 
-    // Rule 2: Usage must be strictly below plan limit
+    let activeWarning: 'QUOTA_EXCEEDED_SOFT_WARNING' | 'GRACE_PERIOD_ACTIVE' | 'USAGE_WARNING_THRESHOLD' | undefined;
+    let activeWarningMessage: string | undefined;
+
+    if (sub.status === 'past_due') {
+      const explicitGraceEndMs = sub.gracePeriodEnd ? new Date(sub.gracePeriodEnd).getTime() : null;
+      const computedGraceEndMs =
+        explicitGraceEndMs && Number.isFinite(explicitGraceEndMs)
+          ? explicitGraceEndMs
+          : new Date(sub.currentPeriodEnd).getTime() + graceDays * 24 * 60 * 60 * 1000;
+
+      if (graceDays <= 0 || nowMs > computedGraceEndMs) {
+        return {
+          allowed: false,
+          reason: 'PAST_DUE_LOCKED',
+          message: `Subscription payment is past due and the ${graceDays}-day grace period has elapsed. Please renew to resume printing.`,
+          currentUsage: sub.printJobsUsed,
+          limit: sub.printJobsLimit
+        };
+      }
+
+      const daysLeft = Math.max(1, Math.ceil((computedGraceEndMs - nowMs) / (24 * 60 * 60 * 1000)));
+      activeWarning = 'GRACE_PERIOD_ACTIVE';
+      activeWarningMessage = `Subscription payment is past due. Grace period active (${daysLeft} day${daysLeft === 1 ? '' : 's'} remaining).`;
+    }
+
+    // Rule 2: Enforce monthly print quota according to live overagePolicy
     if (sub.printJobsUsed >= sub.printJobsLimit) {
+      if (policies.overagePolicy === 'SOFT_WARNING') {
+        return {
+          allowed: true,
+          warning: 'QUOTA_EXCEEDED_SOFT_WARNING',
+          message: `Soft warning: Shop has reached ${sub.printJobsUsed}/${sub.printJobsLimit} monthly print jobs. Printing remains enabled under platform overage policy.`,
+          currentUsage: sub.printJobsUsed,
+          limit: sub.printJobsLimit
+        };
+      }
       return {
         allowed: false,
         reason: 'QUOTA_EXCEEDED',
@@ -824,8 +875,16 @@ export class SubscriptionRepository {
       };
     }
 
+    const usagePercent = Math.round((sub.printJobsUsed / Math.max(1, sub.printJobsLimit)) * 100);
+    if (!activeWarning && usagePercent >= policies.warningThresholdPercent) {
+      activeWarning = 'USAGE_WARNING_THRESHOLD';
+      activeWarningMessage = `Monthly usage is at ${usagePercent}% (warning threshold: ${policies.warningThresholdPercent}%).`;
+    }
+
     return {
       allowed: true,
+      warning: activeWarning,
+      message: activeWarningMessage,
       currentUsage: sub.printJobsUsed,
       limit: sub.printJobsLimit
     };
@@ -1272,38 +1331,71 @@ export class SubscriptionRepository {
   }
 
   /**
-   * Cancel subscription auto-renewal (retains access until current_period_end)
+   * Cancel subscription according to live platform cancellationPolicy:
+   * - END_OF_CYCLE: disables auto-renewal while retaining access until current_period_end
+   * - IMMEDIATE: cancels immediately and reverts shop to Starter/Free tier
    */
-  public async cancelSubscription(shopId: string, reason?: string): Promise<SubscriptionRecord> {
-    const sub = await this.getShopSubscription(shopId);
+  public async cancelSubscription(shopId: string, reason?: string): Promise<SubscriptionRecord & { appliedCancellationPolicy?: 'END_OF_CYCLE' | 'IMMEDIATE' }> {
+    const [sub, policies] = await Promise.all([
+      this.getShopSubscription(shopId),
+      getPlatformPolicies()
+    ]);
     const now = new Date();
+    const isImmediate = policies.cancellationPolicy === 'IMMEDIATE';
 
     if (isSharedPoolConfigured()) {
       const pool = requireSharedPool();
-      await pool.query(`
-        UPDATE public.subscriptions
-        SET auto_renew = false,
-            cancelled_at = NOW(),
-            updated_at = NOW()
-        WHERE shop_id = $1
-      `, [shopId]);
+      if (isImmediate) {
+        await pool.query(`
+          UPDATE public.subscriptions
+          SET status = 'cancelled',
+              auto_renew = false,
+              cancelled_at = NOW(),
+              current_period_end = NOW(),
+              updated_at = NOW()
+          WHERE shop_id = $1 AND LOWER(status) IN ('active', 'trialing', 'trial', 'past_due')
+        `, [shopId]);
+
+        await pool.query(`
+          UPDATE public.shops
+          SET current_plan_id = 'plan_starter'
+          WHERE id = $1
+        `, [shopId]);
+      } else {
+        await pool.query(`
+          UPDATE public.subscriptions
+          SET auto_renew = false,
+              cancelled_at = NOW(),
+              updated_at = NOW()
+          WHERE shop_id = $1 AND LOWER(status) IN ('active', 'trialing', 'trial', 'past_due')
+        `, [shopId]);
+      }
 
       await pool.query(`
         INSERT INTO public.subscription_events (subscription_id, shop_id, event_type, metadata)
         VALUES ($1, $2, 'CANCELLED', $3::jsonb)
       `, [sub.id.startsWith('sub_') ? null : sub.id, shopId, JSON.stringify({
         reason: reason || 'Customer requested cancellation from billing settings',
-        accessUntil: sub.currentPeriodEnd
+        cancellationPolicy: policies.cancellationPolicy,
+        accessUntil: isImmediate ? now.toISOString() : sub.currentPeriodEnd
       })]);
     } else {
       const memSub = inMemorySubscriptions.get(shopId);
       if (memSub) {
         memSub.autoRenew = false;
         memSub.cancelledAt = now.toISOString();
+        if (isImmediate) {
+          memSub.status = 'cancelled';
+          memSub.currentPeriodEnd = now.toISOString();
+        }
       }
     }
 
-    return this.getShopSubscription(shopId);
+    const updated = await this.getShopSubscription(shopId);
+    return {
+      ...updated,
+      appliedCancellationPolicy: policies.cancellationPolicy
+    };
   }
 
   /**
@@ -1489,10 +1581,14 @@ export class SubscriptionRepository {
     const printerLimit = data.plan.limits.printerLimit || 1;
     const usagePercent = Math.min(100, Math.round((data.printJobsUsed / Math.max(1, printJobsLimit)) * 100));
 
+    const policies = getCachedPlatformPoliciesSync();
+    const warningPct = Math.max(50, Math.min(95, policies.warningThresholdPercent || 80));
+    const criticalPct = Math.max(warningPct + 5, Math.min(99, policies.criticalThresholdPercent || 90));
+
     let warningThreshold: 'NORMAL' | 'WARNING_80' | 'WARNING_90' | 'LIMIT_100' = 'NORMAL';
     if (usagePercent >= 100) warningThreshold = 'LIMIT_100';
-    else if (usagePercent >= 90) warningThreshold = 'WARNING_90';
-    else if (usagePercent >= 80) warningThreshold = 'WARNING_80';
+    else if (usagePercent >= criticalPct) warningThreshold = 'WARNING_90';
+    else if (usagePercent >= warningPct) warningThreshold = 'WARNING_80';
 
     return {
       id: data.id,

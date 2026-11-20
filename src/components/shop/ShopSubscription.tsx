@@ -41,7 +41,8 @@ export const ShopSubscription: React.FC = () => {
     shops,
     deletePlan,
     archivePlan,
-    togglePlanStatus
+    togglePlanStatus,
+    platformPolicies
   } = useApp();
 
   const [gatewayMeta, setGatewayMeta] = useState<{
@@ -240,12 +241,32 @@ export const ShopSubscription: React.FC = () => {
             </div>
             <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
               <div
-                className="bg-blue-600 h-full rounded-full transition-all"
+                className={`h-full rounded-full transition-all ${
+                  jobsUsagePercent >= 100
+                    ? 'bg-red-500'
+                    : jobsUsagePercent >= (platformPolicies?.warningThresholdPercent || 80)
+                    ? 'bg-amber-500'
+                    : 'bg-blue-600'
+                }`}
                 style={{ width: `${Math.max(5, jobsUsagePercent)}%` }}
               />
             </div>
-            <span className="text-[10px] text-slate-400 block">
-              {printLimit > 50000 ? 'Unlimited high-volume quota' : `${Math.max(0, printLimit - shopJobs.length)} orders remaining`}
+            <span className={`text-[10px] block ${
+              jobsUsagePercent >= 100
+                ? 'text-red-600 font-semibold'
+                : jobsUsagePercent >= (platformPolicies?.warningThresholdPercent || 80)
+                ? 'text-amber-600 font-semibold'
+                : 'text-slate-400'
+            }`}>
+              {printLimit > 50000
+                ? 'Unlimited high-volume quota'
+                : jobsUsagePercent >= 100
+                ? platformPolicies?.overagePolicy === 'SOFT_WARNING'
+                  ? 'Monthly quota reached (Soft Warning active — printing allowed)'
+                  : 'Monthly quota reached — upgrade required to accept new orders'
+                : jobsUsagePercent >= (platformPolicies?.warningThresholdPercent || 80)
+                ? `Warning: ${jobsUsagePercent}% used (${Math.max(0, printLimit - shopJobs.length)} orders remaining)`
+                : `${Math.max(0, printLimit - shopJobs.length)} orders remaining`}
             </span>
           </div>
 

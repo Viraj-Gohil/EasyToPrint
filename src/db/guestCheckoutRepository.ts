@@ -12,6 +12,7 @@
 import crypto from 'node:crypto';
 import type { PoolClient } from 'pg';
 import type { DurableDatabase } from './durableCheckoutRepository';
+import { getCachedPlatformPoliciesSync } from '../services/platformPolicyService';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ensureUuid = (name: string, value: string) => {
@@ -283,12 +284,15 @@ export class DurableGuestCheckoutRepository {
       throw new Error('sizeBytes must be a positive integer.');
     }
 
-    const retentionDays = params.retentionDays || 7;
+    const defaultRetentionHours = Math.max(1, getCachedPlatformPoliciesSync().defaultFileRetentionHours || 48);
+    const retentionMs = params.retentionDays
+      ? params.retentionDays * 24 * 3600 * 1000
+      : defaultRetentionHours * 3600 * 1000;
     const client = await this.database.connect();
     try {
       await client.query('BEGIN');
 
-      const retentionExpiry = new Date(Date.now() + retentionDays * 24 * 3600 * 1000);
+      const retentionExpiry = new Date(Date.now() + retentionMs);
       const bucket = params.storageBucket || 'print-documents';
 
       // 1. Insert into uploaded_files

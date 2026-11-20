@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../lib/store';
 import {
   Crown,
@@ -72,6 +72,7 @@ export const AdminSubscriptions: React.FC = () => {
     cancelSubscription,
     platformPolicies,
     updatePlatformPolicies,
+    refreshPlatformPolicies,
     adminRazorpay,
     updateAdminRazorpay,
     testGatewayConnection,
@@ -145,9 +146,21 @@ export const AdminSubscriptions: React.FC = () => {
   const [gatewaySaveError, setGatewaySaveError] = useState<string | null>(null);
   const [gatewaySaveSuccess, setGatewaySaveSuccess] = useState(false);
 
-  // Policies form state
+  // Policies form state (synced with authoritative PostgreSQL platform_policies)
   const [policiesForm, setPoliciesForm] = useState<PlatformPolicies>({ ...platformPolicies });
   const [isSavingPolicies, setIsSavingPolicies] = useState(false);
+  const [policiesError, setPoliciesError] = useState<string | null>(null);
+  const [policiesSavedBanner, setPoliciesSavedBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPoliciesForm({ ...platformPolicies });
+  }, [platformPolicies]);
+
+  useEffect(() => {
+    if (activeTab === 'policies') {
+      void refreshPlatformPolicies?.();
+    }
+  }, [activeTab]);
 
   // Temporary plan form state for Create / Edit
   const [planForm, setPlanForm] = useState<{
@@ -595,12 +608,54 @@ export const AdminSubscriptions: React.FC = () => {
     setSubToCancel(null);
   };
 
-  // Save Platform Policies
-  const handleSavePolicies = (e: React.FormEvent) => {
+  // Save Platform Policies authoritatively to PostgreSQL & activate live server enforcement
+  const handleSavePolicies = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPoliciesError(null);
+    setPoliciesSavedBanner(null);
     setIsSavingPolicies(true);
-    updatePlatformPolicies(policiesForm);
-    setIsSavingPolicies(false);
+    try {
+      const saved = await updatePlatformPolicies({
+        defaultFileRetentionHours: Number(policiesForm.defaultFileRetentionHours),
+        maxAllowedUploadSizeMb: Number(policiesForm.maxAllowedUploadSizeMb),
+        globalRateLimitPerMin: Number(policiesForm.globalRateLimitPerMin),
+        trialDurationDays: Number(policiesForm.trialDurationDays),
+        trialPerShopEligibility: policiesForm.trialPerShopEligibility ?? true,
+        failedPaymentGracePeriodDays: Number(policiesForm.failedPaymentGracePeriodDays),
+        warningThresholdPercent: Number(policiesForm.warningThresholdPercent),
+        criticalThresholdPercent: Math.max(
+          Number(policiesForm.criticalThresholdPercent || 95),
+          Math.min(100, Number(policiesForm.warningThresholdPercent) + 5)
+        ),
+        overagePolicy: policiesForm.overagePolicy,
+        cancellationPolicy: policiesForm.cancellationPolicy
+      });
+      setPoliciesForm({ ...saved });
+      setPoliciesSavedBanner('Saved to database and active immediately across uploads, rate limits, trials, quotas, and cancellations.');
+      setTimeout(() => setPoliciesSavedBanner(null), 5000);
+    } catch (err: any) {
+      setPoliciesError(err?.message || 'Failed to save Global Quota & Subscription Policies.');
+    } finally {
+      setIsSavingPolicies(false);
+    }
+  };
+
+  const handleResetDefaultPolicies = () => {
+    setPoliciesError(null);
+    setPoliciesSavedBanner(null);
+    setPoliciesForm({
+      ...policiesForm,
+      defaultFileRetentionHours: 48,
+      maxAllowedUploadSizeMb: 50,
+      globalRateLimitPerMin: 300,
+      trialDurationDays: 7,
+      trialPerShopEligibility: true,
+      failedPaymentGracePeriodDays: 5,
+      warningThresholdPercent: 80,
+      criticalThresholdPercent: 95,
+      overagePolicy: 'BLOCK_PRINTS',
+      cancellationPolicy: 'END_OF_CYCLE'
+    });
   };
 
   // Gateway handshake verification
@@ -1563,7 +1618,8 @@ export const AdminSubscriptions: React.FC = () => {
                     const plan = plans.find((p) => p.id === s.planId);
                     if (!plan || plan.isUnlimitedPrintJobs) return false;
                     const limit = plan.printLimitMonthly || 1500;
-                    return (s.jobsUsedThisMonth || 0) / limit >= 0.8;
+                    const warnRatio = (platformPolicies.warningThresholdPercent || 80) / 100;
+                    return (s.jobsUsedThisMonth || 0) / limit >= warnRatio;
                   }).length
                 }
               </p>
@@ -1620,7 +1676,11 @@ export const AdminSubscriptions: React.FC = () => {
                             <div className="w-32 bg-slate-200 h-1.5 rounded-full overflow-hidden">
                               <div
                                 className={`h-full rounded-full ${
-                                  jobRatio >= 0.95 ? 'bg-red-500' : jobRatio >= 0.8 ? 'bg-amber-500' : 'bg-[#00B52D]'
+                                  jobRatio >= 0.95
+                                    ? 'bg-red-500'
+                                    : jobRatio >= (platformPolicies.warningThresholdPercent || 80) / 100
+                                    ? 'bg-amber-500'
+                                    : 'bg-[#00B52D]'
                                 }`}
                                 style={{ width: `${Math.min(100, Math.max(5, Math.round(jobRatio * 100)))}%` }}
                               />
@@ -1639,9 +1699,9 @@ export const AdminSubscriptions: React.FC = () => {
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200">
                               Quota Exceeded
                             </span>
-                          ) : jobRatio >= 0.8 ? (
+                          ) : jobRatio >= (platformPolicies.warningThresholdPercent || 80) / 100 ? (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                              Warning (&gt;80%)
+                              Warning (&gt;{platformPolicies.warningThresholdPercent || 80}%)
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -1678,21 +1738,36 @@ export const AdminSubscriptions: React.FC = () => {
             </div>
 
             <form onSubmit={handleSavePolicies} className="space-y-5 text-xs">
+              {policiesError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 font-medium flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{policiesError}</span>
+                </div>
+              )}
+
+              {policiesSavedBanner && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-[#008F25] font-medium flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{policiesSavedBanner}</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="font-semibold text-slate-800">Default File Retention (Hours)</label>
                   <input
                     type="number"
+                    required
                     min={1}
                     max={720}
                     value={policiesForm.defaultFileRetentionHours}
                     onChange={(e) =>
                       setPoliciesForm({ ...policiesForm, defaultFileRetentionHours: Number(e.target.value) })
                     }
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D]"
                   />
                   <p className="text-[10px] text-slate-400">
-                    Duration after completed print before uploaded PDFs/images are purged.
+                    Duration (1–720h) applied to uploaded print documents for retention expiry.
                   </p>
                 </div>
 
@@ -1700,16 +1775,17 @@ export const AdminSubscriptions: React.FC = () => {
                   <label className="font-semibold text-slate-800">Platform Max Upload Ceiling (MB)</label>
                   <input
                     type="number"
+                    required
                     min={5}
                     max={500}
                     value={policiesForm.maxAllowedUploadSizeMb}
                     onChange={(e) =>
                       setPoliciesForm({ ...policiesForm, maxAllowedUploadSizeMb: Number(e.target.value) })
                     }
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D]"
                   />
                   <p className="text-[10px] text-slate-400">
-                    Hard security ceiling. No plan can grant uploads higher than this threshold.
+                    Hard security ceiling (5–500 MB) enforced live on both customer upload UI and backend upload APIs.
                   </p>
                 </div>
 
@@ -1717,60 +1793,64 @@ export const AdminSubscriptions: React.FC = () => {
                   <label className="font-semibold text-slate-800">Global Rate Limit (Requests / Min)</label>
                   <input
                     type="number"
+                    required
                     min={30}
                     max={1000}
                     value={policiesForm.globalRateLimitPerMin}
                     onChange={(e) =>
                       setPoliciesForm({ ...policiesForm, globalRateLimitPerMin: Number(e.target.value) })
                     }
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D]"
                   />
-                  <p className="text-[10px] text-slate-400">DDoS and counter flood protection.</p>
+                  <p className="text-[10px] text-slate-400">Live API volumetric rate limit (30–1000 req/min) for DDoS and flood protection.</p>
                 </div>
 
                 <div className="space-y-1.5">
                   <label className="font-semibold text-slate-800">Default Trial Duration (Days)</label>
                   <input
                     type="number"
+                    required
                     min={0}
                     max={60}
                     value={policiesForm.trialDurationDays}
                     onChange={(e) =>
                       setPoliciesForm({ ...policiesForm, trialDurationDays: Number(e.target.value) })
                     }
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D]"
                   />
-                  <p className="text-[10px] text-slate-400">Standard evaluation period for new shop signups.</p>
+                  <p className="text-[10px] text-slate-400">Standard evaluation period (0–60 days; set 0 to disable new free trials).</p>
                 </div>
 
                 <div className="space-y-1.5">
                   <label className="font-semibold text-slate-800">Failed Payment Grace Period (Days)</label>
                   <input
                     type="number"
+                    required
                     min={0}
                     max={30}
                     value={policiesForm.failedPaymentGracePeriodDays}
                     onChange={(e) =>
                       setPoliciesForm({ ...policiesForm, failedPaymentGracePeriodDays: Number(e.target.value) })
                     }
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D]"
                   />
-                  <p className="text-[10px] text-slate-400">Time allowed before past-due accounts are locked.</p>
+                  <p className="text-[10px] text-slate-400">Days (0–30) a past-due shop continues accepting orders before automatic lock.</p>
                 </div>
 
                 <div className="space-y-1.5">
                   <label className="font-semibold text-slate-800">Usage Warning Threshold (%)</label>
                   <input
                     type="number"
+                    required
                     min={50}
                     max={95}
                     value={policiesForm.warningThresholdPercent}
                     onChange={(e) =>
                       setPoliciesForm({ ...policiesForm, warningThresholdPercent: Number(e.target.value) })
                     }
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D]"
                   />
-                  <p className="text-[10px] text-slate-400">Sends alert to shop dashboard when reached.</p>
+                  <p className="text-[10px] text-slate-400">Triggers usage warning alerts (50–95%) in shop & admin quota telemetry.</p>
                 </div>
 
                 <div className="space-y-1.5">
@@ -1778,7 +1858,7 @@ export const AdminSubscriptions: React.FC = () => {
                   <select
                     value={policiesForm.overagePolicy}
                     onChange={(e) => setPoliciesForm({ ...policiesForm, overagePolicy: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D]"
                   >
                     <option value="BLOCK_PRINTS">Block Orders (Prompt Shop To Upgrade)</option>
                     <option value="SOFT_WARNING">Soft Warning (Allow Prints with Notification)</option>
@@ -1792,7 +1872,7 @@ export const AdminSubscriptions: React.FC = () => {
                     onChange={(e) =>
                       setPoliciesForm({ ...policiesForm, cancellationPolicy: e.target.value as any })
                     }
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00B52D]/20 focus:border-[#00B52D]"
                   >
                     <option value="END_OF_CYCLE">Active until end of current billing cycle</option>
                     <option value="IMMEDIATE">Immediate cancellation (Revert to Free tier)</option>
@@ -1800,14 +1880,22 @@ export const AdminSubscriptions: React.FC = () => {
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-slate-100 flex justify-end gap-2">
+              <div className="pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={handleResetDefaultPolicies}
+                  disabled={isSavingPolicies}
+                  className="px-4 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-semibold rounded-xl border border-slate-200 transition-colors cursor-pointer"
+                >
+                  Reset to Recommended Defaults
+                </button>
                 <button
                   type="submit"
                   disabled={isSavingPolicies}
-                  className="px-5 py-2.5 bg-[#00B52D] hover:bg-[#009624] text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-5 py-2.5 bg-[#00B52D] hover:bg-[#009624] disabled:opacity-60 text-white font-semibold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>{isSavingPolicies ? 'Saving...' : 'Save Platform Policies'}</span>
+                  <span>{isSavingPolicies ? 'Saving Policies...' : 'Save Platform Policies'}</span>
                 </button>
               </div>
             </form>

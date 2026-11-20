@@ -190,8 +190,7 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Total Registered Users */}
         <div
-          onClick={() => navigate(adminPath('users'))}
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs hover:border-[#00B52D]/50 hover:shadow-sm transition-all cursor-pointer group"
+          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs transition-all"
         >
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-xs font-semibold text-[#777777] group-hover:text-[#080808] transition-colors">Registered Users</span>

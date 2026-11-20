@@ -58,6 +58,13 @@ import {
 } from './src/lib/security';
 import { ADMIN_API_LOGIN_PATH } from './src/lib/adminConfig';
 import {
+  getPlatformPolicies,
+  getCachedPlatformPoliciesSync,
+  updatePlatformPoliciesInDb,
+  getEffectiveUploadMaxBytes,
+  toPublicPlatformPolicies
+} from './src/services/platformPolicyService';
+import {
   initializePaymentTables,
   issuePrintAgentToken,
   getDeterministicAgentToken,
@@ -150,6 +157,13 @@ import {
   getMidnightCleanupCronStatus,
   listRecentCleanupRuns
 } from './src/lib/storage/midnightCleanupJob';
+import {
+  getAdminStorageOverview,
+  listAdminStorageFiles,
+  listAdminCleanupHistory,
+  getAdminStorageCronStatus,
+  invalidateAdminStorageCache
+} from './src/services/adminStorageService';
 import { subscriptionRepository, CANONICAL_PLANS } from './src/db/subscriptionRepository';
 import type { PaymentOrderRecord } from './src/db/durablePaymentRepository';
 
@@ -453,19 +467,20 @@ function consumeRateLimitBucket(
   };
 }
 
-function createRateLimiter(maxRequests: number, windowMs = 60_000, options: RateLimitOptions = {}) {
+function createRateLimiter(maxRequests: number | (() => number), windowMs = 60_000, options: RateLimitOptions = {}) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (options.skip?.(req)) {
       return next();
     }
 
+    const resolvedMaxRequests = Math.max(1, typeof maxRequests === 'function' ? Number(maxRequests()) || 300 : maxRequests);
     const ip = getClientIp(req);
     const now = Date.now();
     const bucketName = options.bucketKey || normalizeRateLimitPath(req.path);
     const ipKey = `rl:ip:${bucketName}:${ip}`;
-    const ipResult = consumeRateLimitBucket(ipKey, maxRequests, windowMs, now);
+    const ipResult = consumeRateLimitBucket(ipKey, resolvedMaxRequests, windowMs, now);
 
-    let effectiveLimit = maxRequests;
+    let effectiveLimit = resolvedMaxRequests;
     let effectiveRemaining = ipResult.remaining;
     let effectiveResetAt = ipResult.resetAt;
     let blocked = !ipResult.allowed;
@@ -474,7 +489,7 @@ function createRateLimiter(maxRequests: number, windowMs = 60_000, options: Rate
       const rawIdentifier = options.identifierExtractor(req);
       const cleanIdentifier = typeof rawIdentifier === 'string' ? rawIdentifier.trim().toLowerCase() : '';
       if (cleanIdentifier) {
-        const idLimit = options.identifierMaxRequests ?? maxRequests;
+        const idLimit = options.identifierMaxRequests ?? resolvedMaxRequests;
         const idKey = `rl:id:${bucketName}:${cleanIdentifier}`;
         const idResult = consumeRateLimitBucket(idKey, idLimit, windowMs, now);
         if (!idResult.allowed) {
@@ -515,8 +530,8 @@ function createRateLimiter(maxRequests: number, windowMs = 60_000, options: Rate
   };
 }
 
-// Baseline volumetric protection across all /api routes (exempting health probes and payment webhooks)
-app.use('/api', createRateLimiter(300, 60_000, {
+// Baseline volumetric protection across all /api routes (dynamically honors Global Rate Limit policy)
+app.use('/api', createRateLimiter(() => getCachedPlatformPoliciesSync().globalRateLimitPerMin, 60_000, {
   bucketKey: 'api-global',
   skip: (req) => {
     const p = normalizeRateLimitPath(req.path);
@@ -3458,6 +3473,81 @@ app.post('/api/admin/maintenance', requireAdminRole, createRateLimiter(15, 60_00
   }
 });
 
+/**
+ * GET /api/platform-policies/public
+ * Safe public projection of active Global Quota & Subscription Policies
+ * for customer upload validation and shop owner billing screens.
+ */
+app.get('/api/platform-policies/public', createRateLimiter(120, 60_000, { bucketKey: 'platform-policies-public' }), async (_req: Request, res: Response) => {
+  try {
+    const policies = await getPlatformPolicies();
+    return res.json({
+      success: true,
+      policies: toPublicPlatformPolicies(policies)
+    });
+  } catch (error: any) {
+    logger.warn('Failed to load public platform policies, using cached defaults', { error: deepRedact(error) });
+    return res.json({
+      success: true,
+      policies: toPublicPlatformPolicies(getCachedPlatformPoliciesSync())
+    });
+  }
+});
+
+/**
+ * GET /api/admin/platform-policies
+ * Returns authoritative Global Quota & Subscription Policies from PostgreSQL.
+ */
+app.get('/api/admin/platform-policies', requireAdminRole, async (_req: Request, res: Response) => {
+  try {
+    const policies = await getPlatformPolicies({ bypassCache: true });
+    return res.json({
+      success: true,
+      policies
+    });
+  } catch (error: any) {
+    logger.error('Failed to fetch admin platform policies', { error: deepRedact(error) });
+    return res.status(500).json({ success: false, error: 'Failed to load Global Quota & Subscription Policies.' });
+  }
+});
+
+/**
+ * PUT /api/admin/platform-policies
+ * Validates and persists Global Quota & Subscription Policies to PostgreSQL
+ * and immediately activates enforcement across rate limiting, uploads, trials, quotas, and cancellations.
+ */
+app.put('/api/admin/platform-policies', requireAdminRole, createRateLimiter(20, 60_000, { bucketKey: 'admin-platform-policies-write' }), async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).authenticatedUser as ServerSession | undefined;
+    const actorName = user?.email || 'Platform Super Admin';
+    const updated = await updatePlatformPoliciesInDb(req.body || {}, actorName);
+    logger.info('Global Quota & Subscription Policies updated', {
+      actor: actorName,
+      maxAllowedUploadSizeMb: updated.maxAllowedUploadSizeMb,
+      defaultFileRetentionHours: updated.defaultFileRetentionHours,
+      globalRateLimitPerMin: updated.globalRateLimitPerMin,
+      trialDurationDays: updated.trialDurationDays,
+      failedPaymentGracePeriodDays: updated.failedPaymentGracePeriodDays,
+      warningThresholdPercent: updated.warningThresholdPercent,
+      overagePolicy: updated.overagePolicy,
+      cancellationPolicy: updated.cancellationPolicy
+    });
+    return res.json({
+      success: true,
+      message: 'Global Quota & Subscription Policies saved and activated.',
+      policies: updated
+    });
+  } catch (error: any) {
+    const status = error?.statusCode === 400 ? 400 : 500;
+    logger.warn('Failed to update Global Quota & Subscription Policies', { error: deepRedact(error) });
+    return res.status(status).json({
+      success: false,
+      error: error?.message || 'Could not save Global Quota & Subscription Policies.',
+      validationErrors: error?.validationErrors
+    });
+  }
+});
+
 
 
 app.use(async (req: Request, res: Response, next: NextFunction) => {
@@ -4948,7 +5038,8 @@ app.post('/api/upload', createRateLimiter(30, 60_000, { bucketKey: 'file-upload'
       filename,
       declaredMime,
       shopId,
-      jobId: jobId || `job_${Date.now()}`
+      jobId: jobId || `job_${Date.now()}`,
+      maxSizeBytes: getEffectiveUploadMaxBytes()
     });
 
     if (!validation.isValid) {
@@ -5166,13 +5257,14 @@ app.post('/api/fetch-remote-document', createRateLimiter(15, 60_000, { bucketKey
     const safeFilename = sanitizeFilename(filename || 'imported_document.pdf');
     const cleanJobId = jobId || `job_${Date.now()}`;
 
-    // Verify magic bytes
+    // Verify magic bytes & enforce live platform upload ceiling
     const uploadCheck = validateUploadFile({
       buffer: fetchResult.buffer,
       filename: safeFilename,
       declaredMime: (fetchResult.headers['content-type'] as string) || 'application/pdf',
       shopId,
-      jobId: cleanJobId
+      jobId: cleanJobId,
+      maxSizeBytes: getEffectiveUploadMaxBytes()
     });
 
     if (!uploadCheck.isValid) {
@@ -5995,7 +6087,8 @@ async function processAndStoreStagedFile(params: {
     filename: fileName,
     declaredMime,
     shopId: canonicalShopId,
-    jobId: checkoutSessionId
+    jobId: checkoutSessionId,
+    maxSizeBytes: getEffectiveUploadMaxBytes()
   });
   if (!validation.isValid || !validation.detectedMime || !validation.sanitizedFilename) {
     return {
@@ -6390,9 +6483,14 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
     }
 
     const buffer = Buffer.from(input.fileBase64, 'base64');
+    const platformMaxUploadBytes = getEffectiveUploadMaxBytes();
+    const platformMaxUploadMb = Math.round(platformMaxUploadBytes / (1024 * 1024));
     totalBytes += buffer.length;
-    if (totalBytes > 50 * 1024 * 1024) {
-      return res.status(413).json({ success: false, error: 'The combined print files exceed the 50 MB limit.' });
+    if (totalBytes > platformMaxUploadBytes) {
+      return res.status(413).json({
+        success: false,
+        error: `The combined print files exceed the ${platformMaxUploadMb} MB platform upload limit.`
+      });
     }
 
     const validation = validateUploadFile({
@@ -6400,7 +6498,8 @@ app.post('/api/customer/stage-order', createRateLimiter(30, 60_000, { bucketKey:
       filename: input.fileName,
       declaredMime: typeof input.fileType === 'string' ? input.fileType : undefined,
       shopId: canonicalShopId,
-      jobId: id
+      jobId: id,
+      maxSizeBytes: platformMaxUploadBytes
     });
     if (!validation.isValid || !validation.storageKey || !validation.detectedMime || !validation.sanitizedFilename) {
       return res.status(400).json({
@@ -6985,9 +7084,14 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
     }
 
     const buffer = Buffer.from(input.fileBase64, 'base64');
+    const platformMaxUploadBytes = getEffectiveUploadMaxBytes();
+    const platformMaxUploadMb = Math.round(platformMaxUploadBytes / (1024 * 1024));
     totalBytes += buffer.length;
-    if (totalBytes > 50 * 1024 * 1024) {
-      return res.status(413).json({ success: false, error: 'The combined print files exceed the 50 MB limit.' });
+    if (totalBytes > platformMaxUploadBytes) {
+      return res.status(413).json({
+        success: false,
+        error: `The combined print files exceed the ${platformMaxUploadMb} MB platform upload limit.`
+      });
     }
 
     const validation = validateUploadFile({
@@ -6995,7 +7099,8 @@ app.post('/api/customer/print-jobs', createRateLimiter(30, 60_000, { bucketKey: 
       filename: input.fileName,
       declaredMime: typeof input.fileType === 'string' ? input.fileType : undefined,
       shopId: canonicalShopId,
-      jobId: id
+      jobId: id,
+      maxSizeBytes: platformMaxUploadBytes
     });
     if (!validation.isValid || !validation.storageKey || !validation.detectedMime || !validation.sanitizedFilename) {
       return res.status(400).json({
@@ -7886,9 +7991,10 @@ app.post('/api/subscription/activate-trial', createRateLimiter(10, 60_000, { buc
     }
     const canonicalShopId = await resolvePrintFlowShopId(requestedShopId);
     const subscription = await subscriptionRepository.activateTrial(canonicalShopId);
+    const activePolicies = getCachedPlatformPoliciesSync();
     return res.json({
       success: true,
-      message: '7-Day Free Starter Trial activated successfully!',
+      message: `${activePolicies.trialDurationDays}-Day Free Starter Trial activated successfully!`,
       subscription
     });
   } catch (error: any) {
@@ -7972,9 +8078,12 @@ app.post('/api/subscription/cancel', createRateLimiter(10, 60_000, { bucketKey: 
     }
     const canonicalShopId = await resolvePrintFlowShopId(requestedShopId);
     const subscription = await subscriptionRepository.cancelSubscription(canonicalShopId, reason);
+    const isImmediate = subscription.appliedCancellationPolicy === 'IMMEDIATE';
     return res.json({
       success: true,
-      message: 'Auto-renewal cancelled. Your plan features will remain active until the end of your billing cycle.',
+      message: isImmediate
+        ? 'Subscription cancelled immediately per platform policy and reverted to Starter tier.'
+        : 'Auto-renewal cancelled. Your plan features will remain active until the end of your billing cycle.',
       subscription
     });
   } catch (error: any) {
@@ -9754,6 +9863,15 @@ app.post('/api/guest/checkout/:jobId/upload', createRateLimiter(30, 60_000, { bu
     }
 
     const buffer = Buffer.from(fileBase64, 'base64');
+    const platformMaxUploadBytes = getEffectiveUploadMaxBytes();
+    const platformMaxUploadMb = Math.round(platformMaxUploadBytes / (1024 * 1024));
+    if (buffer.length > platformMaxUploadBytes) {
+      return res.status(413).json({
+        success: false,
+        code: 'FILE_TOO_LARGE',
+        error: `Uploaded file exceeds the ${platformMaxUploadMb} MB platform upload limit.`
+      });
+    }
     const inspected = inspectDocument(buffer);
     if (!inspected.isValid || !inspected.mimeType) {
       return res.status(400).json({ success: false, error: inspected.error || 'Invalid print document.' });
@@ -9913,9 +10031,11 @@ app.post('/api/internal/cron/midnight-storage-cleanup', createRateLimiter(10, 60
 
     const result = await executeMidnightStorageCleanup({
       triggerSource: 'AUTHENTICATED_CRON_HTTP',
+      triggeredBy: 'Cron (HTTP)',
       pool: resolveCleanupDatabasePool(),
       storageProvider: getStorageProvider()
     });
+    invalidateAdminStorageCache();
 
     const httpStatus = result.status === 'FAILED' ? 500 : 200;
     return res.status(httpStatus).json({
@@ -9929,30 +10049,224 @@ app.post('/api/internal/cron/midnight-storage-cleanup', createRateLimiter(10, 60
 });
 
 /**
+ * GET /api/admin/storage/overview
+ * Real-time Supabase Storage KPIs for the `print-documents` bucket.
+ */
+app.get(
+  '/api/admin/storage/overview',
+  createRateLimiter(60, 60_000, { bucketKey: 'admin-storage-overview' }),
+  requireAdminRole,
+  async (req: Request, res: Response) => {
+    try {
+      const refresh = String(req.query.refresh || '').toLowerCase() === 'true' || req.query.refresh === '1';
+      const overview = await getAdminStorageOverview(resolveCleanupDatabasePool(), getStorageProvider(), {
+        refresh
+      });
+      return res.json({
+        success: true,
+        overview
+      });
+    } catch (error: any) {
+      logger.error('Failed to load admin storage overview', { error: deepRedact(error) });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve Supabase Storage overview.'
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/storage/files
+ * Paginated, searchable, filterable, sortable listing of `print-documents` objects.
+ * Strictly never exposes public or signed URLs.
+ */
+app.get(
+  '/api/admin/storage/files',
+  createRateLimiter(60, 60_000, { bucketKey: 'admin-storage-files' }),
+  requireAdminRole,
+  async (req: Request, res: Response) => {
+    try {
+      const search = String(req.query.search || '').slice(0, 200);
+      const fileType = String(req.query.fileType || 'ALL').slice(0, 16);
+      const status = String(req.query.status || 'ACTIVE').slice(0, 16);
+      const sortBy = String(req.query.sortBy || 'uploaded_at').slice(0, 32);
+      const sortOrder = String(req.query.sortOrder || 'desc').slice(0, 8);
+      const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+      const pageSize = Math.min(100, Math.max(1, parseInt(String(req.query.pageSize || '20'), 10) || 20));
+      const refresh = String(req.query.refresh || '').toLowerCase() === 'true' || req.query.refresh === '1';
+
+      const data = await listAdminStorageFiles(resolveCleanupDatabasePool(), getStorageProvider(), {
+        search,
+        fileType,
+        status,
+        sortBy,
+        sortOrder,
+        page,
+        pageSize,
+        refresh
+      });
+
+      return res.json({
+        success: true,
+        ...data
+      });
+    } catch (error: any) {
+      logger.error('Failed to list admin storage files', { error: deepRedact(error) });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve storage files.'
+      });
+    }
+  }
+);
+
+/**
  * POST /api/admin/storage/cleanup
  * Manual Super Admin trigger delegating to the unified midnight IST storage cleanup engine.
- * Preserves active paid/printing jobs and protected non-print storage files.
+ * Prevents duplicate concurrent runs, preserves active paid/printing jobs and protected files,
+ * records full audit history, and invalidates cached storage telemetry immediately.
  */
-app.post('/api/admin/storage/cleanup', createRateLimiter(10, 60_000, { bucketKey: 'admin-storage-cleanup' }), requireAdminRole, async (_req: Request, res: Response) => {
-  try {
-    logger.info('Running manual Super Admin midnight storage cleanup routine');
-    const result = await executeMidnightStorageCleanup({
-      triggerSource: 'MANUAL_ADMIN',
-      pool: resolveCleanupDatabasePool(),
-      storageProvider: getStorageProvider()
-    });
+app.post(
+  '/api/admin/storage/cleanup',
+  createRateLimiter(10, 60_000, { bucketKey: 'admin-storage-cleanup' }),
+  requireAdminRole,
+  async (req: Request, res: Response) => {
+    try {
+      const adminUser = (req as any).authenticatedUser as ServerSession | undefined;
+      const triggeredBy = adminUser?.email || adminUser?.fullName || 'Admin';
 
-    const httpStatus = result.status === 'FAILED' ? 500 : 200;
-    return res.status(httpStatus).json({
-      success: result.status !== 'FAILED',
-      purgedCount: result.totalDeleted,
-      result
-    });
-  } catch (error: any) {
-    logger.error('Storage cleanup failed', { error: deepRedact(error) });
-    return res.status(500).json({ success: false, error: 'Storage cleanup failed.' });
+      const liveCronStatus = getMidnightCleanupCronStatus();
+      if (liveCronStatus.currentlyRunning) {
+        return res.status(409).json({
+          success: false,
+          code: 'CLEANUP_ALREADY_RUNNING',
+          error: 'A storage cleanup execution is already in progress. Please wait for it to finish.'
+        });
+      }
+
+      logger.info('Running manual Super Admin Supabase Storage cleanup', {
+        adminUserId: adminUser?.userId,
+        triggeredBy
+      });
+
+      const result = await executeMidnightStorageCleanup({
+        triggerSource: 'MANUAL_ADMIN',
+        triggeredBy,
+        pool: resolveCleanupDatabasePool(),
+        storageProvider: getStorageProvider()
+      });
+
+      invalidateAdminStorageCache();
+
+      logger.info('Manual Super Admin Supabase Storage cleanup completed', {
+        runId: result.runId,
+        triggeredBy,
+        status: result.status,
+        totalDeleted: result.totalDeleted,
+        reclaimedBytes: result.reclaimedBytes,
+        totalFailed: result.totalFailed
+      });
+
+      if (result.status === 'SKIPPED_OVERLAP') {
+        return res.status(409).json({
+          success: false,
+          code: 'CLEANUP_ALREADY_RUNNING',
+          error: result.error || 'Another cleanup job is currently running.',
+          result
+        });
+      }
+
+      if (result.status === 'SKIPPED_UNCONFIGURED') {
+        return res.status(503).json({
+          success: false,
+          code: 'STORAGE_UNCONFIGURED',
+          error: result.error || 'Supabase Storage service-role credentials are not configured.',
+          result
+        });
+      }
+
+      const httpStatus = result.status === 'FAILED' ? 500 : 200;
+      return res.status(httpStatus).json({
+        success: result.status !== 'FAILED',
+        purgedCount: result.totalDeleted,
+        reclaimedBytes: result.reclaimedBytes,
+        result,
+        ...(result.error ? { error: result.error } : {})
+      });
+    } catch (error: any) {
+      logger.error('Storage cleanup failed', { error: deepRedact(error) });
+      return res.status(500).json({ success: false, error: 'Storage cleanup failed.' });
+    }
   }
-});
+);
+
+/**
+ * GET /api/admin/storage/cleanup-history
+ * Paginated, filterable persistent history from `public.storage_cleanup_runs`.
+ */
+app.get(
+  '/api/admin/storage/cleanup-history',
+  createRateLimiter(60, 60_000, { bucketKey: 'admin-storage-cleanup-history' }),
+  requireAdminRole,
+  async (req: Request, res: Response) => {
+    try {
+      const search = String(req.query.search || '').slice(0, 200);
+      const executionType = String(req.query.executionType || 'ALL').slice(0, 16);
+      const status = String(req.query.status || 'ALL').slice(0, 16);
+      const dateFrom = String(req.query.dateFrom || '').slice(0, 40);
+      const dateTo = String(req.query.dateTo || '').slice(0, 40);
+      const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
+      const pageSize = Math.min(100, Math.max(1, parseInt(String(req.query.pageSize || '15'), 10) || 15));
+
+      const history = await listAdminCleanupHistory(resolveCleanupDatabasePool(), {
+        search,
+        executionType,
+        status,
+        dateFrom,
+        dateTo,
+        page,
+        pageSize
+      });
+
+      return res.json({
+        success: true,
+        ...history
+      });
+    } catch (error: any) {
+      logger.error('Failed to fetch storage cleanup history', { error: deepRedact(error) });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve cleanup history.'
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/storage/cron-status
+ * Verified automatic daily 12:00 AM IST cleanup scheduler status and last execution details.
+ */
+app.get(
+  '/api/admin/storage/cron-status',
+  createRateLimiter(60, 60_000, { bucketKey: 'admin-storage-cron-status' }),
+  requireAdminRole,
+  async (_req: Request, res: Response) => {
+    try {
+      const cronStatus = await getAdminStorageCronStatus(resolveCleanupDatabasePool(), getStorageProvider());
+      return res.json({
+        success: true,
+        cron: cronStatus
+      });
+    } catch (error: any) {
+      logger.error('Failed to retrieve storage cron status', { error: deepRedact(error) });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve automatic cleanup cron status.'
+      });
+    }
+  }
+);
 
 /**
  * GET /api/admin/storage/cleanup-logs
@@ -10787,7 +11101,8 @@ async function startServer() {
           updated_at = NOW()
       `, [ADMIN_EMAIL, adminHash]);
     }
-    logger.info('[Server] Supabase PostgreSQL database tables and admin user initialized.');
+    await getPlatformPolicies({ bypassCache: true }).catch(() => {});
+    logger.info('[Server] Supabase PostgreSQL database tables, platform policies, and admin user initialized.');
   } catch (err) {
     console.warn('[Server] Initial database table check deferred (non-fatal):', err);
   }

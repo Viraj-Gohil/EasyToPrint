@@ -7,7 +7,6 @@ import {
   BarChart3,
   Store,
   Printer,
-  Users,
   HardDrive,
   Crown,
   Layers,
@@ -82,15 +81,6 @@ export const AdminCommandPalette: React.FC<AdminCommandPaletteProps> = ({ isOpen
         icon: Store,
         path: adminPath('shops'),
         keywords: ['shops', 'tenants', 'stores', 'xerox', 'directory', 'merchants', 'owners']
-      },
-      {
-        id: 'nav-users',
-        title: 'Users Management',
-        category: 'Navigation',
-        section: 'Teams & Hardware',
-        icon: Users,
-        path: adminPath('users'),
-        keywords: ['users', 'accounts', 'staff', 'owners', 'admins', 'members']
       },
       {
         id: 'nav-printers',

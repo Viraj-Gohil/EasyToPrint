@@ -112,9 +112,6 @@ const AdminAnalytics = lazy(() =>
 const AdminShops = lazy(() =>
   import('./components/admin/AdminShops').then((m) => ({ default: m.AdminShops }))
 );
-const AdminUsers = lazy(() =>
-  import('./components/admin/AdminUsers').then((m) => ({ default: m.AdminUsers }))
-);
 const AdminPrinters = lazy(() =>
   import('./components/admin/AdminPrinters').then((m) => ({ default: m.AdminPrinters }))
 );
@@ -217,10 +214,6 @@ function resolveAdminTab(cleanPath: string): string | null {
     case 'stores':
     case 'tenants':
       return 'shops';
-    case 'users':
-    case 'accounts':
-    case 'members':
-      return 'users';
     case 'printers':
     case 'hardware':
       return 'printers';
@@ -618,7 +611,6 @@ const AppRouter: React.FC = () => {
           {resolvedTab === 'dashboard' && <AdminDashboard />}
           {resolvedTab === 'analytics' && <AdminAnalytics />}
           {resolvedTab === 'shops' && <AdminShops />}
-          {resolvedTab === 'users' && <AdminUsers />}
           {resolvedTab === 'printers' && <AdminPrinters />}
           {resolvedTab === 'plans' && <AdminSubscriptions />}
           {resolvedTab === 'subscriptions' && <AdminShopSubscriptions />}

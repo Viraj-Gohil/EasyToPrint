@@ -36,12 +36,12 @@ const DEFAULT_ADMIN_RAZORPAY_SETTINGS: AdminRazorpaySettings = {
 };
 
 const DEFAULT_PLATFORM_POLICIES: PlatformPolicies = {
-  defaultFileRetentionHours: 168,
+  defaultFileRetentionHours: 48,
   maxAllowedUploadSizeMb: 50,
-  globalRateLimitPerMin: 60,
-  trialDurationDays: 14,
+  globalRateLimitPerMin: 300,
+  trialDurationDays: 7,
   trialPerShopEligibility: true,
-  failedPaymentGracePeriodDays: 3,
+  failedPaymentGracePeriodDays: 5,
   warningThresholdPercent: 80,
   criticalThresholdPercent: 95,
   overagePolicy: 'BLOCK_PRINTS',
@@ -278,7 +278,8 @@ interface AppContextType {
   updateSubscription: (subId: string, updates: Partial<Subscription>) => void;
   changeShopSubscription: (shopId: string, newPlanId: string, policy?: PlanChangePolicy) => Promise<boolean>;
   cancelSubscription: (subId: string, reason?: string) => void;
-  updatePlatformPolicies: (policies: Partial<PlatformPolicies>) => void;
+  updatePlatformPolicies: (policies: Partial<PlatformPolicies>) => Promise<PlatformPolicies>;
+  refreshPlatformPolicies: () => Promise<PlatformPolicies | null>;
   testGatewayConnection: () => Promise<{ success: boolean; message: string; latencyMs: number }>;
 
   // Printers & Agent
@@ -1593,18 +1594,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Subscription Cancelled', `${targetSub.shopName} subscription cancelled. Reverted to Free tier.`, 'info', 4000);
   };
 
-  const updatePlatformPolicies = (policies: Partial<PlatformPolicies>) => {
-    const now = new Date().toISOString();
-    const nextPolicies = {
+  const refreshPlatformPolicies = async (): Promise<PlatformPolicies | null> => {
+    try {
+      const endpoint = currentUser?.role === 'ADMIN'
+        ? '/api/admin/platform-policies'
+        : '/api/platform-policies/public';
+      const res = currentUser?.role === 'ADMIN'
+        ? await authenticatedFetch(endpoint)
+        : await fetch(apiUrl(endpoint));
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data?.success && data?.policies) {
+        const merged: PlatformPolicies = {
+          ...DEFAULT_PLATFORM_POLICIES,
+          ...data.policies
+        };
+        setPlatformPolicies(merged);
+        return merged;
+      }
+    } catch (err) {
+      console.warn('Could not refresh platform policies from server:', err);
+    }
+    return null;
+  };
+
+  const updatePlatformPolicies = async (policies: Partial<PlatformPolicies>): Promise<PlatformPolicies> => {
+    const payload = {
       ...platformPolicies,
-      ...policies,
-      updatedAt: now,
-      updatedBy: currentUser?.fullName || 'Platform Super Admin'
+      ...policies
     };
-    setPlatformPolicies(nextPolicies);
-    setStoredItem('platform_policies', nextPolicies);
-    addAuditLog('PLATFORM_POLICIES_UPDATED', 'SETTINGS', 'platform_policies', `Updated global platform quota & billing policies`);
-    showToast('Platform Policies Saved', 'Global quota rules updated across all tenants.', 'success', 3500);
+    const res = await authenticatedFetch('/api/admin/platform-policies', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success || !data?.policies) {
+      const errMsg = data?.error || 'Failed to persist Global Quota & Subscription Policies.';
+      showToast('Policy Save Failed', errMsg, 'error', 5000);
+      throw new Error(errMsg);
+    }
+
+    const authoritative: PlatformPolicies = {
+      ...DEFAULT_PLATFORM_POLICIES,
+      ...data.policies
+    };
+    setPlatformPolicies(authoritative);
+    setStoredItem('platform_policies', authoritative);
+    addAuditLog(
+      'PLATFORM_POLICIES_UPDATED',
+      'SETTINGS',
+      'platform_policies',
+      `Updated global quota & subscription policies (Upload <= ${authoritative.maxAllowedUploadSizeMb}MB, Retention ${authoritative.defaultFileRetentionHours}h, Rate ${authoritative.globalRateLimitPerMin}/min, Trial ${authoritative.trialDurationDays}d, Grace ${authoritative.failedPaymentGracePeriodDays}d, Warning ${authoritative.warningThresholdPercent}%, Overage ${authoritative.overagePolicy}, Cancel ${authoritative.cancellationPolicy})`
+    );
+    showToast('Platform Policies Saved', 'Global quota & subscription policies saved and enforced live across the platform.', 'success', 4000);
+    return authoritative;
   };
 
   const testGatewayConnection = async (): Promise<{ success: boolean; message: string; latencyMs: number }> => {
@@ -2873,6 +2917,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [activeShop.id, currentUser?.id, currentUser?.role]);
 
+  // Hydrate authoritative Global Quota & Subscription Policies from PostgreSQL on mount & role change
+  useEffect(() => {
+    void refreshPlatformPolicies();
+  }, [currentUser?.role]);
+
   return (
     <AppContext.Provider
       value={{
@@ -2918,6 +2967,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         changeShopSubscription,
         cancelSubscription,
         updatePlatformPolicies,
+        refreshPlatformPolicies,
         testGatewayConnection,
         printers,
         updatePrinter,

@@ -178,19 +178,13 @@ function createMockQueryablePool(state: MockDbState): QueryablePool {
       }
 
       if (normalized.startsWith('INSERT INTO public.storage_cleanup_runs')) {
-        state.cleanupRuns.push({
-          id: params[0],
-          trigger_source: params[1],
-          cron_expression: params[2],
-          timezone: params[3],
-          executed_at_ist: params[4],
-          status: params[8],
-          total_discovered: params[10],
-          total_deleted: params[11],
-          total_skipped: params[12],
-          total_failed: params[13],
-          reclaimed_bytes: params[14]
+        const colMatch = normalized.match(/\(([^)]+)\)\s*VALUES/i);
+        const cols = colMatch ? colMatch[1].split(',').map((c) => c.trim()) : [];
+        const record: Record<string, any> = {};
+        cols.forEach((col, idx) => {
+          record[col] = params[idx];
         });
+        state.cleanupRuns.push(record);
         return { rows: [], rowCount: 1 };
       }
 
