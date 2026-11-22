@@ -624,7 +624,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             businessHours: s.businessHours || '9:00 AM - 9:00 PM',
             logoUrl: s.logoUrl || '',
             primaryColor: s.primaryColor || '#2563EB',
-            minimumOrder: s.minOrderAmount || 2.00,
+            minimumOrder:
+              Number.isFinite(Number(s.minOrderAmount)) && Number(s.minOrderAmount) >= 0 && Number(s.minOrderAmount) <= 500
+                ? Number(s.minOrderAmount)
+                : 2.00,
             autoAccept: s.autoAccept !== false,
             planId: s.currentPlanId || 'plan_free',
             planName: 'Counter Plan',

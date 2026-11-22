@@ -357,8 +357,16 @@ export const createRazorpayOrder = async (params: {
 }> => {
   try {
     const paise = params.amountInPaise !== undefined
-      ? Math.round(params.amountInPaise)
-      : Math.round(params.amount * 100);
+      ? Math.round(Number(params.amountInPaise))
+      : Math.round(Number(params.amount) * 100);
+
+    if (!Number.isInteger(paise) || paise < 100) {
+      return {
+        success: false,
+        code: 'INVALID_AMOUNT',
+        error: 'Payment amount must be at least ₹1.00 (100 paise).'
+      };
+    }
 
     const res = await fetchWithRetry(
       '/api/create-order',
@@ -383,12 +391,13 @@ export const createRazorpayOrder = async (params: {
     const data = await safeParseJson(res);
     if (res.ok && (data.order_id || data.orderId || data.id)) {
       const orderId = data.order_id || data.orderId || data.id;
+      const returnedAmount = Number(data.amount);
       return {
         success: true,
         order_id: orderId,
         orderId,
-        amount: data.amount,
-        currency: data.currency,
+        amount: Number.isInteger(returnedAmount) ? returnedAmount : undefined,
+        currency: data.currency || 'INR',
         key_id: data.key_id
       };
     }

@@ -129,6 +129,16 @@ export const RazorpayCheckoutButton: React.FC<RazorpayCheckoutButtonProps> = ({
       }
 
       const orderId = orderData.order_id || orderData.orderId || orderData.id;
+      const returnedAmountInPaise = Number(orderData.amount);
+      if (!Number.isInteger(returnedAmountInPaise) || returnedAmountInPaise < 100) {
+        throw new Error('Payment gateway returned an invalid order amount. Please try again.');
+      }
+      if (flow !== 'subscription' && returnedAmountInPaise !== validPaise) {
+        throw new Error(
+          `Payment amount mismatch detected (expected ₹${(validPaise / 100).toFixed(2)}, gateway returned ₹${(returnedAmountInPaise / 100).toFixed(2)}). Checkout blocked for your safety.`
+        );
+      }
+
       // Authoritative key returned by server matching the exact order account:
       const keyId = orderData.key_id && orderData.key_id.startsWith('rzp_')
         ? orderData.key_id.trim()
@@ -144,11 +154,11 @@ export const RazorpayCheckoutButton: React.FC<RazorpayCheckoutButtonProps> = ({
         }
       }, 12000);
 
-      // 4. STEP 2: Open Razorpay Checkout modal with order_id
+      // 4. STEP 2: Open Razorpay Checkout modal with exact backend order_id and amount (paise)
       const options = {
         key: keyId,
-        amount: validPaise,
-        currency,
+        amount: returnedAmountInPaise,
+        currency: orderData.currency || currency,
         name,
         description,
         order_id: orderId,

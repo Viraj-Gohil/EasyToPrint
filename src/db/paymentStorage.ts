@@ -2020,7 +2020,11 @@ export async function calculateAuthoritativeCustomerPrintTotal(params: {
         [canonicalShopId, candidateShopIds]
       );
       if (shopRes.rowCount && shopRes.rows[0]?.min_order_amount) {
-        minOrderAmount = Number(shopRes.rows[0].min_order_amount) || 0;
+        const rawMinOrder = Number(shopRes.rows[0].min_order_amount);
+        // Guard against legacy corrupted values (> ₹500) so print totals can never be silently inflated
+        if (Number.isFinite(rawMinOrder) && rawMinOrder > 0 && rawMinOrder <= 500) {
+          minOrderAmount = Math.round(rawMinOrder);
+        }
       }
     } catch (err: any) {
       if (!isDatabaseNetworkError(err)) {
@@ -2029,7 +2033,7 @@ export async function calculateAuthoritativeCustomerPrintTotal(params: {
     }
   }
 
-  let totalRupees = 0;
+  let subtotalRupees = 0;
   const unitPrices: number[] = [];
 
   for (const file of params.files) {
@@ -2046,17 +2050,20 @@ export async function calculateAuthoritativeCustomerPrintTotal(params: {
     const unitPrice = resolveUnitPrice(rules, canonicalShopId, file.paperSize, file.colorMode, sides);
     unitPrices.push(unitPrice);
     const copies = Math.max(1, Math.min(999, file.copies || 1));
-    totalRupees += Math.round(effectivePages * copies * unitPrice);
+    subtotalRupees += Math.round(effectivePages * copies * unitPrice);
   }
 
+  let totalRupees = subtotalRupees;
   if (minOrderAmount > 0 && totalRupees < minOrderAmount) {
     totalRupees = Math.round(minOrderAmount);
   }
 
   totalRupees = Math.max(1, Math.round(totalRupees));
+  // Convert final INR total to paise strictly ONCE
+  const amountMinor = Math.round(Number(totalRupees) * 100);
   return {
     totalRupees,
-    amountMinor: Math.round(totalRupees * 100),
+    amountMinor,
     minOrderAmount,
     unitPrices
   };

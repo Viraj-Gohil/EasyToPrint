@@ -1003,13 +1003,19 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
     );
   };
 
-  // Memoized pricing breakdown: Customers pay strictly actual printing charges calculated from pricing rules
+  // Memoized pricing breakdown: single source of truth aligned with server authoritative calculation
   const subtotal = React.useMemo(
     () => files.reduce((acc, f) => acc + f.totalPrice, 0),
     [files]
   );
   const serviceFee = 0;
-  const grandTotal = subtotal;
+  const shopMinimumOrderRupees = React.useMemo(() => {
+    const raw = Number(shop?.minimumOrder ?? shop?.minOrderAmount ?? 0);
+    return Number.isFinite(raw) && raw > 0 && raw <= 500 ? Math.round(raw) : 0;
+  }, [shop?.minimumOrder, shop?.minOrderAmount]);
+  const minOrderAdjustment =
+    subtotal > 0 && shopMinimumOrderRupees > subtotal ? shopMinimumOrderRupees - subtotal : 0;
+  const grandTotal = subtotal + minOrderAdjustment;
 
   // Live-derived active preview file & normalized shop capabilities for LivePrintPreview
   const previewFile = React.useMemo(
@@ -1771,18 +1777,34 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
 
       stagedJobIdRef.current = stageRes.jobId;
 
-      // 3. Ensure Razorpay script loaded & create fresh server-validated Razorpay Order
+      // Single-source-of-truth paise conversion (INR -> paise strictly ONCE)
+      const expectedAmountInPaise = Math.round(Number(grandTotal) * 100);
+      if (!Number.isInteger(expectedAmountInPaise) || expectedAmountInPaise < 100) {
+        throw new Error('Order total must be at least ₹1.00 before initiating payment.');
+      }
+
+      if (
+        stageRes.authoritativeAmountMinor !== undefined &&
+        Math.round(Number(stageRes.authoritativeAmountMinor)) !== expectedAmountInPaise
+      ) {
+        const serverRupees = (Number(stageRes.authoritativeAmountMinor) / 100).toFixed(2);
+        throw new Error(
+          `Order total mismatch detected (displayed ₹${grandTotal.toFixed(0)}, server calculated ₹${serverRupees}). Please review your order and try again.`
+        );
+      }
+
+      // 3. Ensure Razorpay script loaded & ALWAYS create a fresh server-validated Razorpay Order
       setCheckoutStatus('CREATING_ORDER');
       setPaymentProcessingLabel('Opening Razorpay...');
 
       const [scriptLoaded, orderRes] = await Promise.all([
         scriptPromise,
         createRazorpayOrder({
-          amount: stageRes.authoritativeTotalAmount ?? grandTotal,
-          amountInPaise: stageRes.authoritativeAmountMinor,
+          amount: grandTotal,
+          amountInPaise: expectedAmountInPaise,
           checkoutSessionId: activeSessionId,
           stagedJobId: stageRes.jobId,
-          forceNewOrder: wasFailedOrCancelled,
+          forceNewOrder: true,
           shopId: shop.id,
           notes: {
             shopName: shop.name,
@@ -1805,6 +1827,21 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         throw new Error('Payment gateway did not return a valid order ID.');
       }
 
+      // STRICT PRE-CHECKOUT PARITY ASSERTION: Never open Razorpay if backend amount != displayed total (paise)
+      const returnedAmountInPaise = Number(orderRes.amount);
+      if (
+        !Number.isInteger(returnedAmountInPaise) ||
+        returnedAmountInPaise < 100 ||
+        returnedAmountInPaise !== expectedAmountInPaise
+      ) {
+        const returnedRupees = Number.isFinite(returnedAmountInPaise)
+          ? (returnedAmountInPaise / 100).toFixed(2)
+          : 'invalid';
+        throw new Error(
+          `Payment amount mismatch detected (Order Summary: ₹${grandTotal.toFixed(0)}, Payment Gateway: ₹${returnedRupees}). Checkout was blocked for your protection.`
+        );
+      }
+
       setActiveOrderId(backendOrderId);
       saveOrderSession({
         orderId: backendOrderId,
@@ -1812,7 +1849,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         status: 'CREATED',
         shopId: shop.id,
         customerPhone: customerPhone.trim() || undefined,
-        totalAmount: stageRes.authoritativeTotalAmount ?? grandTotal
+        totalAmount: returnedAmountInPaise / 100
       });
 
       setCheckoutStatus('PAYMENT_CHECKOUT_OPEN');
@@ -1824,7 +1861,8 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
         ? orderRes.key_id.trim()
         : effectiveKey;
 
-      const amountInPaise = orderRes.amount || stageRes.authoritativeAmountMinor || Math.round(grandTotal * 100);
+      const amountInPaise = returnedAmountInPaise;
+      const checkoutCurrency = orderRes.currency || 'INR';
 
       // Start background polling to reconcile UPI payments completed on external apps
       const startPolling = (orderIdToPoll: string) => {
@@ -1893,7 +1931,7 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
       const options: any = {
         key: activeKey,
         amount: amountInPaise,
-        currency: 'INR',
+        currency: checkoutCurrency,
         name: shop.name,
         description: `Print Order (${files.length} document${files.length > 1 ? 's' : ''})`,
         image: shop.logoUrl || undefined,
@@ -3338,6 +3376,12 @@ export const CustomerPrintFlow: React.FC<CustomerPrintFlowProps> = ({ shopSlug }
                       <span>Printing Charges</span>
                       <span className="font-mono font-semibold text-[#111111]">₹{subtotal.toFixed(0)}</span>
                     </div>
+                    {minOrderAdjustment > 0 && (
+                      <div className="flex items-center justify-between text-[#646B65]">
+                        <span>Minimum Order Adjustment</span>
+                        <span className="font-mono font-semibold text-[#111111]">+₹{minOrderAdjustment.toFixed(0)}</span>
+                      </div>
+                    )}
                     <div className="pt-2 border-t border-[#E1E7E1] flex items-center justify-between font-bold text-[#111111] text-sm">
                       <span>Total Amount</span>
                       <span className="font-mono text-[#008F25] text-base font-extrabold">₹{grandTotal.toFixed(0)}</span>

@@ -1033,6 +1033,12 @@ app.put('/api/app-data/:key', createRateLimiter(45, 60_000, { bucketKey: 'app-da
         } else if (key === 'shops' && Array.isArray(value) && value.length > 0) {
           const shopObj = value[0] as Record<string, unknown>;
           if (shopObj && typeof shopObj === 'object') {
+            const rawMinOrder = shopObj.minimumOrder !== undefined ? Number(shopObj.minimumOrder) : null;
+            // Guard against corrupted/unit-confused values (> ₹500) being written back to public.shops.min_order_amount
+            const safeMinOrder =
+              rawMinOrder !== null && Number.isFinite(rawMinOrder) && rawMinOrder >= 0 && rawMinOrder <= 500
+                ? rawMinOrder
+                : null;
             await pool.query(`
               UPDATE public.shops SET
                 name = COALESCE($2, name),
@@ -1057,7 +1063,7 @@ app.put('/api/app-data/:key', createRateLimiter(45, 60_000, { bucketKey: 'app-da
               shopObj.businessHours as string || null,
               shopObj.logoUrl as string || null,
               shopObj.primaryColor as string || null,
-              shopObj.minimumOrder !== undefined ? Number(shopObj.minimumOrder) : null,
+              safeMinOrder,
               shopObj.autoAccept !== undefined ? Boolean(shopObj.autoAccept) : null
             ]);
           }
@@ -4001,7 +4007,7 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
     const cleanStagedJobId =
       typeof stagedJobId === 'string' && stagedJobId.trim() ? stagedJobId.trim() : undefined;
 
-    if ((amount === undefined || amount === null) && !cleanCheckoutSessionId && !cleanStagedJobId) {
+    if ((amount === undefined || amount === null) && req.body.amountInRupees === undefined && !cleanCheckoutSessionId && !cleanStagedJobId) {
       return res.status(400).json({
         success: false,
         error: 'Missing required field: amount'
@@ -4009,19 +4015,26 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
     }
 
     let amountInPaise = 0;
-    if (amount !== undefined && amount !== null) {
-      const numericAmount = typeof amount === 'number' ? amount : parseFloat(amount);
-      if (isNaN(numericAmount) || numericAmount <= 0) {
+    if (req.body.amountInRupees !== undefined && req.body.amountInRupees !== null) {
+      const numericRupees = Number(req.body.amountInRupees);
+      if (!Number.isFinite(numericRupees) || numericRupees <= 0) {
         return res.status(400).json({
           success: false,
           error: 'Invalid payment amount specified.'
         });
       }
-      // Minimum amount: 100 paise (₹1.00)
-      amountInPaise = Math.round(numericAmount);
-      if (numericAmount < 100 && req.path.includes('/payment/create-order')) {
-        amountInPaise = Math.round(numericAmount * 100);
+      // Convert INR -> paise strictly ONCE
+      amountInPaise = Math.round(numericRupees * 100);
+    } else if (amount !== undefined && amount !== null) {
+      const numericAmount = typeof amount === 'number' ? amount : Number(amount);
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid payment amount specified.'
+        });
       }
+      // Request `amount` is strictly integer paise (never heuristically multiplied a second time)
+      amountInPaise = Math.round(numericAmount);
     }
 
     const orderReceipt = sanitizeRazorpayReceipt(receipt);
@@ -4092,7 +4105,7 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
         }
       }
 
-      // Compute server-authoritative print price and reject tampered client amounts
+      // Compute server-authoritative print price and reject ANY client/server discrepancy (0-paise tolerance)
       const authoritativePricing = await calculateAuthoritativeCustomerPrintTotal({
         shopId: effectiveShopId,
         files: resolvedStagedJob.files.map((f: any) => ({
@@ -4105,14 +4118,25 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
         }))
       });
 
-      if (amountInPaise > 0 && Math.abs(amountInPaise - authoritativePricing.amountMinor) > 100) {
+      const authoritativeAmountInPaise = Math.round(Number(authoritativePricing.totalRupees) * 100);
+      if (!Number.isInteger(authoritativeAmountInPaise) || authoritativeAmountInPaise < 100) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_AMOUNT',
+          error: 'Calculated order total must be at least ₹1.00 (100 paise).'
+        });
+      }
+
+      if (amountInPaise > 0 && amountInPaise !== authoritativeAmountInPaise) {
         return res.status(400).json({
           success: false,
           code: 'AMOUNT_MISMATCH',
-          error: `Submitted amount (${(amountInPaise / 100).toFixed(2)}) does not match server-verified print total (₹${authoritativePricing.totalRupees}).`
+          expectedAmountInPaise: authoritativeAmountInPaise,
+          expectedTotalRupees: authoritativePricing.totalRupees,
+          error: `Submitted amount (₹${(amountInPaise / 100).toFixed(2)}) does not match server-verified print total (₹${authoritativePricing.totalRupees}).`
         });
       }
-      amountInPaise = authoritativePricing.amountMinor;
+      amountInPaise = authoritativeAmountInPaise;
     }
 
     if (amountInPaise < 100) {
@@ -4334,6 +4358,20 @@ app.post(['/api/create-order', '/api/payment/create-order'], createRateLimiter(3
         notes: sanitizedNotes
       });
 
+      if (Number(razorpayOrder?.amount) !== amountInPaise) {
+        logger.error('Razorpay returned unexpected order amount mismatch', {
+          requestId: (req as any).requestId,
+          orderId: razorpayOrder?.id,
+          expectedAmountInPaise: amountInPaise,
+          returnedAmountInPaise: razorpayOrder?.amount
+        });
+        return res.status(502).json({
+          success: false,
+          code: 'GATEWAY_AMOUNT_MISMATCH',
+          error: 'Payment gateway returned an unexpected order amount. Please retry.'
+        });
+      }
+
       logger.info('Razorpay order created successfully', {
         requestId: (req as any).requestId,
         orderId: razorpayOrder.id,
@@ -4474,38 +4512,46 @@ app.post(['/api/verify-payment', '/api/payment/verify'], createRateLimiter(45, 6
       }
     }
 
-    // Gather candidate secrets based strictly on account separation
-    const candidateSecrets: string[] = [];
+    // Gather candidate credentials based strictly on account separation
+    const candidateCreds: Array<{ keyId: string; keySecret: string }> = [];
     const platformCreds = await getAuthoritativePlatformRazorpayCreds();
 
     if (dbOrder) {
       if (dbOrder.purpose === 'SUBSCRIPTION' || dbOrder.shopId === 'platform') {
-        if (platformCreds.keySecret) candidateSecrets.push(platformCreds.keySecret);
+        if (platformCreds.keySecret) {
+          candidateCreds.push({ keyId: platformCreds.keyId, keySecret: platformCreds.keySecret });
+        }
       } else {
         const shopIntegration = await getShopPaymentIntegration(dbOrder.shopId);
-        if (shopIntegration?.keySecret) candidateSecrets.push(shopIntegration.keySecret);
+        if (shopIntegration?.keySecret) {
+          candidateCreds.push({ keyId: shopIntegration.keyId, keySecret: shopIntegration.keySecret });
+        }
       }
     } else {
       const effectiveShopId = reqShopId || (flow === 'subscription' ? 'platform' : undefined);
       if (effectiveShopId && effectiveShopId !== 'platform') {
         const shopIntegration = await getShopPaymentIntegration(effectiveShopId);
-        if (shopIntegration?.keySecret) candidateSecrets.push(shopIntegration.keySecret);
-      } else {
-        if (platformCreds.keySecret) candidateSecrets.push(platformCreds.keySecret);
+        if (shopIntegration?.keySecret) {
+          candidateCreds.push({ keyId: shopIntegration.keyId, keySecret: shopIntegration.keySecret });
+        }
+      } else if (platformCreds.keySecret) {
+        candidateCreds.push({ keyId: platformCreds.keyId, keySecret: platformCreds.keySecret });
       }
     }
 
     let isValid = false;
-    for (const secret of candidateSecrets) {
-      if (!secret) continue;
+    let verifiedCreds: { keyId: string; keySecret: string } | null = null;
+    for (const cred of candidateCreds) {
+      if (!cred.keySecret) continue;
       const expected = crypto
-        .createHmac('sha256', secret)
+        .createHmac('sha256', cred.keySecret)
         .update(`${order_id}|${payment_id}`)
         .digest('hex');
 
       if (expected.length === razorpay_signature.length &&
           crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(razorpay_signature))) {
         isValid = true;
+        verifiedCreds = cred;
         break;
       }
     }
@@ -4518,35 +4564,101 @@ app.post(['/api/verify-payment', '/api/payment/verify'], createRateLimiter(45, 6
       });
     }
 
-    const amountMinor = dbOrder?.amountMinor || 0;
-    const currency = dbOrder?.currency || 'INR';
     const sigHash = crypto.createHash('sha256').update(razorpay_signature).digest('hex');
 
     if (!isSharedPoolConfigured()) {
       return res.status(503).json({ success: false, error: 'Authoritative database is required for payment verification.' });
     }
 
+    // Fail-closed: never fabricate a payment order from untrusted client body during verification
     if (!dbOrder) {
-      try {
-        const canonicalShopId = await resolvePrintFlowShopId(reqShopId || 'a001a111-0000-0000-0000-000000000001');
-        dbOrder = await getPaymentRepository().createPaymentOrder({
-          jobId: undefined,
-          shopId: canonicalShopId,
-          purpose: flow === 'subscription' ? 'SUBSCRIPTION' : 'PRINT_JOB',
-          providerOrderId: order_id,
-          providerAccountRef: reqShopId || 'counter',
-          amountMinor: Math.round(Number(req.body?.amount || 0) * 100) || 100,
-          currency: 'INR',
-          idempotencyKey: crypto.randomUUID(),
-          metadata: { createdOnDemandDuringVerification: true }
-        });
-      } catch (createErr) {
-        logger.warn('Could not auto-create dbOrder during verification', { order_id, error: deepRedact(createErr) });
+      return res.status(404).json({
+        success: false,
+        code: 'ORDER_NOT_FOUND',
+        error: 'Payment order not found in server records. Please retry from checkout or use payment recovery.'
+      });
+    }
+
+    const amountMinor = Number(dbOrder.amountMinor);
+    const currency = String(dbOrder.currency || 'INR').toUpperCase();
+    if (!Number.isInteger(amountMinor) || amountMinor < 100) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_ORDER_AMOUNT',
+        error: 'Stored order amount is invalid and cannot be verified.'
+      });
+    }
+
+    // Cross-verify against linked staged print job expected total when present
+    if (dbOrder.stagedJobId) {
+      const stagedJob = await getPrintAgentJob(dbOrder.stagedJobId).catch(() => null);
+      if (stagedJob && Number.isFinite(Number(stagedJob.totalAmount))) {
+        const expectedJobPaise = Math.round(Number(stagedJob.totalAmount) * 100);
+        if (expectedJobPaise !== amountMinor) {
+          logger.error('Staged print job amount mismatch during payment verification', {
+            order_id,
+            payment_id,
+            stagedJobId: dbOrder.stagedJobId,
+            expectedJobPaise,
+            orderAmountMinor: amountMinor
+          });
+          return res.status(400).json({
+            success: false,
+            code: 'PAYMENT_AMOUNT_MISMATCH',
+            error: 'Paid order amount does not match the print job total.'
+          });
+        }
       }
     }
 
-    if (!dbOrder) {
-      return res.status(503).json({ success: false, error: 'Authoritative database order is required for payment verification.' });
+    // Confirm actual paid amount & status directly with Razorpay API when credentials are configured
+    if (verifiedCreds?.keyId && verifiedCreds?.keySecret) {
+      try {
+        const verifyRzp = new Razorpay({
+          key_id: verifiedCreds.keyId,
+          key_secret: verifiedCreds.keySecret
+        });
+        const rzpPayment: any = await verifyRzp.payments.fetch(payment_id);
+        const rzpAmountMinor = Number(rzpPayment?.amount);
+        const rzpCurrency = String(rzpPayment?.currency || 'INR').toUpperCase();
+        const rzpStatus = String(rzpPayment?.status || '').toLowerCase();
+
+        if (rzpPayment?.order_id && rzpPayment.order_id !== order_id) {
+          return res.status(400).json({
+            success: false,
+            code: 'PAYMENT_ORDER_MISMATCH',
+            error: 'Payment ID does not belong to this Razorpay order.'
+          });
+        }
+        if (!Number.isInteger(rzpAmountMinor) || rzpAmountMinor !== amountMinor || rzpCurrency !== currency) {
+          logger.error('Razorpay paid amount mismatch during verification', {
+            order_id,
+            payment_id,
+            expectedAmountMinor: amountMinor,
+            rzpAmountMinor,
+            expectedCurrency: currency,
+            rzpCurrency
+          });
+          return res.status(400).json({
+            success: false,
+            code: 'PAYMENT_AMOUNT_MISMATCH',
+            error: `Paid amount (₹${(rzpAmountMinor / 100).toFixed(2)}) does not match expected order total (₹${(amountMinor / 100).toFixed(2)}).`
+          });
+        }
+        if (rzpStatus && !['captured', 'authorized'].includes(rzpStatus)) {
+          return res.status(400).json({
+            success: false,
+            code: 'PAYMENT_NOT_COMPLETED',
+            error: `Payment status is "${rzpStatus}" and has not completed.`
+          });
+        }
+      } catch (rzpFetchErr: any) {
+        logger.warn('Transient Razorpay payments.fetch check skipped after valid HMAC + durable order match', {
+          order_id,
+          payment_id,
+          error: deepRedact(rzpFetchErr)
+        });
+      }
     }
 
     // Atomic durable verification and print-job transition in Neon

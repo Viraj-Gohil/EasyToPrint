@@ -104,6 +104,12 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
       }
 
       const orderId = orderData.order_id || orderData.orderId || orderData.id;
+      const returnedAmountInPaise = Number(orderData.amount);
+      if (!Number.isInteger(returnedAmountInPaise) || returnedAmountInPaise !== amountInPaise) {
+        throw new Error(
+          `Payment amount mismatch detected (expected ₹${(amountInPaise / 100).toFixed(2)}, gateway returned ₹${(returnedAmountInPaise / 100).toFixed(2)}). Checkout aborted.`
+        );
+      }
       const keyId = orderData.key_id && orderData.key_id.startsWith('rzp_')
         ? orderData.key_id.trim()
         : getEffectiveRazorpayKey(orderData.key_id);
@@ -111,7 +117,7 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
       newLogs[1] = {
         step: 'Backend Order',
         status: 'ok',
-        detail: `Order Created! ID: ${orderId} (${orderData.currency} ${orderData.amount / 100})`
+        detail: `Order Created! ID: ${orderId} (${orderData.currency} ${returnedAmountInPaise / 100})`
       };
       setLogs([...newLogs]);
 
@@ -138,8 +144,8 @@ export const RazorpayCheckoutModal: React.FC<RazorpayCheckoutModalProps> = ({
 
       const options = {
         key: keyId,
-        amount: amountInPaise,
-        currency: 'INR',
+        amount: returnedAmountInPaise,
+        currency: orderData.currency || 'INR',
         name: 'EasyToPrint Cloud Platform',
         description: orderDescription,
         order_id: orderId,

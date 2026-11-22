@@ -88,7 +88,7 @@ export class NeonBusinessRepository {
                 shop_code AS "shopCode",
                 is_open AS "isOpen", business_hours AS "businessHours",
                 logo_url AS "logoUrl", primary_color AS "primaryColor",
-                min_order_amount::float * 100 AS "minOrderAmount",
+                min_order_amount::float AS "minOrderAmount",
                 auto_accept AS "autoAccept",
                 current_plan_id::text AS "currentPlanId"
          FROM public.shops WHERE slug = $1 AND status = 'ACTIVE' LIMIT 1`,
@@ -109,7 +109,7 @@ export class NeonBusinessRepository {
                 shop_code AS "shopCode",
                 is_open AS "isOpen", business_hours AS "businessHours",
                 logo_url AS "logoUrl", primary_color AS "primaryColor",
-                min_order_amount::float * 100 AS "minOrderAmount",
+                min_order_amount::float AS "minOrderAmount",
                 auto_accept AS "autoAccept",
                 current_plan_id::text AS "currentPlanId"
          FROM public.shops WHERE shop_code = $1 AND status = 'ACTIVE' LIMIT 1`,
@@ -130,7 +130,7 @@ export class NeonBusinessRepository {
                 shop_code AS "shopCode",
                 is_open AS "isOpen", business_hours AS "businessHours",
                 logo_url AS "logoUrl", primary_color AS "primaryColor",
-                min_order_amount::float * 100 AS "minOrderAmount",
+                min_order_amount::float AS "minOrderAmount",
                 auto_accept AS "autoAccept",
                 current_plan_id::text AS "currentPlanId"
          FROM public.shops WHERE id = $1 LIMIT 1`,
@@ -151,7 +151,7 @@ export class NeonBusinessRepository {
                 shop_code AS "shopCode",
                 is_open AS "isOpen", business_hours AS "businessHours",
                 logo_url AS "logoUrl", primary_color AS "primaryColor",
-                min_order_amount::float * 100 AS "minOrderAmount",
+                min_order_amount::float AS "minOrderAmount",
                 auto_accept AS "autoAccept",
                 current_plan_id::text AS "currentPlanId"
          FROM public.shops
