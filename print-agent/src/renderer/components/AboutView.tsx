@@ -1,13 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { AgentConfig, AgentConnectionStatus } from '../types/agent';
 import {
-  Printer,
   RefreshCw,
   Check,
   FileText,
-  Laptop,
-  HardDrive,
-  ShieldCheck,
   LifeBuoy,
   Activity,
   Zap,
@@ -154,12 +150,6 @@ export const AboutView: React.FC<AboutViewProps> = ({
   };
 
   const appVersion = packageMetadata.version || '1.4.2';
-  const electronVer = systemHealth?.agent?.electronVersion || getSafeProcessVersion('electron', '34.3.0');
-  const nodeVer = systemHealth?.agent?.nodeVersion || getSafeProcessVersion('node', '22.14.0');
-  const osRelease = systemHealth?.os?.release || '10.0.22631';
-  const osArch = systemHealth?.os?.arch || 'x64';
-  const hostname = config?.deviceName || systemHealth?.os?.hostname || 'COUNTER-PC-1';
-  const spoolerRunning = systemHealth?.spooler?.running !== false;
   const shopName = config?.shopDetails?.name || (config?.shopId ? `Shop (${config.shopId})` : 'Main Counter Station');
   const targetServerUrl = (serverUrl || config?.serverUrl || 'https://easytoprint.devpixel.space').replace(/\/+$/, '');
 
@@ -201,14 +191,11 @@ export const AboutView: React.FC<AboutViewProps> = ({
       <div className="pf-card p-5 border border-[#E1E7E1] dark:border-slate-800 bg-white dark:bg-[#131D33] rounded-2xl shadow-card space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-[#00B52D] text-white flex items-center justify-center shrink-0 shadow-md shadow-[#00B52D]/20">
-              <svg viewBox="0 0 28 28" fill="none" className="w-8 h-8" aria-hidden="true">
-                <path d="M8 9V4.5C8 3.94772 8.44772 3.5 9 3.5H19C19.5523 3.5 20 3.94772 20 4.5V9" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-                <rect x="3.5" y="9" width="21" height="11" rx="3" stroke="currentColor" strokeWidth="2.2" />
-                <path d="M8 16.5H20V23.5C20 24.0523 19.5523 24.5 19 24.5H9C8.44772 24.5 8 24.0523 8 23.5V16.5Z" fill="white" stroke="currentColor" strokeWidth="2" />
-                <circle cx="19.5" cy="12.5" r="1.25" fill="white" />
-              </svg>
-            </div>
+            <img
+              src="./assets/icon.png"
+              alt="EasyToPrint Agent"
+              className="w-14 h-14 rounded-2xl object-contain shrink-0 shadow-sm"
+            />
             <div className="space-y-1">
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h2 className="text-lg font-bold text-[#080808] dark:text-white">EasyToPrint Agent</h2>
@@ -306,90 +293,7 @@ export const AboutView: React.FC<AboutViewProps> = ({
         </div>
       </div>
 
-      {/* 3. System Environment Diagnostics Layout */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Card A: Application Runtime */}
-        <div className="pf-card p-5 border border-[#E1E7E1] dark:border-slate-800 bg-white dark:bg-[#131D33] rounded-2xl shadow-card space-y-3">
-          <div className="flex items-center gap-2 pb-2.5 border-b border-[#E1E7E1] dark:border-slate-800">
-            <Laptop className="w-4 h-4 text-[#00B32D]" />
-            <h3 className="text-xs font-bold text-[#111111] dark:text-white uppercase tracking-wider">Application Runtime</h3>
-          </div>
-          <div className="space-y-2.5 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">Agent Version</span>
-              <span className="font-mono font-bold text-[#111111] dark:text-slate-200">v{appVersion}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">Electron Version</span>
-              <span className="font-mono font-semibold text-[#111111] dark:text-slate-200">v{electronVer}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">Node.js Version</span>
-              <span className="font-mono font-semibold text-[#111111] dark:text-slate-200">v{nodeVer}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">App Architecture</span>
-              <span className="font-mono font-semibold text-[#111111] dark:text-slate-200">{osArch}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Card B: Windows Environment */}
-        <div className="pf-card p-5 border border-[#E1E7E1] dark:border-slate-800 bg-white dark:bg-[#131D33] rounded-2xl shadow-card space-y-3">
-          <div className="flex items-center gap-2 pb-2.5 border-b border-[#E1E7E1] dark:border-slate-800">
-            <HardDrive className="w-4 h-4 text-[#00B32D]" />
-            <h3 className="text-xs font-bold text-[#111111] dark:text-white uppercase tracking-wider">Windows Environment</h3>
-          </div>
-          <div className="space-y-2.5 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">Windows Subsystem</span>
-              <span className="font-semibold text-[#111111] dark:text-slate-200">{systemHealth?.os?.platform || 'win32'} ({osRelease})</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">System Architecture</span>
-              <span className="font-mono font-semibold text-[#111111] dark:text-slate-200">{osArch}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">Computer Hostname</span>
-              <span className="font-mono font-semibold text-[#111111] dark:text-slate-200 truncate max-w-[120px]">{hostname}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">Print Spooler</span>
-              <span className={`font-semibold ${spoolerRunning ? 'text-[#008F25]' : 'text-[#DC2626]'}`}>
-                {spoolerRunning ? 'Running' : 'Stopped'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Card C: Security & Vault */}
-        <div className="pf-card p-5 border border-[#E1E7E1] dark:border-slate-800 bg-white dark:bg-[#131D33] rounded-2xl shadow-card space-y-3">
-          <div className="flex items-center gap-2 pb-2.5 border-b border-[#E1E7E1] dark:border-slate-800">
-            <ShieldCheck className="w-4 h-4 text-[#00B32D]" />
-            <h3 className="text-xs font-bold text-[#111111] dark:text-white uppercase tracking-wider">Security &amp; Vault</h3>
-          </div>
-          <div className="space-y-2.5 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">Secure Storage</span>
-              <span className="font-semibold text-[#111111] dark:text-slate-200">safeStorage DPAPI</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">Session Policy</span>
-              <span className="font-semibold text-[#008F25]">Single Active PC</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">Auth Status</span>
-              <span className="font-semibold text-[#008F25]">M2M HMAC Active</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[#646B65] dark:text-slate-400">Transport Security</span>
-              <span className="font-semibold text-[#111111] dark:text-slate-200">TLS 1.3 Encrypted</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 4. Support & Diagnostics Section */}
+      {/* 3. Support & Diagnostics Section */}
       <div className="pf-card p-5 border border-[#E1E7E1] dark:border-slate-800 bg-white dark:bg-[#131D33] rounded-2xl shadow-card space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-[#E1E7E1] dark:border-slate-800">
           <div className="flex items-center gap-2.5">

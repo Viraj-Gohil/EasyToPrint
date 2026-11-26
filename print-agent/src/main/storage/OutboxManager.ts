@@ -39,6 +39,7 @@ export class OutboxManager {
   private items: Map<string, OutboxItem> = new Map();
   private apiClient: ApiClient | null = null;
   private isFlushing = false;
+  private networkAvailable = true;
   private timer: NodeJS.Timeout | null = null;
 
   private constructor() {
@@ -57,6 +58,20 @@ export class OutboxManager {
   public setApiClient(client: ApiClient): void {
     this.apiClient = client;
     this.startWorker();
+  }
+
+  public setNetworkAvailable(available: boolean): void {
+    const wasOffline = !this.networkAvailable;
+    this.networkAvailable = available;
+    if (available && wasOffline && this.items.size > 0) {
+      // Reset backoff timestamps so queued updates synchronize promptly upon reconnection
+      const now = Date.now();
+      for (const item of this.items.values()) {
+        item.nextAttemptAt = Math.min(item.nextAttemptAt, now);
+      }
+      this.saveToDisk();
+      void this.flush();
+    }
   }
 
   private loadFromDisk(): void {
@@ -106,8 +121,10 @@ export class OutboxManager {
 
     logger.info('NETWORK', `[Outbox] Enqueued durable status update for job ${fullItem.jobId}: status=${fullItem.status}, event=${fullItem.eventType}`);
 
-    // Trigger immediate flush attempt if client available
-    void this.flush();
+    // Trigger immediate flush attempt if client available and online
+    if (this.networkAvailable) {
+      void this.flush();
+    }
 
     return fullItem;
   }
@@ -118,7 +135,9 @@ export class OutboxManager {
     }
     // Check outbox every 3 seconds
     this.timer = setInterval(() => {
-      void this.flush();
+      if (this.networkAvailable) {
+        void this.flush();
+      }
     }, 3000);
     if (this.timer.unref) {
       this.timer.unref();
@@ -147,7 +166,7 @@ export class OutboxManager {
    * Flushes eligible pending items to backend.
    */
   public async flush(): Promise<void> {
-    if (this.isFlushing || !this.apiClient || this.items.size === 0) {
+    if (this.isFlushing || !this.networkAvailable || !this.apiClient || this.items.size === 0) {
       return;
     }
 

@@ -20,12 +20,15 @@ export class PrintAgentService {
   private pollingInProgress = false;
   private pairingInProgress = false;
   private backgroundLoopsActive = false;
+  private hasStarted = false;
+  private networkAvailable = false;
   private configRevision = 0;
   private heartbeatTimer?: NodeJS.Timeout;
   private pollingTimer?: NodeJS.Timeout;
   private pollFailureCount = 0;
   private mainWindow?: BrowserWindow | null;
   private onStatusChangeListener?: (status: AgentConnectionStatus) => void;
+  private onNetworkFailureListener?: () => void;
   private revocationReason: string | null = null;
 
   private constructor() {
@@ -52,6 +55,78 @@ export class PrintAgentService {
 
   public setOnStatusChangeListener(listener: (status: AgentConnectionStatus) => void): void {
     this.onStatusChangeListener = listener;
+  }
+
+  public setOnNetworkFailureListener(listener: () => void): void {
+    this.onNetworkFailureListener = listener;
+  }
+
+  private isTransportNetworkError(errorText?: string): boolean {
+    if (!errorText) return false;
+    const msg = errorText.toLowerCase();
+    return (
+      msg.includes('fetch failed') ||
+      msg.includes('enotfound') ||
+      msg.includes('eai_again') ||
+      msg.includes('enetunreach') ||
+      msg.includes('ehostunreach') ||
+      msg.includes('econnrefused') ||
+      msg.includes('econnreset') ||
+      msg.includes('etimedout') ||
+      msg.includes('network')
+    );
+  }
+
+  /**
+   * Pauses cloud synchronization, heartbeats, and outbox flushes when internet drops
+   * without losing queued local print jobs, printers, or local application state.
+   */
+  public pauseForOffline(): void {
+    this.networkAvailable = false;
+    this.backgroundLoopsActive = false;
+    outboxManager.setNetworkAvailable(false);
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+    if (this.pollingTimer) {
+      clearTimeout(this.pollingTimer);
+      this.pollingTimer = undefined;
+    }
+    if (this.printerScanTimer) {
+      clearInterval(this.printerScanTimer);
+      this.printerScanTimer = undefined;
+    }
+    this.setStatus('OFFLINE');
+    logger.warn('NETWORK', 'Internet connection lost. Cloud sync paused while preserving local print queue.');
+  }
+
+  /**
+   * Revalidates backend connectivity and resumes background sync & outbox delivery once internet returns.
+   */
+  public async resumeAfterReconnect(reportProgress?: (progress: number, message: string) => void): Promise<void> {
+    this.networkAvailable = true;
+    outboxManager.setNetworkAvailable(true);
+
+    if (!this.hasStarted) {
+      await this.start(reportProgress);
+      return;
+    }
+
+    reportProgress?.(86, 'Preparing your workspace...');
+    const config = localVault.getConfig();
+    this.apiClient.updateConfig(config);
+    if (!config.serverUrl || !config.shopId || !config.agentId || !config.authToken) {
+      this.setStatus('OFFLINE');
+      return;
+    }
+
+    logger.info('NETWORK', 'Internet restored. Revalidating backend connection and resuming synchronization...');
+    reportProgress?.(92, 'Almost ready...');
+    await this.triggerHeartbeat();
+    await this.pollPendingJobs();
+    void outboxManager.flush();
+    this.startBackgroundLoops();
   }
 
   public setOnJobUpdateListener(listener: (job: PrintJobItem) => void): void {
@@ -197,12 +272,23 @@ export class PrintAgentService {
   }
 
   /**
-   * Initializes agent lifecycle, recovery audit, and background sync
+   * Initializes agent lifecycle, recovery audit, and background sync.
+   * Must only be called after internet & backend connectivity have been verified.
    */
-  public async start(): Promise<void> {
+  public async start(reportProgress?: (progress: number, message: string) => void): Promise<void> {
+    this.networkAvailable = true;
+    outboxManager.setNetworkAvailable(true);
+
+    if (this.hasStarted) {
+      await this.resumeAfterReconnect(reportProgress);
+      return;
+    }
+
+    this.hasStarted = true;
     logger.info('AGENT', 'Starting EasyToPrint Windows Desktop Agent Service...');
 
     // 1. Crash recovery audit
+    reportProgress?.(82, 'Preparing your workspace...');
     CrashRecoveryManager.performStartupRecovery();
 
     // 2. Discover local printers automatically on app startup with initial reconciliation
@@ -222,6 +308,7 @@ export class PrintAgentService {
     }
 
     // 3. Initial heartbeat & sync
+    reportProgress?.(90, 'Almost ready...');
     await this.triggerHeartbeat();
 
     // 4. Initial job poll
@@ -232,7 +319,9 @@ export class PrintAgentService {
   }
 
   public stop(): void {
+    this.networkAvailable = false;
     this.backgroundLoopsActive = false;
+    outboxManager.setNetworkAvailable(false);
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
@@ -345,6 +434,7 @@ export class PrintAgentService {
   }
 
   public async triggerHeartbeat(): Promise<{ success: boolean; status?: string }> {
+    if (!this.networkAvailable) return { success: false, status: 'OFFLINE' };
     if (this.heartbeatInProgress || this.pairingInProgress) return { success: false };
     this.heartbeatInProgress = true;
     const requestRevision = this.configRevision;
@@ -400,6 +490,9 @@ export class PrintAgentService {
 
       this.setStatus('ERROR');
       logger.warn('NETWORK', `Heartbeat ping failed: ${res.error}`);
+      if (this.isTransportNetworkError(res.error) && this.onNetworkFailureListener) {
+        this.onNetworkFailureListener();
+      }
       return { success: false };
     } finally {
       this.heartbeatInProgress = false;
@@ -407,6 +500,9 @@ export class PrintAgentService {
   }
 
   public async pollPendingJobs(): Promise<{ success: boolean; newJobsCount: number; error?: string }> {
+    if (!this.networkAvailable) {
+      return { success: false, newJobsCount: 0, error: 'Internet connection is unavailable. Print queue sync is paused.' };
+    }
     if (this.pairingInProgress) return { success: false, newJobsCount: 0, error: 'Device pairing is in progress.' };
     if (this.currentStatus === 'RESTRICTED' || this.currentStatus === 'UNAUTHORIZED' || this.currentStatus === 'REVOKED') {
       return { success: false, newJobsCount: 0, error: 'Shop account or device session is currently restricted or revoked.' };
@@ -426,6 +522,9 @@ export class PrintAgentService {
           return { success: false, newJobsCount: 0, error: res.error };
         }
         logger.warn('NETWORK', `Could not fetch the print queue: ${res.error || 'backend request failed'}`);
+        if (this.isTransportNetworkError(res.error) && this.onNetworkFailureListener) {
+          this.onNetworkFailureListener();
+        }
         return { success: false, newJobsCount: 0, error: res.error || 'The backend request failed.' };
       }
 

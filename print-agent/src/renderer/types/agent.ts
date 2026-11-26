@@ -243,7 +243,47 @@ export interface PrinterQueueState {
   failedCount: number;
 }
 
+export type StartupPhase =
+  | 'INITIALIZING'
+  | 'CHECKING_INTERNET'
+  | 'VERIFY_BACKEND'
+  | 'LOADING_APP'
+  | 'DASHBOARD'
+  | 'OFFLINE_BLOCKING_SCREEN';
+
+export type ConnectivityErrorCode =
+  | 'OFFLINE'
+  | 'DNS_FAILED'
+  | 'TIMEOUT'
+  | 'CONNECTION_REFUSED'
+  | 'TLS_ERROR'
+  | 'BACKEND_UNREACHABLE'
+  | 'UNKNOWN';
+
+export interface ConnectivitySnapshot {
+  phase: StartupPhase;
+  isOnline: boolean;
+  internetVerified: boolean;
+  backendVerified: boolean;
+  isChecking: boolean;
+  hasCompletedStartup: boolean;
+  progress: number;
+  statusMessage: string;
+  errorCode: ConnectivityErrorCode | null;
+  errorMessage: string | null;
+  lastCheckedAt: string | null;
+  lastVerifiedAt: string | null;
+  retryCount: number;
+  runtimeDisconnected: boolean;
+}
+
 export interface ElectronAgentAPI {
+  // Startup & Network Connectivity
+  getConnectivityState: () => Promise<ConnectivitySnapshot>;
+  checkConnectivity: (options?: { reason?: 'startup' | 'manual_retry' | 'network_event' | 'runtime_probe' }) => Promise<ConnectivitySnapshot>;
+  reportNetworkHint: (onlineHint: boolean) => Promise<void>;
+  onConnectivityChanged: (callback: (snapshot: ConnectivitySnapshot) => void) => () => void;
+
   // Configuration
   getConfig: () => Promise<AgentConfig>;
   saveConfig: (config: Partial<AgentConfig>) => Promise<{ success: boolean; error?: string }>;

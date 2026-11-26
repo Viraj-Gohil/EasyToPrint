@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AgentConfig,
   AgentConnectionStatus,
+  ConnectivitySnapshot,
   DiscoveredPrinter,
   PrintJobItem,
   AgentLogEntry,
@@ -19,6 +20,8 @@ import { SettingsModal } from './components/SettingsModal';
 import { LoginScreen } from './components/LoginScreen';
 import { AboutView } from './components/AboutView';
 import { DevicePreferencesView } from './components/DevicePages';
+import { StartupLoaderScreen } from './components/StartupLoaderScreen';
+import { OfflineBlockingScreen } from './components/OfflineBlockingScreen';
 import { filterPhysicalPrinters } from './utils/printerFilter';
 import {
   Activity,
@@ -36,6 +39,23 @@ import {
 } from 'lucide-react';
 
 type AgentPage = 'DASHBOARD' | 'HEALTH' | 'QUEUE' | 'PRINTERS' | 'LOGS' | 'DEVICE_PREFERENCES' | 'ABOUT';
+
+const INITIAL_CONNECTIVITY_SNAPSHOT: ConnectivitySnapshot = {
+  phase: 'INITIALIZING',
+  isOnline: false,
+  internetVerified: false,
+  backendVerified: false,
+  isChecking: true,
+  hasCompletedStartup: false,
+  progress: 12,
+  statusMessage: 'Initializing EasyToPrint...',
+  errorCode: null,
+  errorMessage: null,
+  lastCheckedAt: null,
+  lastVerifiedAt: null,
+  retryCount: 0,
+  runtimeDisconnected: false
+};
 
 const DEFAULT_CONFIG: AgentConfig = {
   serverUrl: 'https://easytoprint.devpixel.space',
@@ -121,43 +141,185 @@ export const App: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [initializationError, setInitializationError] = useState<string | null>(null);
+  const [connectivity, setConnectivity] = useState<ConnectivitySnapshot>(INITIAL_CONNECTIVITY_SNAPSHOT);
+  const [isLoaderCompleting, setIsLoaderCompleting] = useState(false);
+  const [hasRevealedWorkspace, setHasRevealedWorkspace] = useState(false);
+  const completionTimerRef = useRef<number | null>(null);
+  const prevPhaseRef = useRef<ConnectivitySnapshot['phase']>('INITIALIZING');
+
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [entitlements, setEntitlements] = useState<PlanEntitlements | null>(null);
 
+  const applyConnectivitySnapshot = useCallback((nextSnapshot: ConnectivitySnapshot) => {
+    const prevPhase = prevPhaseRef.current;
+    prevPhaseRef.current = nextSnapshot.phase;
+
+    setConnectivity(nextSnapshot);
+
+    if (nextSnapshot.phase === 'DASHBOARD' && prevPhase !== 'DASHBOARD') {
+      // Smooth loader completion animation before revealing the dashboard
+      if (completionTimerRef.current !== null) {
+        window.clearTimeout(completionTimerRef.current);
+      }
+      setIsLoaderCompleting(true);
+      completionTimerRef.current = window.setTimeout(() => {
+        setIsLoaderCompleting(false);
+        setHasRevealedWorkspace(true);
+        completionTimerRef.current = null;
+      }, 320);
+    } else if (nextSnapshot.phase === 'OFFLINE_BLOCKING_SCREEN') {
+      if (completionTimerRef.current !== null) {
+        window.clearTimeout(completionTimerRef.current);
+        completionTimerRef.current = null;
+      }
+      setIsLoaderCompleting(false);
+    }
+  }, []);
+
+  // 1. Mandatory Startup & Runtime Connectivity Verification Listener
   useEffect(() => {
+    const api = window.electronAgentAPI;
+    let active = true;
+
+    if (!api?.getConnectivityState || !api?.onConnectivityChanged) {
+      // Safe non-Electron browser fallback: verify actual backend reachability via fetch
+      const checkBrowserFallback = async () => {
+        try {
+          const controller = new AbortController();
+          const timer = window.setTimeout(() => controller.abort(), 4500);
+          const res = await fetch('/api/health', { cache: 'no-store', signal: controller.signal });
+          window.clearTimeout(timer);
+          if (!active) return;
+          if (res.ok || res.status === 503) {
+            applyConnectivitySnapshot({
+              ...INITIAL_CONNECTIVITY_SNAPSHOT,
+              phase: 'DASHBOARD',
+              isOnline: true,
+              internetVerified: true,
+              backendVerified: true,
+              isChecking: false,
+              hasCompletedStartup: true,
+              progress: 100,
+              statusMessage: 'Connected to EasyToPrint',
+              lastCheckedAt: new Date().toISOString(),
+              lastVerifiedAt: new Date().toISOString()
+            });
+          } else {
+            throw new Error('Offline');
+          }
+        } catch {
+          if (!active) return;
+          applyConnectivitySnapshot({
+            ...INITIAL_CONNECTIVITY_SNAPSHOT,
+            phase: 'OFFLINE_BLOCKING_SCREEN',
+            isOnline: false,
+            isChecking: false,
+            progress: 0,
+            statusMessage: 'No internet connection',
+            errorCode: 'OFFLINE',
+            errorMessage: 'No active internet connection detected.',
+            lastCheckedAt: new Date().toISOString()
+          });
+        }
+      };
+      void checkBrowserFallback();
+      return () => {
+        active = false;
+      };
+    }
+
+    const unsubConnectivity = api.onConnectivityChanged((snapshot) => {
+      if (active) {
+        applyConnectivitySnapshot(snapshot);
+      }
+    });
+
+    void api
+      .getConnectivityState()
+      .then((initialSnapshot) => {
+        if (active && initialSnapshot) {
+          applyConnectivitySnapshot(initialSnapshot);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          applyConnectivitySnapshot({
+            ...INITIAL_CONNECTIVITY_SNAPSHOT,
+            phase: 'OFFLINE_BLOCKING_SCREEN',
+            isOnline: false,
+            isChecking: false,
+            progress: 0,
+            statusMessage: 'No internet connection',
+            errorCode: 'OFFLINE',
+            errorMessage: 'Unable to verify internet connectivity.',
+            lastCheckedAt: new Date().toISOString()
+          });
+        }
+      });
+
+    // Forward OS/browser online & offline events strictly as hints to trigger main-process HTTPS verification
+    const handleOnlineHint = () => {
+      void api.reportNetworkHint?.(true).catch(() => undefined);
+    };
+    const handleOfflineHint = () => {
+      void api.reportNetworkHint?.(false).catch(() => undefined);
+    };
+
+    window.addEventListener('online', handleOnlineHint);
+    window.addEventListener('offline', handleOfflineHint);
+
+    return () => {
+      active = false;
+      if (completionTimerRef.current !== null) {
+        window.clearTimeout(completionTimerRef.current);
+        completionTimerRef.current = null;
+      }
+      unsubConnectivity();
+      window.removeEventListener('online', handleOnlineHint);
+      window.removeEventListener('offline', handleOfflineHint);
+    };
+  }, [applyConnectivitySnapshot]);
+
+  // 2. Hydrate Agent Workspace ONLY after startup connectivity has been verified
+  useEffect(() => {
+    if (!connectivity.hasCompletedStartup) return;
     const api = window.electronAgentAPI;
     if (!api) return;
     let active = true;
 
-    Promise.all([
-      api.getConfig(),
-      api.getStatus(),
-      api.getMetrics(),
-      api.getPrinters(),
-      api.getJobs(),
-      api.getLogs(),
-      api.getIsScanning ? api.getIsScanning() : Promise.resolve(false),
-      api.getEntitlements ? api.getEntitlements() : Promise.resolve(null)
-    ])
-      .then(([loadedConfig, loadedStatus, loadedMetrics, loadedPrinters, loadedJobs, loadedLogs, scanningState, loadedEntitlements]) => {
-        if (!active) return;
-        setConfig(loadedConfig);
-        setStatus(loadedStatus.status);
-        setLastHeartbeat(loadedStatus.lastHeartbeat);
-        setMetrics(loadedMetrics);
-        setPrinters(filterPhysicalPrinters(loadedPrinters));
-        setJobs(loadedJobs);
-        setLogs(loadedLogs);
-        setIsScanning(Boolean(scanningState));
-        if (loadedEntitlements) {
-          setEntitlements(loadedEntitlements);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        setInitializationError(error instanceof Error ? error.message : 'Could not initialize agent environment.');
-        setStatus('ERROR');
-      });
+    const hydrateWorkspace = () => {
+      void Promise.all([
+        api.getConfig(),
+        api.getStatus(),
+        api.getMetrics(),
+        api.getPrinters(),
+        api.getJobs(),
+        api.getLogs(),
+        api.getIsScanning ? api.getIsScanning() : Promise.resolve(false),
+        api.getEntitlements ? api.getEntitlements() : Promise.resolve(null)
+      ])
+        .then(([loadedConfig, loadedStatus, loadedMetrics, loadedPrinters, loadedJobs, loadedLogs, scanningState, loadedEntitlements]) => {
+          if (!active) return;
+          setConfig(loadedConfig);
+          setStatus(loadedStatus.status);
+          setLastHeartbeat(loadedStatus.lastHeartbeat);
+          setMetrics(loadedMetrics);
+          setPrinters(filterPhysicalPrinters(loadedPrinters));
+          setJobs(loadedJobs);
+          setLogs(loadedLogs);
+          setIsScanning(Boolean(scanningState));
+          if (loadedEntitlements) {
+            setEntitlements(loadedEntitlements);
+          }
+        })
+        .catch((error: unknown) => {
+          if (!active) return;
+          setInitializationError(error instanceof Error ? error.message : 'Could not initialize agent environment.');
+          setStatus('ERROR');
+        });
+    };
+
+    hydrateWorkspace();
 
     const unsubStatus = api.onStatusChanged((newStatus) => {
       setStatus(newStatus);
@@ -217,6 +379,34 @@ export const App: React.FC = () => {
       unsubScanning();
       unsubEntitlements();
     };
+  }, [connectivity.hasCompletedStartup]);
+
+  // Re-sync jobs, status, and metrics immediately when returning to DASHBOARD after runtime reconnect
+  useEffect(() => {
+    if (!connectivity.hasCompletedStartup || connectivity.phase !== 'DASHBOARD') return;
+    const api = window.electronAgentAPI;
+    if (!api) return;
+    let active = true;
+    void Promise.all([api.getStatus(), api.getJobs(), api.getMetrics(), api.getPrinters()])
+      .then(([loadedStatus, loadedJobs, loadedMetrics, loadedPrinters]) => {
+        if (!active) return;
+        setStatus(loadedStatus.status);
+        setLastHeartbeat(loadedStatus.lastHeartbeat);
+        setJobs(loadedJobs);
+        setMetrics(loadedMetrics);
+        setPrinters(filterPhysicalPrinters(loadedPrinters));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [connectivity.hasCompletedStartup, connectivity.phase]);
+
+  const handleRetryConnectivity = useCallback(() => {
+    const api = window.electronAgentAPI;
+    if (api?.checkConnectivity) {
+      void api.checkConnectivity({ reason: 'manual_retry' }).catch(() => undefined);
+    }
   }, []);
 
   const handlePollNow = async () => {
@@ -368,15 +558,64 @@ export const App: React.FC = () => {
   const currentPage = PAGE_DETAILS[activePage];
 
   // =========================================================================
+  // MANDATORY STARTUP GATE: Dashboard & Login MUST NEVER mount before connectivity is verified
+  // =========================================================================
+  const isShowingOfflineBlocking = connectivity.phase === 'OFFLINE_BLOCKING_SCREEN';
+  const isShowingStartupLoader =
+    !isShowingOfflineBlocking &&
+    (connectivity.phase !== 'DASHBOARD' || isLoaderCompleting || !hasRevealedWorkspace);
+
+  if (!connectivity.hasCompletedStartup) {
+    if (isShowingOfflineBlocking) {
+      return (
+        <OfflineBlockingScreen
+          snapshot={connectivity}
+          onRetry={handleRetryConnectivity}
+          onQuit={window.electronAgentAPI ? () => window.electronAgentAPI?.quitApp() : undefined}
+        />
+      );
+    }
+    return (
+      <StartupLoaderScreen
+        snapshot={connectivity}
+        isCompleting={isLoaderCompleting}
+      />
+    );
+  }
+
+  // Runtime connectivity overlay (preserves mounted React state & print queue while blocking UI)
+  const runtimeOverlay = isShowingOfflineBlocking ? (
+    <OfflineBlockingScreen
+      snapshot={connectivity}
+      onRetry={handleRetryConnectivity}
+      onQuit={window.electronAgentAPI ? () => window.electronAgentAPI?.quitApp() : undefined}
+    />
+  ) : isShowingStartupLoader ? (
+    <StartupLoaderScreen
+      snapshot={connectivity}
+      isCompleting={isLoaderCompleting}
+    />
+  ) : null;
+
+  // =========================================================================
   // Unpaired / Setup State Screen (Centered Login Card)
   // =========================================================================
   if (!configured) {
     return (
-      <LoginScreen
-        onPair={handlePairDevice}
-        defaultShopId={config.shopId}
-        serverUrl={config.serverUrl}
-      />
+      <>
+        <div
+          aria-hidden={Boolean(runtimeOverlay)}
+          inert={Boolean(runtimeOverlay) || undefined}
+          className={runtimeOverlay ? 'pointer-events-none select-none' : undefined}
+        >
+          <LoginScreen
+            onPair={handlePairDevice}
+            defaultShopId={config.shopId}
+            serverUrl={config.serverUrl}
+          />
+        </div>
+        {runtimeOverlay}
+      </>
     );
   }
 
@@ -384,7 +623,12 @@ export const App: React.FC = () => {
   // Main Application Shell
   // =========================================================================
   return (
-    <div className="agent-app">
+    <>
+    <div
+      className={`agent-app ${runtimeOverlay ? 'pointer-events-none select-none' : ''}`}
+      aria-hidden={Boolean(runtimeOverlay)}
+      inert={Boolean(runtimeOverlay) || undefined}
+    >
       <Header
         status={status}
         lastHeartbeat={lastHeartbeat}
@@ -632,5 +876,7 @@ export const App: React.FC = () => {
         onDisconnect={handleDisconnectDevice}
       />
     </div>
+    {runtimeOverlay}
+    </>
   );
 };

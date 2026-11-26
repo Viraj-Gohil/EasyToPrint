@@ -488,6 +488,65 @@ input[readonly] {
   animation: scaleIn var(--transition-normal) forwards ease-out;
 }
 
+/* EasyToPrint Branded Startup Loader Animations (Compositor-Only) */
+@keyframes etpLogoBreathe {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.035);
+  }
+}
+
+@keyframes etpLogoHalo {
+  0% {
+    transform: scale(0.96);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(1.26);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.26);
+    opacity: 0;
+  }
+}
+
+@keyframes etpProgressSweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(360%);
+  }
+}
+
+.etp-logo-breathe {
+  animation: etpLogoBreathe 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.etp-logo-halo {
+  animation: etpLogoHalo 2.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.etp-progress-sweep {
+  animation: etpProgressSweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.etp-loader-exit {
+  opacity: 0;
+  transform: scale(0.985);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .etp-logo-breathe,
+  .etp-logo-halo,
+  .etp-progress-sweep {
+    animation: none;
+  }
+}
+
 /* App Shell Layout */
 .agent-app {
   min-height: 100vh;

@@ -1,8 +1,31 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { AgentConfig, AgentConnectionStatus, DiscoveredPrinter, PrintJobItem, AgentLogEntry, TestPrintResult, QueueMetrics } from '../renderer/types/agent.js';
+import {
+  AgentConfig,
+  AgentConnectionStatus,
+  ConnectivitySnapshot,
+  DiscoveredPrinter,
+  PrintJobItem,
+  AgentLogEntry,
+  TestPrintResult,
+  QueueMetrics
+} from '../renderer/types/agent.js';
 
 // Secure Preload Bridge exposing strictly typed IPC methods
 contextBridge.exposeInMainWorld('electronAgentAPI', {
+  // Startup & Network Connectivity
+  getConnectivityState: (): Promise<ConnectivitySnapshot> =>
+    ipcRenderer.invoke('connectivity:get-state'),
+  checkConnectivity: (options?: {
+    reason?: 'startup' | 'manual_retry' | 'network_event' | 'runtime_probe';
+  }): Promise<ConnectivitySnapshot> => ipcRenderer.invoke('connectivity:check', options),
+  reportNetworkHint: (onlineHint: boolean): Promise<void> =>
+    ipcRenderer.invoke('connectivity:report-network-hint', onlineHint),
+  onConnectivityChanged: (callback: (snapshot: ConnectivitySnapshot) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, snapshot: ConnectivitySnapshot) => callback(snapshot);
+    ipcRenderer.on('event:connectivity-changed', handler);
+    return () => ipcRenderer.removeListener('event:connectivity-changed', handler);
+  },
+
   // Configuration
   getConfig: (): Promise<AgentConfig> => ipcRenderer.invoke('agent:get-config'),
   getHostname: (): Promise<string> => ipcRenderer.invoke('system:get-hostname'),

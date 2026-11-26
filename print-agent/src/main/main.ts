@@ -20,6 +20,7 @@ import { outboxManager } from './storage/OutboxManager.js';
 import { printerManager } from './printer/WindowsPrinterManager.js';
 import { logger } from './logger/AgentLogger.js';
 import { systemHealthManager } from './health/SystemHealthManager.js';
+import { ConnectivityService, ConnectivityReason } from './network/ConnectivityService.js';
 import { AgentConfig, AgentConnectionStatus } from '../renderer/types/agent.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,11 +31,31 @@ electronApp.isQuitting = false;
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let connectivityService: ConnectivityService | null = null;
+let unsubscribeConnectivity: (() => void) | null = null;
 let isQuitting = false;
 let hasShutdownServices = false;
 let lastNotifiedStatus: AgentConnectionStatus | null = null;
 const notifiedJobIds = new Set<string>();
 let hasShownFatalDialog = false;
+
+/**
+ * Validates that IPC invocations originate strictly from the authorized EasyToPrint main window
+ * loaded from the local app bundle (file://) or trusted dev server origin.
+ */
+function assertTrustedIpcSender(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): void {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
+    throw new Error('Unauthorized IPC sender.');
+  }
+  const frameUrl = event.senderFrame?.url || '';
+  if (!frameUrl) return;
+  const isFileBundle = frameUrl.startsWith('file://');
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL || '';
+  const isTrustedDev = !app.isPackaged && Boolean(devServerUrl) && frameUrl.startsWith(devServerUrl);
+  if (!isFileBundle && !isTrustedDev) {
+    throw new Error('Unauthorized IPC frame origin.');
+  }
+}
 
 function shutdownBackgroundServices(): void {
   electronApp.isQuitting = true;
@@ -42,6 +63,14 @@ function shutdownBackgroundServices(): void {
   if (hasShutdownServices) return;
   hasShutdownServices = true;
 
+  try {
+    unsubscribeConnectivity?.();
+    unsubscribeConnectivity = null;
+  } catch {}
+  try {
+    connectivityService?.stop();
+    connectivityService = null;
+  } catch {}
   try {
     agentService.stop();
   } catch {}
@@ -220,8 +249,41 @@ if (!gotTheLock) {
         }
       });
 
-      // Start background agent service
-      await agentService.start();
+      // Initialize main-process internet connectivity verification & startup orchestrator.
+      // IMPORTANT: agentService.start() only executes inside onPrepareWorkspace AFTER internet & backend succeed.
+      connectivityService = new ConnectivityService({
+        getBackendBaseUrl: () => localVault.getConfig().serverUrl,
+        onPrepareWorkspace: async ({ isInitialStartup, reportProgress }) => {
+          if (isInitialStartup) {
+            await agentService.start(reportProgress);
+          } else {
+            await agentService.resumeAfterReconnect(reportProgress);
+          }
+        },
+        onRuntimeOffline: () => {
+          agentService.pauseForOffline();
+          updateTrayMenu();
+        },
+        onLog: (level, message, details) => {
+          if (level === 'ERROR') logger.error('NETWORK', message, details);
+          else if (level === 'WARN') logger.warn('NETWORK', message, details);
+          else logger.info('NETWORK', message, details);
+        }
+      });
+
+      agentService.setOnNetworkFailureListener(() => {
+        connectivityService?.notifyApiNetworkError();
+      });
+
+      unsubscribeConnectivity = connectivityService.subscribe((snapshot) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('event:connectivity-changed', snapshot);
+        }
+        updateTrayMenu();
+      });
+
+      // Start mandatory startup connectivity verification immediately (non-blocking)
+      void connectivityService.startStartupSequence();
     } catch (startupError: any) {
       const logFile = writeCrashErrorLog('startupException', startupError);
       dialog.showErrorBox(
@@ -264,7 +326,7 @@ function createMainWindow() {
     minHeight: 600,
     title: 'Print Agent – EasyToPrint',
     icon: windowIcon,
-    backgroundColor: '#F7F7F7',
+    backgroundColor: '#FFFFFF',
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -274,6 +336,18 @@ function createMainWindow() {
       sandbox: false,
       webSecurity: false,
       devTools: true
+    }
+  });
+
+  // Prevent opening secondary windows or navigating away to bypass startup verification
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL || '';
+    const isAllowedLocal =
+      targetUrl.startsWith('file://') ||
+      (!app.isPackaged && Boolean(devServerUrl) && targetUrl.startsWith(devServerUrl));
+    if (!isAllowedLocal) {
+      event.preventDefault();
     }
   });
 
@@ -403,7 +477,9 @@ function updateTrayMenu() {
     },
     {
       label: 'Check for Jobs Now',
+      enabled: connectivityService ? connectivityService.isOnline() : true,
       click: async () => {
+        if (connectivityService && !connectivityService.isOnline()) return;
         await agentService.pollPendingJobs();
       }
     },
@@ -432,11 +508,74 @@ function updateTrayMenu() {
 // IPC MAIN HANDLERS
 // ============================================================================
 
-ipcMain.handle('system:get-hostname', () => {
+ipcMain.handle('connectivity:get-state', (event) => {
+  assertTrustedIpcSender(event);
+  if (connectivityService) {
+    return connectivityService.getSnapshot();
+  }
+  return {
+    phase: 'INITIALIZING',
+    isOnline: false,
+    internetVerified: false,
+    backendVerified: false,
+    isChecking: true,
+    hasCompletedStartup: false,
+    progress: 12,
+    statusMessage: 'Initializing EasyToPrint...',
+    errorCode: null,
+    errorMessage: null,
+    lastCheckedAt: null,
+    lastVerifiedAt: null,
+    retryCount: 0,
+    runtimeDisconnected: false
+  };
+});
+
+ipcMain.handle('connectivity:check', async (event, options?: unknown) => {
+  assertTrustedIpcSender(event);
+  if (!connectivityService) {
+    return {
+      phase: 'OFFLINE_BLOCKING_SCREEN',
+      isOnline: false,
+      internetVerified: false,
+      backendVerified: false,
+      isChecking: false,
+      hasCompletedStartup: false,
+      progress: 0,
+      statusMessage: 'No internet connection',
+      errorCode: 'OFFLINE',
+      errorMessage: 'Connectivity service is not ready.',
+      lastCheckedAt: new Date().toISOString(),
+      lastVerifiedAt: null,
+      retryCount: 1,
+      runtimeDisconnected: false
+    };
+  }
+  const allowedReasons = new Set<ConnectivityReason>(['startup', 'manual_retry', 'network_event', 'runtime_probe']);
+  const rawReason =
+    options && typeof options === 'object' && 'reason' in options
+      ? (options as { reason?: unknown }).reason
+      : 'manual_retry';
+  const reason: ConnectivityReason =
+    typeof rawReason === 'string' && allowedReasons.has(rawReason as ConnectivityReason)
+      ? (rawReason as ConnectivityReason)
+      : 'manual_retry';
+  return connectivityService.verifyConnectivity(reason);
+});
+
+ipcMain.handle('connectivity:report-network-hint', async (event, onlineHint: unknown) => {
+  assertTrustedIpcSender(event);
+  if (typeof onlineHint !== 'boolean' || !connectivityService) return;
+  await connectivityService.handleNetworkSignal(onlineHint);
+});
+
+ipcMain.handle('system:get-hostname', (event) => {
+  assertTrustedIpcSender(event);
   return os.hostname();
 });
 
-ipcMain.handle('agent:get-config', () => {
+ipcMain.handle('agent:get-config', (event) => {
+  assertTrustedIpcSender(event);
   return localVault.getPublicConfig();
 });
 
