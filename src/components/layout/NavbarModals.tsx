@@ -3,7 +3,6 @@ import {
   X,
   BookOpen,
   Headphones,
-  Phone,
   MessageCircle,
   Search,
   ExternalLink,
@@ -293,9 +292,7 @@ export const ContactSupportModal: React.FC<{ onClose: () => void }> = ({ onClose
         <div className="p-6 overflow-y-auto space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <a
-              href="https://wa.me/919876543210?text=Hello%20EasyToPrint%20Support,%20I%20need%20help%20with%20my%20print%20shop"
-              target="_blank"
-              rel="noreferrer"
+              href="mailto:support@easytoprint.in?subject=EasyToPrint%20Support%20Request"
               className="p-3.5 rounded-2xl border border-[#A7F3D0] bg-[#E8F8EC]/50 hover:bg-[#E8F8EC] transition-all flex items-center gap-3 group"
             >
               <div className="w-9 h-9 rounded-xl bg-[#00B32D] text-white flex items-center justify-center shrink-0">
@@ -303,25 +300,25 @@ export const ContactSupportModal: React.FC<{ onClose: () => void }> = ({ onClose
               </div>
               <div>
                 <div className="text-xs font-bold text-[#111111] group-hover:text-[#008F25] transition-colors flex items-center gap-1">
-                  <span>WhatsApp Chat</span>
+                  <span>Email Support</span>
                   <ExternalLink className="w-3 h-3 text-[#00B32D]" />
                 </div>
-                <p className="text-[11px] text-[#646B65]">Instant reply under 2 mins</p>
+                <p className="text-[11px] text-[#646B65]">support@easytoprint.in</p>
               </div>
             </a>
 
             <a
-              href="tel:+919876543210"
+              href="/faq"
               className="p-3.5 rounded-2xl border border-[#E1E7E1] bg-[#F7F8F7] hover:bg-white transition-all flex items-center gap-3 group"
             >
               <div className="w-9 h-9 rounded-xl bg-white border border-[#E1E7E1] text-[#111111] flex items-center justify-center shrink-0">
-                <Phone className="w-5 h-5 text-[#00B32D]" />
+                <BookOpen className="w-5 h-5 text-[#00B32D]" />
               </div>
               <div>
                 <div className="text-xs font-bold text-[#111111] group-hover:text-[#008F25] transition-colors">
-                  Toll-Free Phone
+                  Setup &amp; Printer FAQ
                 </div>
-                <p className="text-[11px] text-[#646B65]">Mon–Sat · 9 AM to 9 PM</p>
+                <p className="text-[11px] text-[#646B65]">Mon–Sat · 9 AM to 8 PM IST</p>
               </div>
             </a>
           </div>

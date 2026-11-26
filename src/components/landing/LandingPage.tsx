@@ -532,7 +532,7 @@ export const LandingPage: React.FC = () => {
                       Step 1
                     </span>
                   </div>
-                  <h3 className="text-base font-bold text-[#111111]">Create Your Shop Account</h3>
+                  <h4 className="text-base font-bold text-[#111111]">Create Your Shop Account</h4>
                   <p className="text-xs text-[#646B65] leading-relaxed">
                     Register your printing business and set up your shop on EasyToPrint. Choose your shop slug, pricing per page, and payment details.
                   </p>
@@ -558,7 +558,7 @@ export const LandingPage: React.FC = () => {
                       Step 2
                     </span>
                   </div>
-                  <h3 className="text-base font-bold text-[#111111]">Connect EasyToPrint Agent</h3>
+                  <h4 className="text-base font-bold text-[#111111]">Connect EasyToPrint Agent</h4>
                   <p className="text-xs text-[#646B65] leading-relaxed">
                     Install the Windows desktop Agent and securely connect it to your shop account using your shop credentials and safe DPAPI vault token.
                   </p>
@@ -584,7 +584,7 @@ export const LandingPage: React.FC = () => {
                       Step 3
                     </span>
                   </div>
-                  <h3 className="text-base font-bold text-[#111111]">Connect Your Printers</h3>
+                  <h4 className="text-base font-bold text-[#111111]">Connect Your Printers</h4>
                   <p className="text-xs text-[#646B65] leading-relaxed">
                     Discover, configure and register your physical printers. Automatically detect supported printer capabilities (paper sizes, B&amp;W/Color).
                   </p>
@@ -610,7 +610,7 @@ export const LandingPage: React.FC = () => {
                       Step 4
                     </span>
                   </div>
-                  <h3 className="text-base font-bold text-[#111111]">Start Accepting Orders</h3>
+                  <h4 className="text-base font-bold text-[#111111]">Start Accepting Orders</h4>
                   <p className="text-xs text-[#646B65] leading-relaxed">
                     Generate your branded shop QR code counter standee and start receiving customer print orders automatically. Zero manual steps.
                   </p>
@@ -823,7 +823,7 @@ export const LandingPage: React.FC = () => {
                         <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                       </div>
                       <div>
-                        <h4 className="text-sm font-bold text-[#111111]">{feat.title}</h4>
+                        <h3 className="text-sm font-bold text-[#111111]">{feat.title}</h3>
                         <p className="text-xs text-[#646B65] mt-0.5">{feat.desc}</p>
                       </div>
                     </div>
@@ -832,14 +832,14 @@ export const LandingPage: React.FC = () => {
 
                 <div className="pt-4 flex flex-wrap items-center gap-3">
                   <a
-                    href="/print-agent"
+                    href="/print-agent-software"
                     onClick={(e) => {
                       e.preventDefault();
-                      navigate('/print-agent');
+                      navigate('/print-agent-software');
                     }}
                     className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white border border-[#E1E7E1] hover:border-[#00B32D] text-xs font-bold text-[#111111] hover:text-[#00B32D] shadow-2xs transition-all cursor-pointer"
                   >
-                    <span>Explore EasyToPrint Agent</span>
+                    <span>Explore Windows Print Agent Software</span>
                     <ArrowRight className="w-4 h-4 text-[#00B32D]" />
                   </a>
                   <a
@@ -875,7 +875,7 @@ export const LandingPage: React.FC = () => {
                   {/* Agent Header Bar */}
                   <div className="p-4 border-b border-[#E1E7E1] flex flex-wrap items-center justify-between gap-3 bg-white">
                     <div>
-                      <h4 className="text-base font-bold text-[#111111]">Counter Hardware Orchestrator</h4>
+                      <h3 className="text-base font-bold text-[#111111]">Counter Hardware Orchestrator</h3>
                       <p className="text-xs text-[#646B65]">Paired Shop: Main Station (ID: AP-8849-WIN)</p>
                     </div>
 
@@ -1204,39 +1204,19 @@ export const LandingPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <article className="p-6 rounded-2xl bg-[#F7F8F7] border border-[#E1E7E1] space-y-3">
-                <h2 className="text-lg sm:text-xl font-bold text-[#111111]">
-                  QR-Based Online Print Ordering
-                </h2>
+                <h3 className="text-lg font-bold text-[#111111]">
+                  Print Shop Management Software
+                </h3>
                 <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">
-                  Replace WhatsApp Web file transfers and virus-infected USB drives with a dedicated counter QR code. Walk-in customers scan the code using any smartphone browser, upload PDFs, select Black &amp; White or Color, single or double-sided pages, and pay via UPI before printing begins.
+                  Control your entire printing shop billing, custom INR rate cards, UPI payment reconciliation, and order queues from a single cloud dashboard.
                 </p>
                 <a
-                  href="/qr-print-ordering"
+                  href="/print-shop-management-software"
                   onClick={(e) => {
                     e.preventDefault();
-                    navigate('/qr-print-ordering');
-                  }}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
-                >
-                  <span>Explore QR Code Print Ordering System</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </a>
-              </article>
-
-              <article className="p-6 rounded-2xl bg-[#F7F8F7] border border-[#E1E7E1] space-y-3">
-                <h2 className="text-lg sm:text-xl font-bold text-[#111111]">
-                  Manage Print Orders from One Dashboard
-                </h2>
-                <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">
-                  Control your entire printing shop billing and order management workflow from a single web dashboard. Configure custom per-page rates, monitor live customer orders, reconcile instant UPI payments, and view daily revenue analytics.
-                </p>
-                <a
-                  href="/print-shop-management"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigate('/print-shop-management');
+                    navigate('/print-shop-management-software');
                   }}
                   className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
                 >
@@ -1246,90 +1226,162 @@ export const LandingPage: React.FC = () => {
               </article>
 
               <article className="p-6 rounded-2xl bg-[#F7F8F7] border border-[#E1E7E1] space-y-3">
-                <h2 className="text-lg sm:text-xl font-bold text-[#111111]">
-                  Automate Printing with Desktop Print Agent
-                </h2>
+                <h3 className="text-lg font-bold text-[#111111]">
+                  Xerox Shop Management Software
+                </h3>
                 <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">
-                  The EasyToPrint Agent for Windows connects your cloud order queue directly to your physical USB and network printers. It detects printer capabilities automatically and routes paid print jobs to the right laser or inkjet printer hands-free.
+                  Built for high-volume Indian Xerox and photocopy counters near colleges, courts, and offices to eliminate WhatsApp Web clutter and manual page counting.
                 </p>
                 <a
-                  href="/print-agent"
+                  href="/xerox-shop-management-software"
                   onClick={(e) => {
                     e.preventDefault();
-                    navigate('/print-agent');
+                    navigate('/xerox-shop-management-software');
                   }}
                   className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
                 >
-                  <span>Learn About EasyToPrint Desktop Agent</span>
+                  <span>Explore Xerox Shop Management Software</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </a>
               </article>
 
               <article className="p-6 rounded-2xl bg-[#F7F8F7] border border-[#E1E7E1] space-y-3">
-                <h2 className="text-lg sm:text-xl font-bold text-[#111111]">
-                  Designed for Xerox and Printing Businesses
-                </h2>
+                <h3 className="text-lg font-bold text-[#111111]">
+                  QR Code Printing Orders
+                </h3>
                 <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">
-                  Whether you run a neighbourhood Xerox shop, a university campus reprography counter, or a multi-printer commercial digital press, EasyToPrint scales with your daily order volume and existing printer hardware.
+                  Replace WhatsApp forwarding and virus-prone USB pen drives with a counter QR standee. Customers scan, upload PDFs, preview output, and pay via UPI.
                 </p>
-                <div className="flex flex-wrap items-center gap-4 pt-1">
-                  <a
-                    href="/how-it-works"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      navigate('/how-it-works');
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
-                  >
-                    <span>How It Works</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </a>
-                  <a
-                    href="/about"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      navigate('/about');
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
-                  >
-                    <span>About EasyToPrint</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </a>
-                  <a
-                    href="/pricing"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      navigate('/pricing');
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
-                  >
-                    <span>Compare Pricing Plans</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </a>
-                  <a
-                    href="/blog"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      navigate('/blog');
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
-                  >
-                    <span>Xerox Automation Blog</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </a>
-                  <a
-                    href="/contact"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      navigate('/contact');
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
-                  >
-                    <span>Contact Support</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </a>
-                </div>
+                <a
+                  href="/qr-code-printing-orders"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/qr-code-printing-orders');
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
+                >
+                  <span>Explore QR Code Printing Orders</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </a>
               </article>
+
+              <article className="p-6 rounded-2xl bg-[#F7F8F7] border border-[#E1E7E1] space-y-3">
+                <h3 className="text-lg font-bold text-[#111111]">
+                  Online Print Order Management
+                </h3>
+                <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">
+                  Track every walk-in and remote document order from Uploaded and Paid through Queued, Printing, and Completed with automatic pickup tokens.
+                </p>
+                <a
+                  href="/online-print-order-management"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/online-print-order-management');
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
+                >
+                  <span>Explore Online Print Order Management</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </a>
+              </article>
+
+              <article className="p-6 rounded-2xl bg-[#F7F8F7] border border-[#E1E7E1] space-y-3">
+                <h3 className="text-lg font-bold text-[#111111]">
+                  Print Job Automation
+                </h3>
+                <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">
+                  Route Black &amp; White jobs to laser printers and color pages to inkjet printers automatically with capability detection and jam recovery.
+                </p>
+                <a
+                  href="/print-job-automation"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/print-job-automation');
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
+                >
+                  <span>Explore Print Job Automation</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </a>
+              </article>
+
+              <article className="p-6 rounded-2xl bg-[#F7F8F7] border border-[#E1E7E1] space-y-3">
+                <h3 className="text-lg font-bold text-[#111111]">
+                  Windows Print Agent Software
+                </h3>
+                <p className="text-xs sm:text-sm text-[#646B65] leading-relaxed">
+                  Connect HP, Canon, Epson, Brother, Ricoh, and Konica Minolta printers on Windows 10/11 to your cloud queue with DPAPI credential security.
+                </p>
+                <a
+                  href="/print-agent-software"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/print-agent-software');
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#008F25] hover:text-[#00B32D]"
+                >
+                  <span>Explore Windows Print Agent Software</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </a>
+              </article>
+            </div>
+
+            <div className="pt-2 flex flex-wrap items-center gap-4 text-xs font-bold text-[#008F25]">
+              <a
+                href="/how-it-works"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate('/how-it-works');
+                }}
+                className="inline-flex items-center gap-1.5 hover:text-[#00B32D]"
+              >
+                <span>How It Works</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </a>
+              <a
+                href="/about"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate('/about');
+                }}
+                className="inline-flex items-center gap-1.5 hover:text-[#00B32D]"
+              >
+                <span>About EasyToPrint</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </a>
+              <a
+                href="/pricing"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate('/pricing');
+                }}
+                className="inline-flex items-center gap-1.5 hover:text-[#00B32D]"
+              >
+                <span>Compare Pricing Plans</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </a>
+              <a
+                href="/blog"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate('/blog');
+                }}
+                className="inline-flex items-center gap-1.5 hover:text-[#00B32D]"
+              >
+                <span>Print Shop Automation Blog</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </a>
+              <a
+                href="/contact"
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate('/contact');
+                }}
+                className="inline-flex items-center gap-1.5 hover:text-[#00B32D]"
+              >
+                <span>Contact Support</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </a>
             </div>
           </div>
         </section>

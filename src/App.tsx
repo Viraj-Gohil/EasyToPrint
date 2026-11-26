@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { AppProvider, useApp } from './lib/store';
 import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
@@ -7,7 +7,8 @@ import { ToastContainer } from './components/common/ToastContainer';
 import { SEOHead } from './components/common/SEOHead';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { EasyToPrintLoader, TopRouteLoader } from './components/common/EasyToPrintLoader';
-import { normalizePathname } from './lib/seoConfig';
+import { normalizePathname, getLegacyRedirectTarget } from './lib/seoConfig';
+import { FEATURE_LANDING_PAGE_MAP } from './lib/featurePagesData';
 import { ADMIN_BASE_PATH, ADMIN_LOGIN_PATH, ADMIN_DASHBOARD_PATH, isAdminRoutePath } from './lib/adminConfig';
 import { ShieldAlert, Shield, LogOut, LayoutDashboard, AlertCircle } from 'lucide-react';
 
@@ -36,14 +37,8 @@ const FeaturesSeoPage = lazy(() =>
 const HowItWorksSeoPage = lazy(() =>
   import('./components/public/PublicSeoPages').then((m) => ({ default: m.HowItWorksSeoPage }))
 );
-const QrOrderingSeoPage = lazy(() =>
-  import('./components/public/PublicSeoPages').then((m) => ({ default: m.QrOrderingSeoPage }))
-);
-const PrintShopManagementSeoPage = lazy(() =>
-  import('./components/public/PublicSeoPages').then((m) => ({ default: m.PrintShopManagementSeoPage }))
-);
-const PrintAgentSeoPage = lazy(() =>
-  import('./components/public/PublicSeoPages').then((m) => ({ default: m.PrintAgentSeoPage }))
+const FeatureLandingSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.FeatureLandingSeoPage }))
 );
 const AboutSeoPage = lazy(() =>
   import('./components/public/PublicSeoPages').then((m) => ({ default: m.AboutSeoPage }))
@@ -59,6 +54,15 @@ const BlogIndexSeoPage = lazy(() =>
 );
 const BlogPostSeoPage = lazy(() =>
   import('./components/public/PublicSeoPages').then((m) => ({ default: m.BlogPostSeoPage }))
+);
+const PrivacyPolicySeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.PrivacyPolicySeoPage }))
+);
+const TermsSeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.TermsSeoPage }))
+);
+const RefundPolicySeoPage = lazy(() =>
+  import('./components/public/PublicSeoPages').then((m) => ({ default: m.RefundPolicySeoPage }))
 );
 const NotFoundPage = lazy(() =>
   import('./components/public/PublicSeoPages').then((m) => ({ default: m.NotFoundPage }))
@@ -274,7 +278,16 @@ const AppRouter: React.FC = () => {
   // Normalize path (handle both clean paths and legacy hash strings)
   const rawPath = currentPath || '/';
   const cleanRaw = rawPath.startsWith('#') ? rawPath.slice(1) : rawPath;
-  const path = normalizePathname(cleanRaw.startsWith('/') ? cleanRaw : `/${cleanRaw}`);
+  const normalizedPath = normalizePathname(cleanRaw.startsWith('/') ? cleanRaw : `/${cleanRaw}`);
+  const legacyRedirectTarget = getLegacyRedirectTarget(normalizedPath);
+  const path = legacyRedirectTarget || normalizedPath;
+
+  useEffect(() => {
+    if (legacyRedirectTarget && typeof window !== 'undefined') {
+      window.history.replaceState({}, '', legacyRedirectTarget);
+      navigate(legacyRedirectTarget);
+    }
+  }, [legacyRedirectTarget, navigate]);
 
   // Dedicated Obscured Admin Login URL
   if (path === ADMIN_LOGIN_PATH || path.startsWith(`${ADMIN_LOGIN_PATH}/`)) {
@@ -324,22 +337,24 @@ const AppRouter: React.FC = () => {
     );
   }
 
-  // 1.8. Public SEO & Marketing Pages
+  // 1.8. Public SEO, Feature Landing, Blog & Legal Pages
   const publicPageMap: Record<string, React.ReactNode> = {
     '/pricing': <PricingPage />,
     '/features': <FeaturesSeoPage />,
     '/how-it-works': <HowItWorksSeoPage />,
-    '/qr-print-ordering': <QrOrderingSeoPage />,
-    '/print-shop-management': <PrintShopManagementSeoPage />,
-    '/print-agent': <PrintAgentSeoPage />,
     '/about': <AboutSeoPage />,
     '/contact': <ContactSeoPage />,
     '/faq': <FaqSeoPage />,
-    '/blog': <BlogIndexSeoPage />
+    '/blog': <BlogIndexSeoPage />,
+    '/privacy': <PrivacyPolicySeoPage />,
+    '/terms': <TermsSeoPage />,
+    '/refund-policy': <RefundPolicySeoPage />
   };
 
+  const featureLandingPage = FEATURE_LANDING_PAGE_MAP[path] ? <FeatureLandingSeoPage path={path} /> : null;
   const blogPostMatch = path.startsWith('/blog/') ? path.slice('/blog/'.length) : null;
-  const resolvedPublicPage = publicPageMap[path] || (blogPostMatch ? <BlogPostSeoPage slug={blogPostMatch} /> : null);
+  const resolvedPublicPage =
+    publicPageMap[path] || featureLandingPage || (blogPostMatch ? <BlogPostSeoPage slug={blogPostMatch} /> : null);
 
   if (resolvedPublicPage) {
     return (

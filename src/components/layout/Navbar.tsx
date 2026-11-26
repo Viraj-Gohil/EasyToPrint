@@ -181,17 +181,17 @@ export const Navbar: React.FC = () => {
               </a>
 
               <a
-                href="/qr-print-ordering"
+                href="/how-it-works"
                 onClick={(e) => {
                   e.preventDefault();
                   if (currentPath === '/') {
                     scrollToSection('how-it-works');
                   } else {
-                    navigate('/qr-print-ordering');
+                    navigate('/how-it-works');
                   }
                 }}
                 className={`transition-colors hover:text-[#00B32D] cursor-pointer whitespace-nowrap ${
-                  activeSection === 'how-it-works' || currentPath === '/qr-print-ordering' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
+                  activeSection === 'how-it-works' || currentPath === '/how-it-works' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
                 }`}
               >
                 How It Works
@@ -285,13 +285,33 @@ export const Navbar: React.FC = () => {
 
                 {/* Dropdown Menu */}
                 {resourcesOpen && (
-                  <div className="absolute right-0 mt-3 w-64 rounded-2xl bg-white border border-[#E1E7E1] shadow-xl p-2 z-50 etp-dropdown-enter">
+                  <div className="absolute right-0 mt-3 w-72 rounded-2xl bg-white border border-[#E1E7E1] shadow-xl p-2 z-50 etp-dropdown-enter">
                     <a
-                      href="/how-it-works"
+                      href="/print-shop-management-software"
                       onClick={(e) => {
                         e.preventDefault();
                         setResourcesOpen(false);
-                        navigate('/how-it-works');
+                        navigate('/print-shop-management-software');
+                      }}
+                      className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-[#F7F8F7] text-left transition-colors cursor-pointer group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-[#E8F8EC] text-[#00B32D] group-hover:bg-[#00B32D] group-hover:text-white transition-colors flex items-center justify-center shrink-0">
+                        <Store className="w-4 h-4 stroke-[2.2]" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-[#111111] group-hover:text-[#00B32D] transition-colors">
+                          Print Shop Software
+                        </div>
+                        <p className="text-[11px] text-[#646B65]">Billing, queues &amp; UPI ledger</p>
+                      </div>
+                    </a>
+
+                    <a
+                      href="/xerox-shop-management-software"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setResourcesOpen(false);
+                        navigate('/xerox-shop-management-software');
                       }}
                       className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-[#F7F8F7] text-left transition-colors cursor-pointer group"
                     >
@@ -300,11 +320,53 @@ export const Navbar: React.FC = () => {
                       </div>
                       <div>
                         <div className="text-xs font-bold text-[#111111] group-hover:text-[#00B32D] transition-colors">
-                          How It Works
+                          Xerox Shop Software
                         </div>
-                        <p className="text-[11px] text-[#646B65]">QR scan to auto-print flow</p>
+                        <p className="text-[11px] text-[#646B65]">Fast photocopy counter workflows</p>
                       </div>
                     </a>
+
+                    <a
+                      href="/qr-code-printing-orders"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setResourcesOpen(false);
+                        navigate('/qr-code-printing-orders');
+                      }}
+                      className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-[#F7F8F7] text-left transition-colors cursor-pointer group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-[#E8F8EC] text-[#00B32D] group-hover:bg-[#00B32D] group-hover:text-white transition-colors flex items-center justify-center shrink-0">
+                        <QrCode className="w-4 h-4 stroke-[2.2]" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-[#111111] group-hover:text-[#00B32D] transition-colors">
+                          QR Code Printing Orders
+                        </div>
+                        <p className="text-[11px] text-[#646B65]">Scan, upload &amp; pay without apps</p>
+                      </div>
+                    </a>
+
+                    <a
+                      href="/print-agent-software"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setResourcesOpen(false);
+                        navigate('/print-agent-software');
+                      }}
+                      className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-[#F7F8F7] text-left transition-colors cursor-pointer group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-[#E8F8EC] text-[#00B32D] group-hover:bg-[#00B32D] group-hover:text-white transition-colors flex items-center justify-center shrink-0">
+                        <Printer className="w-4 h-4 stroke-[2.2]" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-[#111111] group-hover:text-[#00B32D] transition-colors">
+                          Windows Print Agent
+                        </div>
+                        <p className="text-[11px] text-[#646B65]">Automated Win32 print spooling</p>
+                      </div>
+                    </a>
+
+                    <div className="my-1.5 border-t border-[#E1E7E1]" />
 
                     <a
                       href="/blog"
@@ -372,14 +434,16 @@ export const Navbar: React.FC = () => {
                 )}
               </div>
 
-              {/* Direct Contact us action as in the reference image */}
+              {/* Direct Contact us page link */}
               <a
                 href="/contact"
                 onClick={(e) => {
                   e.preventDefault();
-                  setContactSupportOpen(true);
+                  navigate('/contact');
                 }}
-                className="transition-colors hover:text-[#00B32D] cursor-pointer whitespace-nowrap"
+                className={`transition-colors hover:text-[#00B32D] cursor-pointer whitespace-nowrap ${
+                  currentPath === '/contact' ? 'text-[#00B32D] font-bold' : 'text-[#111111]'
+                }`}
               >
                 Contact us
               </a>
@@ -480,62 +544,83 @@ export const Navbar: React.FC = () => {
                 <ArrowRight className="w-4 h-4 text-[#00A61C]" />
               </button>
 
-              <button
-                type="button"
-                onClick={() => scrollToSection('platform')}
+              <a
+                href="/about"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setMobileMenuOpen(false);
+                  navigate('/about');
+                }}
                 className="px-3.5 py-2.5 text-left rounded-xl hover:bg-[#F7F8F7] flex items-center justify-between"
               >
                 <span>About Us</span>
                 <ArrowRight className="w-4 h-4 text-[#646B65]" />
-              </button>
+              </a>
 
-              <button
-                type="button"
-                onClick={() => scrollToSection('features')}
+              <a
+                href="/features"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setMobileMenuOpen(false);
+                  navigate('/features');
+                }}
                 className="px-3.5 py-2.5 text-left rounded-xl hover:bg-[#F7F8F7] flex items-center justify-between"
               >
                 <span>Features</span>
                 <ArrowRight className="w-4 h-4 text-[#646B65]" />
-              </button>
+              </a>
 
-              <button
-                type="button"
-                onClick={() => scrollToSection('how-it-works')}
+              <a
+                href="/how-it-works"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setMobileMenuOpen(false);
+                  navigate('/how-it-works');
+                }}
                 className="px-3.5 py-2.5 text-left rounded-xl hover:bg-[#F7F8F7] flex items-center justify-between"
               >
                 <span>How It Works</span>
                 <ArrowRight className="w-4 h-4 text-[#646B65]" />
-              </button>
+              </a>
 
-              <button
-                type="button"
-                onClick={() => scrollToSection('pricing')}
+              <a
+                href="/pricing"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setMobileMenuOpen(false);
+                  navigate('/pricing');
+                }}
                 className="px-3.5 py-2.5 text-left rounded-xl hover:bg-[#F7F8F7] flex items-center justify-between"
               >
                 <span>Pricing</span>
                 <ArrowRight className="w-4 h-4 text-[#646B65]" />
-              </button>
+              </a>
 
-              <button
-                type="button"
-                onClick={() => {
+              <a
+                href="/contact"
+                onClick={(e) => {
+                  e.preventDefault();
                   setMobileMenuOpen(false);
-                  setContactSupportOpen(true);
+                  navigate('/contact');
                 }}
                 className="px-3.5 py-2.5 text-left rounded-xl hover:bg-[#F7F8F7] flex items-center justify-between"
               >
                 <span>Contact us</span>
                 <Headphones className="w-4 h-4 text-[#00B32D]" />
-              </button>
+              </a>
 
-              <button
-                type="button"
-                onClick={() => scrollToSection('faq')}
+              <a
+                href="/faq"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setMobileMenuOpen(false);
+                  navigate('/faq');
+                }}
                 className="px-3.5 py-2.5 text-left rounded-xl hover:bg-[#F7F8F7] flex items-center justify-between"
               >
                 <span>FAQ</span>
                 <HelpCircle className="w-4 h-4 text-[#646B65]" />
-              </button>
+              </a>
 
               <a
                 href="/blog"

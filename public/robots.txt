@@ -2,15 +2,21 @@ User-agent: *
 Allow: /
 Allow: /features
 Allow: /how-it-works
-Allow: /qr-print-ordering
-Allow: /print-shop-management
-Allow: /print-agent
+Allow: /print-shop-management-software
+Allow: /xerox-shop-management-software
+Allow: /qr-code-printing-orders
+Allow: /online-print-order-management
+Allow: /print-job-automation
+Allow: /print-agent-software
 Allow: /pricing
 Allow: /about
 Allow: /contact
 Allow: /faq
 Allow: /blog
 Allow: /blog/
+Allow: /privacy
+Allow: /terms
+Allow: /refund-policy
 Allow: /assets/
 
 Disallow: /admin

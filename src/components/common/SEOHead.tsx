@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { OG_IMAGE_URL, getSeoForPath, buildJsonLdGraph } from '../../lib/seoConfig';
+import { OG_IMAGE_URL, DEFAULT_OG_IMAGE_ALT, getSeoForPath, buildJsonLdGraph } from '../../lib/seoConfig';
 
 interface SEOHeadProps {
   currentPath: string;
@@ -41,6 +41,8 @@ function upsertCanonicalLink(href: string) {
 export const SEOHead: React.FC<SEOHeadProps> = ({ currentPath }) => {
   useEffect(() => {
     const seo = getSeoForPath(currentPath);
+    const resolvedOgImage = seo.ogImage || OG_IMAGE_URL;
+    const resolvedOgImageAlt = seo.ogImageAlt || DEFAULT_OG_IMAGE_ALT;
 
     document.title = seo.title;
     document.documentElement.lang = 'en-IN';
@@ -62,10 +64,10 @@ export const SEOHead: React.FC<SEOHeadProps> = ({ currentPath }) => {
     upsertMetaTag('property', 'og:title', seo.title);
     upsertMetaTag('property', 'og:description', seo.description);
     upsertMetaTag('property', 'og:url', seo.canonical);
-    upsertMetaTag('property', 'og:image', OG_IMAGE_URL);
+    upsertMetaTag('property', 'og:image', resolvedOgImage);
     upsertMetaTag('property', 'og:image:width', '1200');
     upsertMetaTag('property', 'og:image:height', '630');
-    upsertMetaTag('property', 'og:image:alt', 'EasyToPrint – Print Shop Automation & QR Ordering Software');
+    upsertMetaTag('property', 'og:image:alt', resolvedOgImageAlt);
 
     if (seo.ogType === 'article' && seo.articleMeta) {
       upsertMetaTag('property', 'article:published_time', seo.articleMeta.datePublished);
@@ -81,8 +83,8 @@ export const SEOHead: React.FC<SEOHeadProps> = ({ currentPath }) => {
     upsertMetaTag('name', 'twitter:card', 'summary_large_image');
     upsertMetaTag('name', 'twitter:title', seo.title);
     upsertMetaTag('name', 'twitter:description', seo.description);
-    upsertMetaTag('name', 'twitter:image', OG_IMAGE_URL);
-    upsertMetaTag('name', 'twitter:image:alt', 'EasyToPrint – Print Shop Automation & QR Ordering Software');
+    upsertMetaTag('name', 'twitter:image', resolvedOgImage);
+    upsertMetaTag('name', 'twitter:image:alt', resolvedOgImageAlt);
 
     // JSON-LD Structured Data (only on indexable public pages)
     const existingScript = document.getElementById('easytoprint-jsonld');

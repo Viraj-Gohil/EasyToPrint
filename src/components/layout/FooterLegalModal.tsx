@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Mail, Phone } from 'lucide-react';
+import { X, Mail } from 'lucide-react';
 
 export type LegalModalType = 'privacy' | 'terms' | 'refund' | 'contact' | 'about';
 
@@ -58,12 +58,13 @@ export const FooterLegalModal: React.FC<{
             <div className="p-4 rounded-xl bg-[#F7F8F7] border border-[#E1E7E1] space-y-2.5">
               <div className="flex items-center gap-2.5 text-xs text-[#111111] font-semibold">
                 <Mail className="w-4 h-4 text-[#00B32D]" />
-                <span>support@easytoprint.in</span>
+                <a href="mailto:support@easytoprint.in" className="hover:text-[#008F25] hover:underline">
+                  support@easytoprint.in
+                </a>
               </div>
-              <div className="flex items-center gap-2.5 text-xs text-[#111111] font-semibold">
-                <Phone className="w-4 h-4 text-[#00B32D]" />
-                <span>+91 98765 43210 (Mon–Sat, 9 AM – 8 PM IST)</span>
-              </div>
+              <p className="text-xs text-[#646B65]">
+                Mon–Sat, 9 AM – 8 PM IST for shop onboarding, printer pairing, and billing support.
+              </p>
             </div>
           </div>
         )}

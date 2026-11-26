@@ -10,8 +10,10 @@ import cookieParser from 'cookie-parser';
 import {
   PUBLIC_SEO_ROUTES,
   OG_IMAGE_URL,
+  DEFAULT_OG_IMAGE_ALT,
   STRUCTURED_DATA_FAQ_ITEMS,
   getSeoForPath,
+  getLegacyRedirectTarget,
   buildJsonLdGraph,
   buildSitemapXml,
   buildRobotsTxt,
@@ -11093,6 +11095,24 @@ function escapeHtmlAttr(str: string): string {
     .replace(/>/g, '&gt;');
 }
 
+function sendCompressedTextResponse(
+  req: Request,
+  res: Response,
+  statusCode: number,
+  contentType: string,
+  body: string
+) {
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Vary', 'Accept-Encoding');
+  const acceptEncoding = String(req.headers['accept-encoding'] || '');
+  if (acceptEncoding.includes('gzip') && Buffer.byteLength(body, 'utf-8') >= 1024) {
+    const gz = zlib.gzipSync(Buffer.from(body, 'utf-8'), { level: 6 });
+    res.setHeader('Content-Encoding', 'gzip');
+    return res.status(statusCode).end(gz);
+  }
+  return res.status(statusCode).send(body);
+}
+
 function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: string; statusCode: number; robotsHeader: string } {
   const seo = getSeoForPath(rawPath);
   const statusCode = seo.isNotFound ? 404 : 200;
@@ -11101,7 +11121,8 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
   const escapedDesc = escapeHtmlAttr(seo.description);
   const escapedCanonical = escapeHtmlAttr(seo.canonical);
   const escapedOgType = escapeHtmlAttr(seo.ogType || 'website');
-  const escapedOgImage = escapeHtmlAttr(OG_IMAGE_URL);
+  const escapedOgImage = escapeHtmlAttr(seo.ogImage || OG_IMAGE_URL);
+  const escapedOgImageAlt = escapeHtmlAttr(seo.ogImageAlt || DEFAULT_OG_IMAGE_ALT);
 
   let html = rawHtml;
   html = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapedTitle}</title>`);
@@ -11138,6 +11159,10 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
     `<meta property="og:image" content="${escapedOgImage}" />`
   );
   html = html.replace(
+    /<meta\s+property="og:image:alt"\s+content="[^"]*"\s*\/?>/i,
+    `<meta property="og:image:alt" content="${escapedOgImageAlt}" />`
+  );
+  html = html.replace(
     /<meta\s+name="twitter:title"\s+content="[^"]*"\s*\/?>/i,
     `<meta name="twitter:title" content="${escapedTitle}" />`
   );
@@ -11148,6 +11173,10 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
   html = html.replace(
     /<meta\s+name="twitter:image"\s+content="[^"]*"\s*\/?>/i,
     `<meta name="twitter:image" content="${escapedOgImage}" />`
+  );
+  html = html.replace(
+    /<meta\s+name="twitter:image:alt"\s+content="[^"]*"\s*\/?>/i,
+    `<meta name="twitter:image:alt" content="${escapedOgImageAlt}" />`
   );
 
   // Inject optional Google Search Console verification tag when provided via environment variable
@@ -11181,14 +11210,20 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
     '<a href="/">Home</a>',
     '<a href="/features">Features</a>',
     '<a href="/how-it-works">How It Works</a>',
-    '<a href="/qr-print-ordering">QR Print Ordering</a>',
-    '<a href="/print-shop-management">Print Shop Management</a>',
-    '<a href="/print-agent">EasyToPrint Windows Agent</a>',
+    '<a href="/print-shop-management-software">Print Shop Management Software</a>',
+    '<a href="/xerox-shop-management-software">Xerox Shop Management Software</a>',
+    '<a href="/qr-code-printing-orders">QR Code Printing Orders</a>',
+    '<a href="/online-print-order-management">Online Print Order Management</a>',
+    '<a href="/print-job-automation">Print Job Automation</a>',
+    '<a href="/print-agent-software">Windows Print Agent Software</a>',
     '<a href="/pricing">Pricing</a>',
-    '<a href="/blog">Xerox Guides &amp; Blog</a>',
+    '<a href="/blog">Print Shop Guides &amp; Blog</a>',
     '<a href="/about">About EasyToPrint</a>',
     '<a href="/contact">Contact Us</a>',
-    '<a href="/faq">FAQ</a>'
+    '<a href="/faq">FAQ</a>',
+    '<a href="/privacy">Privacy Policy</a>',
+    '<a href="/terms">Terms of Service</a>',
+    '<a href="/refund-policy">Refund Policy</a>'
   ].join(' ');
 
   let noscriptReplacement = '';
@@ -11198,10 +11233,23 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
         ? `<ul>${seo.ssrBullets.map((b) => `<li>${escapeHtmlAttr(b)}</li>`).join('')}</ul>`
         : '';
 
+    const sectionsHtml =
+      seo.ssrSections && seo.ssrSections.length > 0
+        ? seo.ssrSections
+            .map(
+              (sec) =>
+                `<section><h2>${escapeHtmlAttr(sec.heading)}</h2>${sec.paragraphs
+                  .map((p) => `<p>${escapeHtmlAttr(p)}</p>`)
+                  .join('')}</section>`
+            )
+            .join('')
+        : '';
+
+    const activeFaqs = seo.faqItems && seo.faqItems.length > 0 ? seo.faqItems : STRUCTURED_DATA_FAQ_ITEMS;
     const faqHtml = seo.includeFaqSchema
-      ? `<section><h2>Frequently Asked Questions</h2>${STRUCTURED_DATA_FAQ_ITEMS.map(
-          (f) => `<article><h3>${escapeHtmlAttr(f.question)}</h3><p>${escapeHtmlAttr(f.answer)}</p></article>`
-        ).join('')}</section>`
+      ? `<section><h2>Frequently Asked Questions</h2>${activeFaqs
+          .map((f) => `<article><h3>${escapeHtmlAttr(f.question)}</h3><p>${escapeHtmlAttr(f.answer)}</p></article>`)
+          .join('')}</section>`
       : '';
 
     const blogLinksHtml =
@@ -11211,7 +11259,7 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
           ).join('')}</ul></section>`
         : '';
 
-    noscriptReplacement = `<noscript id="seo-noscript"><main><h1>${escapeHtmlAttr(seo.h1)}</h1><p>${escapeHtmlAttr(seo.ssrSummary)}</p>${bulletsHtml}${blogLinksHtml}${faqHtml}<nav aria-label="Primary Public Pages">${navLinksHtml}</nav></main></noscript>`;
+    noscriptReplacement = `<noscript id="seo-noscript"><main><h1>${escapeHtmlAttr(seo.h1)}</h1><p>${escapeHtmlAttr(seo.ssrSummary)}</p>${bulletsHtml}${sectionsHtml}${blogLinksHtml}${faqHtml}<nav aria-label="Primary Public Pages">${navLinksHtml}</nav></main></noscript>`;
   } else if (seo.isNotFound) {
     noscriptReplacement = `<noscript id="seo-noscript"><main><h1>Page Not Found (404) – EasyToPrint</h1><p>The requested URL could not be found. Return to the <a href="/">EasyToPrint Homepage</a>.</p><nav aria-label="Primary Public Pages">${navLinksHtml}</nav></main></noscript>`;
   }
@@ -11226,19 +11274,17 @@ function injectRouteSeoIntoHtml(rawHtml: string, rawPath: string): { html: strin
 }
 
 // Explicit dynamic /robots.txt and /sitemap.xml endpoints (always synced with seoConfig)
-app.get('/robots.txt', (_req: Request, res: Response) => {
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+app.get('/robots.txt', (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'public, max-age=3600');
-  return res.status(200).send(buildRobotsTxt());
+  return sendCompressedTextResponse(req, res, 200, 'text/plain; charset=utf-8', buildRobotsTxt());
 });
 
-app.get('/sitemap.xml', (_req: Request, res: Response) => {
-  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+app.get('/sitemap.xml', (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'public, max-age=3600');
-  return res.status(200).send(buildSitemapXml());
+  return sendCompressedTextResponse(req, res, 200, 'application/xml; charset=utf-8', buildSitemapXml());
 });
 
-// Canonical hostname, trailing-slash redirect & X-Robots-Tag middleware for non-API requests
+// Canonical hostname, trailing-slash redirect, legacy SEO 301 redirect & X-Robots-Tag middleware for non-API requests
 app.use((req: Request, res: Response, next) => {
   if (req.path.startsWith('/api/')) {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
@@ -11264,8 +11310,18 @@ app.use((req: Request, res: Response, next) => {
     !req.path.startsWith('/assets/')
   ) {
     const cleanPath = normalizePathname(req.path);
+    const legacyTarget = getLegacyRedirectTarget(cleanPath);
     const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-    return res.redirect(301, `${cleanPath}${query}`);
+    return res.redirect(301, `${legacyTarget || cleanPath}${query}`);
+  }
+
+  // Permanent 301 redirects from legacy feature & blog URLs to canonical SEO slugs
+  if (req.method === 'GET') {
+    const legacyTarget = getLegacyRedirectTarget(req.path);
+    if (legacyTarget) {
+      const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+      return res.redirect(301, `${legacyTarget}${query}`);
+    }
   }
 
   if (isPrivateNoIndexPath(req.path)) {
@@ -11371,7 +11427,7 @@ async function startServer() {
           const normalized = filePath.replace(/\\/g, '/');
           if (/\/assets\/.*-[a-zA-Z0-9_-]{6,}\.(js|css)$/i.test(normalized)) {
             res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-          } else if (/\.(png|jpg|jpeg|webp|svg|ico|woff2)$/i.test(normalized)) {
+          } else if (/\.(png|jpg|jpeg|webp|avif|svg|ico|woff2)$/i.test(normalized)) {
             res.setHeader('Cache-Control', 'public, max-age=2592000');
           }
         }
@@ -11382,9 +11438,8 @@ async function startServer() {
       const rawHtml = fs.readFileSync(indexFile, 'utf-8');
       const { html, statusCode, robotsHeader } = injectRouteSeoIntoHtml(rawHtml, req.path);
       res.setHeader('X-Robots-Tag', robotsHeader);
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', statusCode === 200 ? 'public, max-age=0, must-revalidate' : 'no-store');
-      res.status(statusCode).send(html);
+      return sendCompressedTextResponse(req, res, statusCode, 'text/html; charset=utf-8', html);
     });
   } else {
     try {
@@ -11401,8 +11456,7 @@ async function startServer() {
           const transformed = await vite.transformIndexHtml(req.originalUrl, rawHtml);
           const { html, statusCode, robotsHeader } = injectRouteSeoIntoHtml(transformed, req.path);
           res.setHeader('X-Robots-Tag', robotsHeader);
-          res.setHeader('Content-Type', 'text/html; charset=utf-8');
-          return res.status(statusCode).send(html);
+          return sendCompressedTextResponse(req, res, statusCode, 'text/html; charset=utf-8', html);
         } catch (err) {
           return next(err);
         }
@@ -11416,8 +11470,7 @@ async function startServer() {
           const rawHtml = fs.readFileSync(indexFile, 'utf-8');
           const { html, statusCode, robotsHeader } = injectRouteSeoIntoHtml(rawHtml, req.path);
           res.setHeader('X-Robots-Tag', robotsHeader);
-          res.setHeader('Content-Type', 'text/html; charset=utf-8');
-          res.status(statusCode).send(html);
+          return sendCompressedTextResponse(req, res, statusCode, 'text/html; charset=utf-8', html);
         });
       }
     }

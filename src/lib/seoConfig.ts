@@ -1,8 +1,10 @@
 import { ADMIN_BASE_PATH } from './adminConfig.js';
 import { BLOG_POSTS, BlogPost, getBlogPostBySlug } from './blogData.js';
+import { FEATURE_LANDING_PAGES, FeatureLandingPageData } from './featurePagesData.js';
 
 export const CANONICAL_DOMAIN = 'https://easytoprint.devpixel.space';
 export const OG_IMAGE_URL = `${CANONICAL_DOMAIN}/assets/easytoprint-og-card.png`;
+export const DEFAULT_OG_IMAGE_ALT = 'EasyToPrint – Print Shop Management Software in India';
 export const LOGO_IMAGE_URL = `${CANONICAL_DOMAIN}/assets/easytoprint-logo.png`;
 
 export interface RouteSeoMetadata {
@@ -12,11 +14,14 @@ export interface RouteSeoMetadata {
   canonical: string;
   robots: 'index, follow' | 'noindex, nofollow';
   ogType?: 'website' | 'article';
+  ogImage?: string;
+  ogImageAlt?: string;
   h1?: string;
   breadcrumbs?: Array<{ name: string; url: string }>;
   includeSoftwareSchema?: boolean;
   includePricingOffers?: boolean;
   includeFaqSchema?: boolean;
+  faqItems?: Array<{ question: string; answer: string }>;
   articleMeta?: {
     headline: string;
     datePublished: string;
@@ -26,29 +31,94 @@ export interface RouteSeoMetadata {
   };
   ssrSummary?: string;
   ssrBullets?: string[];
+  ssrSections?: Array<{ heading: string; paragraphs: string[] }>;
   lastmod?: string;
   changefreq?: 'daily' | 'weekly' | 'monthly';
   priority?: string;
 }
 
+export const STRUCTURED_DATA_FAQ_ITEMS = [
+  {
+    question: 'What is EasyToPrint?',
+    answer:
+      'EasyToPrint is an all-in-one print shop management and printing automation platform. It bridges QR-based customer self-ordering, online UPI payments, and an automated Windows desktop Print Agent to eliminate counter chaos and automate printing workflows for Xerox shops and cyber centres.'
+  },
+  {
+    question: 'How does EasyToPrint work?',
+    answer:
+      'Customers scan your counter QR code on their smartphone, upload PDF documents, choose print settings (color/B&W, copies, duplex), and complete an instant UPI payment. The EasyToPrint Windows Agent immediately receives the paid order and automatically streams it to your connected printer without USB drives or manual intervention.'
+  },
+  {
+    question: 'What is the EasyToPrint Windows Agent?',
+    answer:
+      'The Windows Agent is a lightweight, secure desktop software running on your shop PC. It monitors your physical printers, connects via TLS 1.3 to your cloud queue, and silently dispatches print jobs through the native Win32 Print Spooler with DPAPI vault protection.'
+  },
+  {
+    question: 'Which printers are supported?',
+    answer:
+      'EasyToPrint supports all major desktop and commercial printers with Windows drivers—including HP, Canon, Epson, Brother, Ricoh, Konica Minolta, Kyocera, and Xerox. Both USB and local network printers are supported without requiring special hardware.'
+  },
+  {
+    question: 'Can I connect multiple printers?',
+    answer:
+      'Yes. You can connect and manage multiple physical printers simultaneously (such as a dedicated black-and-white high-speed laser printer and a high-resolution color photo inkjet). The platform automatically detects capabilities and routes customer orders to the correct device.'
+  },
+  {
+    question: 'Do customers need to install an application?',
+    answer:
+      'No. Customers do not need to download or install any app. The entire upload, customization, and payment process runs seamlessly in their mobile browser (Chrome, Safari, Firefox) within seconds of scanning your counter QR code.'
+  },
+  {
+    question: 'How do customer payments work?',
+    answer:
+      'Customers pay directly online using instant UPI (Google Pay, PhonePe, Paytm, BHIM) or cards powered by secure payment gateways like Razorpay. Print jobs are only dispatched to the printer queue after successful payment confirmation, eliminating unpaid prints and change calculation.'
+  }
+];
+
+export const LEGACY_SEO_REDIRECTS: Record<string, string> = {
+  '/qr-print-ordering': '/qr-code-printing-orders',
+  '/print-shop-management': '/print-shop-management-software',
+  '/print-agent': '/print-agent-software',
+  '/blog/how-to-automate-a-xerox-shop-in-india': '/blog/how-to-digitize-your-xerox-shop-in-2026',
+  '/blog/replace-whatsapp-web-with-qr-code-printing': '/blog/how-qr-code-printing-orders-work',
+  '/blog/accept-online-print-orders-with-upi': '/blog/how-online-payments-improve-print-shop-operations',
+  '/blog/multi-printer-routing-bw-and-color-printers': '/blog/how-to-manage-multiple-printers-in-a-printing-shop'
+};
+
+export function normalizePathname(rawPath: string): string {
+  const withoutQuery = (rawPath || '/').split('?')[0].split('#')[0];
+  if (withoutQuery.length > 1 && withoutQuery.endsWith('/')) {
+    return withoutQuery.slice(0, -1);
+  }
+  return withoutQuery || '/';
+}
+
+export function getLegacyRedirectTarget(pathname: string): string | null {
+  const clean = normalizePathname(pathname);
+  return LEGACY_SEO_REDIRECTS[clean] || null;
+}
+
 const CORE_PUBLIC_ROUTES: Record<string, RouteSeoMetadata> = {
   '/': {
     path: '/',
-    title: 'EasyToPrint – Print Shop Management & Automation Software',
+    title: 'EasyToPrint – Print Shop Management Software in India',
     description:
-      'Simplify your Xerox and printing business in India with EasyToPrint. Automate QR code print ordering, PDF uploads, UPI payments, and Windows desktop printing.',
+      'Manage your printing and xerox shop digitally with EasyToPrint. Accept QR-based print orders, online payments, automate print jobs and manage printers with ease.',
     canonical: `${CANONICAL_DOMAIN}/`,
     robots: 'index, follow',
     ogType: 'website',
+    ogImage: OG_IMAGE_URL,
+    ogImageAlt: DEFAULT_OG_IMAGE_ALT,
     h1: 'Run Your Xerox Shop on Autopilot with EasyToPrint',
     includeSoftwareSchema: true,
-    includePricingOffers: true,
+    includePricingOffers: false,
     includeFaqSchema: true,
-    lastmod: '2026-04-02',
+    faqItems: STRUCTURED_DATA_FAQ_ITEMS,
+    lastmod: '2026-04-12',
     changefreq: 'weekly',
     priority: '1.0',
     ssrSummary:
-      'EasyToPrint is a Print Shop Automation SaaS built for Indian Xerox shops, college reprography centres, and commercial print counters. Replace WhatsApp Web and USB pen drives with touch-free QR ordering, automatic PDF page counting, instant UPI payments, and automated Windows desktop printing.',
+      'EasyToPrint is a Print Shop Management Software built for Indian Xerox shops, college reprography centres, and commercial print counters. Replace WhatsApp Web and USB pen drives with touch-free QR-based print orders, automatic PDF page counting, instant UPI payments, and automated Windows desktop printing.',
     ssrBullets: [
       'Counter QR code self-service ordering with zero mobile app download required',
       'Automatic PDF page count inspection and per-page rate calculation in INR',
@@ -58,45 +128,49 @@ const CORE_PUBLIC_ROUTES: Record<string, RouteSeoMetadata> = {
   },
   '/features': {
     path: '/features',
-    title: 'Print Shop Automation Features – QR Ordering, Billing & Queue | EasyToPrint',
+    title: 'Print Shop Automation Features – QR Ordering & Queue | EasyToPrint',
     description:
       'Explore EasyToPrint features for Xerox and printing shops in India: touch-free QR file uploads, automated page counting, instant UPI checkout, and multi-printer routing.',
     canonical: `${CANONICAL_DOMAIN}/features`,
     robots: 'index, follow',
     ogType: 'website',
+    ogImage: `${CANONICAL_DOMAIN}/assets/optimized/seo-print-shop-automation.jpg`,
+    ogImageAlt: 'EasyToPrint print shop automation features overview',
     h1: 'Everything Your Print Shop Needs in One Platform',
     breadcrumbs: [
       { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
       { name: 'Features', url: `${CANONICAL_DOMAIN}/features` }
     ],
     includeSoftwareSchema: true,
-    lastmod: '2026-04-02',
+    lastmod: '2026-04-12',
     changefreq: 'weekly',
     priority: '0.9',
     ssrSummary:
-      'Complete feature breakdown of EasyToPrint print shop management software: QR code document upload, automatic PDF page detection, dynamic Xerox pricing rules, UPI checkout, and Windows print spooler automation.',
+      'Complete feature breakdown of EasyToPrint print shop management software: QR code document upload, live WYSIWYG print preview, automatic PDF page detection, dynamic Xerox pricing rules, UPI checkout, and Windows print spooler automation.',
     ssrBullets: [
       'QR-Based Online Print Ordering for walk-in counter customers',
-      'Real-time PDF Page Count & Per-Page Pricing Engine',
+      'Real-time PDF Page Count, Live Preview & Per-Page Pricing Engine',
       'Instant UPI & Razorpay Checkout with automatic payment verification',
       'EasyToPrint Windows Desktop Agent with Multi-Printer Smart Routing & Live Analytics'
     ]
   },
   '/how-it-works': {
     path: '/how-it-works',
-    title: 'How EasyToPrint Works – Online Document Printing & Auto-Print Workflow',
+    title: 'How EasyToPrint Works – QR Printing & Auto-Print Workflow',
     description:
       'See how customers scan a QR code, upload PDFs, and pay via UPI while EasyToPrint automatically routes paid jobs to your shop’s Windows printers in seconds.',
     canonical: `${CANONICAL_DOMAIN}/how-it-works`,
     robots: 'index, follow',
     ogType: 'website',
+    ogImage: `${CANONICAL_DOMAIN}/assets/optimized/seo-qr-ordering-flow.jpg`,
+    ogImageAlt: 'Step-by-step EasyToPrint QR code document printing workflow',
     h1: 'How EasyToPrint Automates Customer Orders and Shop Printing',
     breadcrumbs: [
       { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
       { name: 'How It Works', url: `${CANONICAL_DOMAIN}/how-it-works` }
     ],
     includeSoftwareSchema: true,
-    lastmod: '2026-04-02',
+    lastmod: '2026-04-12',
     changefreq: 'weekly',
     priority: '0.9',
     ssrSummary:
@@ -107,89 +181,16 @@ const CORE_PUBLIC_ROUTES: Record<string, RouteSeoMetadata> = {
       'Zero WhatsApp Web file clutter, zero infected USB pen drives, and automatic post-print cleanup'
     ]
   },
-  '/qr-print-ordering': {
-    path: '/qr-print-ordering',
-    title: 'QR Code Print Ordering System for Xerox & Printing Shops | EasyToPrint',
-    description:
-      'Eliminate WhatsApp forwarding and infected USB drives with EasyToPrint QR code print ordering. Customers scan, upload PDFs, select print settings, and pay via UPI.',
-    canonical: `${CANONICAL_DOMAIN}/qr-print-ordering`,
-    robots: 'index, follow',
-    ogType: 'website',
-    h1: 'QR-Based Online Print Ordering for Modern Xerox Counters',
-    breadcrumbs: [
-      { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
-      { name: 'QR Print Ordering', url: `${CANONICAL_DOMAIN}/qr-print-ordering` }
-    ],
-    includeSoftwareSchema: true,
-    lastmod: '2026-04-02',
-    changefreq: 'weekly',
-    priority: '0.9',
-    ssrSummary:
-      'Turn any Xerox counter into a self-service print kiosk using a dedicated shop QR code. Customers upload PDFs directly from Chrome or Safari without installing an app.',
-    ssrBullets: [
-      'Protect customer privacy with zero personal phone number or WhatsApp contact sharing',
-      'Serve 10+ walk-in students or customers concurrently during peak counter hours',
-      'Instant PDF preview and self-selected B&W/Color/Duplex preferences eliminate mistakes'
-    ]
-  },
-  '/print-shop-management': {
-    path: '/print-shop-management',
-    title: 'Print Shop Management & Billing Software India | EasyToPrint',
-    description:
-      'Manage daily print orders, counter billing, customer queues, multi-printer routing, and UPI revenue reconciliation with EasyToPrint printing shop software.',
-    canonical: `${CANONICAL_DOMAIN}/print-shop-management`,
-    robots: 'index, follow',
-    ogType: 'website',
-    h1: 'Manage Print Orders, Billing & Shop Operations from One Dashboard',
-    breadcrumbs: [
-      { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
-      { name: 'Print Shop Management', url: `${CANONICAL_DOMAIN}/print-shop-management` }
-    ],
-    includeSoftwareSchema: true,
-    lastmod: '2026-04-02',
-    changefreq: 'weekly',
-    priority: '0.9',
-    ssrSummary:
-      'Centralized cloud dashboard for Indian printing shops, college reprography centres, and DTP studios to track live print orders, configure per-page pricing, and reconcile daily UPI settlements.',
-    ssrBullets: [
-      'Real-time order queue lifecycle: Uploaded -> Paid -> Queued -> Printing -> Completed',
-      'Custom per-page rates for A4, Legal, B&W, Color, and Duplex jobs',
-      'Automated Razorpay & UPI payment verification with daily revenue reporting'
-    ]
-  },
-  '/print-agent': {
-    path: '/print-agent',
-    title: 'EasyToPrint Agent – Automated Windows Desktop Print Spooler Software',
-    description:
-      'Automate physical printers with EasyToPrint Agent for Windows. Detect printer capabilities, route B&W and color jobs automatically, and print paid orders hands-free.',
-    canonical: `${CANONICAL_DOMAIN}/print-agent`,
-    robots: 'index, follow',
-    ogType: 'website',
-    h1: 'Automate Printing with EasyToPrint Desktop Print Agent',
-    breadcrumbs: [
-      { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
-      { name: 'Desktop Print Agent', url: `${CANONICAL_DOMAIN}/print-agent` }
-    ],
-    includeSoftwareSchema: true,
-    lastmod: '2026-04-02',
-    changefreq: 'weekly',
-    priority: '0.9',
-    ssrSummary:
-      'Native Windows desktop print automation agent for Xerox shops. Connects HP, Canon, Epson, Ricoh, Brother, and Konica Minolta printers to your cloud order queue.',
-    ssrBullets: [
-      'Automatic Windows Print Spooler discovery for USB and local LAN network printers',
-      'Driver capability detection for A4, A3, Legal, Color, Monochrome, and Duplex units',
-      'Encrypted cloud pairing using Windows DPAPI credential storage and automatic job recovery'
-    ]
-  },
   '/pricing': {
     path: '/pricing',
-    title: 'Pricing Plans – Affordable Xerox & Print Shop Software India | EasyToPrint',
+    title: 'Pricing Plans – Xerox & Print Shop Software India | EasyToPrint',
     description:
       'Transparent monthly and yearly subscription plans starting at ₹399/mo with a 7-day free trial. Automate your Xerox counter, QR ordering, and Windows printers.',
     canonical: `${CANONICAL_DOMAIN}/pricing`,
     robots: 'index, follow',
     ogType: 'website',
+    ogImage: OG_IMAGE_URL,
+    ogImageAlt: 'EasyToPrint subscription pricing plans for Indian print shops',
     h1: 'Simple, Transparent Pricing for Printing Businesses of Every Size',
     breadcrumbs: [
       { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
@@ -197,7 +198,9 @@ const CORE_PUBLIC_ROUTES: Record<string, RouteSeoMetadata> = {
     ],
     includeSoftwareSchema: true,
     includePricingOffers: true,
-    lastmod: '2026-04-02',
+    includeFaqSchema: true,
+    faqItems: STRUCTURED_DATA_FAQ_ITEMS,
+    lastmod: '2026-04-12',
     changefreq: 'weekly',
     priority: '0.8',
     ssrSummary:
@@ -210,37 +213,41 @@ const CORE_PUBLIC_ROUTES: Record<string, RouteSeoMetadata> = {
   },
   '/about': {
     path: '/about',
-    title: 'About EasyToPrint – Print Shop Automation SaaS for Indian Xerox Shops',
+    title: 'About EasyToPrint – Print Shop Automation Software India',
     description:
-      'Learn how EasyToPrint is modernizing Indian Xerox shops, stationery stores, and document printing centres with cloud order management and desktop print automation.',
+      'Learn how EasyToPrint helps Indian Xerox shops, stationery stores, and document printing centres streamline QR print orders, UPI payments, and Windows printing.',
     canonical: `${CANONICAL_DOMAIN}/about`,
     robots: 'index, follow',
     ogType: 'website',
+    ogImage: OG_IMAGE_URL,
+    ogImageAlt: 'About EasyToPrint digital printing and shop automation platform',
     h1: 'Designed for Xerox and Printing Businesses Across India',
     breadcrumbs: [
       { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
       { name: 'About EasyToPrint', url: `${CANONICAL_DOMAIN}/about` }
     ],
-    lastmod: '2026-04-02',
+    lastmod: '2026-04-12',
     changefreq: 'monthly',
     priority: '0.7',
     ssrSummary:
-      'EasyToPrint builds software tailored for Indian Xerox shops, campus print centres, cyber cafes, and commercial digital presses to eliminate counter bottlenecks.'
+      'EasyToPrint builds print shop management software tailored for Indian Xerox shops, campus print centres, cyber cafes, and commercial digital presses to eliminate counter bottlenecks.'
   },
   '/contact': {
     path: '/contact',
-    title: 'Contact EasyToPrint – Sales, Onboarding & Printer Setup Support',
+    title: 'Contact EasyToPrint – Onboarding & Printer Setup Support',
     description:
-      'Get in touch with EasyToPrint for print shop onboarding, Windows Print Agent setup assistance, multi-printer configuration, and enterprise inquiries in India.',
+      'Get in touch with EasyToPrint for print shop onboarding, Windows Print Agent setup assistance, multi-printer configuration, and support in India.',
     canonical: `${CANONICAL_DOMAIN}/contact`,
     robots: 'index, follow',
     ogType: 'website',
+    ogImage: OG_IMAGE_URL,
+    ogImageAlt: 'Contact EasyToPrint onboarding and technical support',
     h1: 'Contact EasyToPrint Support & Onboarding Team',
     breadcrumbs: [
       { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
       { name: 'Contact Us', url: `${CANONICAL_DOMAIN}/contact` }
     ],
-    lastmod: '2026-04-02',
+    lastmod: '2026-04-12',
     changefreq: 'monthly',
     priority: '0.7',
     ssrSummary:
@@ -248,19 +255,22 @@ const CORE_PUBLIC_ROUTES: Record<string, RouteSeoMetadata> = {
   },
   '/faq': {
     path: '/faq',
-    title: 'Frequently Asked Questions – EasyToPrint Xerox & Print Shop Software',
+    title: 'Frequently Asked Questions – EasyToPrint Print Shop Software',
     description:
       'Answers to common questions about EasyToPrint QR ordering, supported Windows printers, instant UPI payments, multi-printer routing, and shop setup.',
     canonical: `${CANONICAL_DOMAIN}/faq`,
     robots: 'index, follow',
     ogType: 'website',
+    ogImage: OG_IMAGE_URL,
+    ogImageAlt: 'Frequently asked questions about EasyToPrint',
     h1: 'Frequently Asked Questions About EasyToPrint',
     breadcrumbs: [
       { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
       { name: 'FAQ', url: `${CANONICAL_DOMAIN}/faq` }
     ],
     includeFaqSchema: true,
-    lastmod: '2026-04-02',
+    faqItems: STRUCTURED_DATA_FAQ_ITEMS,
+    lastmod: '2026-04-12',
     changefreq: 'monthly',
     priority: '0.7',
     ssrSummary:
@@ -268,25 +278,132 @@ const CORE_PUBLIC_ROUTES: Record<string, RouteSeoMetadata> = {
   },
   '/blog': {
     path: '/blog',
-    title: 'EasyToPrint Blog – Xerox Shop Automation & Online Printing Guides India',
+    title: 'EasyToPrint Blog – Print Shop & Xerox Automation Guides India',
     description:
-      'Practical guides for Indian Xerox shop owners and print centres on QR print ordering, UPI payment automation, Windows Print Agent setup, and queue management.',
+      'Practical guides for Indian Xerox and printing shop owners on print shop management software, QR code printing orders, UPI payments, and multi-printer workflows.',
     canonical: `${CANONICAL_DOMAIN}/blog`,
     robots: 'index, follow',
     ogType: 'website',
+    ogImage: `${CANONICAL_DOMAIN}/assets/optimized/seo-print-shop-automation.jpg`,
+    ogImageAlt: 'EasyToPrint blog and operational guides for Indian print shop owners',
     h1: 'EasyToPrint Guides for Indian Xerox & Print Shop Owners',
     breadcrumbs: [
       { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
       { name: 'Blog', url: `${CANONICAL_DOMAIN}/blog` }
     ],
-    lastmod: '2026-04-02',
+    lastmod: '2026-04-12',
     changefreq: 'weekly',
     priority: '0.8',
     ssrSummary:
-      'In-depth operational guides for Indian photocopy shops, cyber cafes, and reprography centres covering QR code print ordering, UPI checkout, and multi-printer routing.',
+      'In-depth operational guides for Indian photocopy shops, cyber cafes, and reprography centres covering print shop software, QR code print ordering, UPI checkout, and multi-printer routing.',
     ssrBullets: BLOG_POSTS.map((post) => `${post.title} — ${post.excerpt}`)
+  },
+  '/privacy': {
+    path: '/privacy',
+    title: 'Privacy Policy – Document Security & Data Protection | EasyToPrint',
+    description:
+      'Read how EasyToPrint protects uploaded customer PDFs, automates post-print file purging, secures shop credentials with Windows DPAPI, and handles payment metadata.',
+    canonical: `${CANONICAL_DOMAIN}/privacy`,
+    robots: 'index, follow',
+    ogType: 'website',
+    ogImage: OG_IMAGE_URL,
+    ogImageAlt: 'EasyToPrint privacy policy and document protection standards',
+    h1: 'Privacy Policy & Customer Document Protection',
+    breadcrumbs: [
+      { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
+      { name: 'Privacy Policy', url: `${CANONICAL_DOMAIN}/privacy` }
+    ],
+    lastmod: '2026-04-12',
+    changefreq: 'monthly',
+    priority: '0.4',
+    ssrSummary:
+      'EasyToPrint privacy policy covering temporary customer file storage, automatic post-print cleanup, TLS encryption, Windows DPAPI credential storage, and payment gateway handling.'
+  },
+  '/terms': {
+    path: '/terms',
+    title: 'Terms of Service – Shop & Customer Usage Terms | EasyToPrint',
+    description:
+      'Review the EasyToPrint Terms of Service governing print shop SaaS subscriptions, Windows Print Agent operation, customer document uploads, and UPI billing.',
+    canonical: `${CANONICAL_DOMAIN}/terms`,
+    robots: 'index, follow',
+    ogType: 'website',
+    ogImage: OG_IMAGE_URL,
+    ogImageAlt: 'EasyToPrint terms of service',
+    h1: 'EasyToPrint Terms of Service',
+    breadcrumbs: [
+      { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
+      { name: 'Terms of Service', url: `${CANONICAL_DOMAIN}/terms` }
+    ],
+    lastmod: '2026-04-12',
+    changefreq: 'monthly',
+    priority: '0.4',
+    ssrSummary:
+      'Terms of Service for EasyToPrint print shop partners and walk-in printing customers in India, covering account usage, subscription quotas, payment processing, and acceptable use.'
+  },
+  '/refund-policy': {
+    path: '/refund-policy',
+    title: 'Refund & Cancellation Policy – Subscriptions & Orders | EasyToPrint',
+    description:
+      'Understand EasyToPrint refund and cancellation policies for print shop SaaS subscriptions, 7-day free trials, and failed or unprinted customer print orders.',
+    canonical: `${CANONICAL_DOMAIN}/refund-policy`,
+    robots: 'index, follow',
+    ogType: 'website',
+    ogImage: OG_IMAGE_URL,
+    ogImageAlt: 'EasyToPrint refund and cancellation policy',
+    h1: 'Refund & Cancellation Policy',
+    breadcrumbs: [
+      { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
+      { name: 'Refund Policy', url: `${CANONICAL_DOMAIN}/refund-policy` }
+    ],
+    lastmod: '2026-04-12',
+    changefreq: 'monthly',
+    priority: '0.4',
+    ssrSummary:
+      'Refund and cancellation guidelines for EasyToPrint shop subscriptions and customer print orders paid online via Razorpay UPI.'
   }
 };
+
+function featurePageToSeo(page: FeatureLandingPageData): RouteSeoMetadata {
+  return {
+    path: page.path,
+    title: page.seoTitle,
+    description: page.description,
+    canonical: `${CANONICAL_DOMAIN}${page.path}`,
+    robots: 'index, follow',
+    ogType: 'website',
+    ogImage: `${CANONICAL_DOMAIN}${page.imageJpg}`,
+    ogImageAlt: page.imageAlt,
+    h1: page.h1,
+    breadcrumbs: [
+      { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
+      { name: 'Features', url: `${CANONICAL_DOMAIN}/features` },
+      { name: page.breadcrumbLabel, url: `${CANONICAL_DOMAIN}${page.path}` }
+    ],
+    includeSoftwareSchema: true,
+    includePricingOffers: false,
+    includeFaqSchema: true,
+    faqItems: page.faqs,
+    lastmod: '2026-04-12',
+    changefreq: 'weekly',
+    priority: '0.9',
+    ssrSummary: page.heroSubtitle,
+    ssrBullets: page.benefits,
+    ssrSections: [
+      {
+        heading: page.problemTitle,
+        paragraphs: [page.problemIntro, ...page.problemPoints.map((p) => `${p.title}: ${p.detail}`)]
+      },
+      {
+        heading: page.solutionTitle,
+        paragraphs: [page.solutionIntro, ...page.solutionPillars.map((p) => `${p.title}: ${p.detail}`)]
+      },
+      {
+        heading: page.workflowTitle,
+        paragraphs: page.workflowSteps.map((s) => `Step ${s.step} – ${s.title}: ${s.detail}`)
+      }
+    ]
+  };
+}
 
 function blogPostToSeo(post: BlogPost): RouteSeoMetadata {
   const path = `/blog/${post.slug}`;
@@ -297,6 +414,8 @@ function blogPostToSeo(post: BlogPost): RouteSeoMetadata {
     canonical: `${CANONICAL_DOMAIN}${path}`,
     robots: 'index, follow',
     ogType: 'article',
+    ogImage: `${CANONICAL_DOMAIN}${post.imageJpg}`,
+    ogImageAlt: post.imageAlt,
     h1: post.title,
     breadcrumbs: [
       { name: 'Home', url: `${CANONICAL_DOMAIN}/` },
@@ -314,12 +433,20 @@ function blogPostToSeo(post: BlogPost): RouteSeoMetadata {
     changefreq: 'monthly',
     priority: '0.7',
     ssrSummary: post.excerpt,
-    ssrBullets: post.sections.map((s) => `${s.heading}: ${s.paragraphs[0] || ''}`)
+    ssrBullets: post.sections.map((s) => `${s.heading}: ${s.paragraphs[0] || ''}`),
+    ssrSections: post.sections.map((s) => ({
+      heading: s.heading,
+      paragraphs: [
+        ...s.paragraphs,
+        ...(s.subsections || []).flatMap((sub) => [sub.subheading, ...sub.paragraphs])
+      ]
+    }))
   };
 }
 
 export const PUBLIC_SEO_ROUTES: Record<string, RouteSeoMetadata> = {
   ...CORE_PUBLIC_ROUTES,
+  ...Object.fromEntries(FEATURE_LANDING_PAGES.map((page) => [page.path, featurePageToSeo(page)])),
   ...Object.fromEntries(BLOG_POSTS.map((post) => [`/blog/${post.slug}`, blogPostToSeo(post)]))
 };
 
@@ -339,14 +466,6 @@ export const PRIVATE_NOINDEX_PREFIXES = [
   '/s/',
   '/print/'
 ];
-
-export function normalizePathname(rawPath: string): string {
-  const withoutQuery = (rawPath || '/').split('?')[0].split('#')[0];
-  if (withoutQuery.length > 1 && withoutQuery.endsWith('/')) {
-    return withoutQuery.slice(0, -1);
-  }
-  return withoutQuery || '/';
-}
 
 export function isPrivateNoIndexPath(pathname: string): boolean {
   const clean = normalizePathname(pathname);
@@ -397,51 +516,13 @@ export function getSeoForPath(pathname: string): RouteSeoMetadata & { isNotFound
     path: clean,
     title: 'Page Not Found (404) – EasyToPrint',
     description:
-      'The requested page could not be found on EasyToPrint. Explore our print shop automation software, QR ordering, and pricing plans.',
+      'The requested page could not be found on EasyToPrint. Explore our print shop management software, QR code printing orders, and pricing plans.',
     canonical: `${CANONICAL_DOMAIN}${clean}`,
     robots: 'noindex, nofollow',
     ogType: 'website',
     isNotFound: true
   };
 }
-
-export const STRUCTURED_DATA_FAQ_ITEMS = [
-  {
-    question: 'What is EasyToPrint?',
-    answer:
-      'EasyToPrint is an all-in-one print shop management and printing automation platform. It bridges QR-based customer self-ordering, online UPI payments, and an automated Windows desktop Print Agent to eliminate counter chaos and automate printing workflows for Xerox shops and cyber centres.'
-  },
-  {
-    question: 'How does EasyToPrint work?',
-    answer:
-      'Customers scan your counter QR code on their smartphone, upload PDF documents, choose print settings (color/B&W, copies, duplex), and complete an instant UPI payment. The EasyToPrint Windows Agent immediately receives the paid order and automatically streams it to your connected printer without USB drives or manual intervention.'
-  },
-  {
-    question: 'What is the EasyToPrint Windows Agent?',
-    answer:
-      'The Windows Agent is a lightweight, secure desktop software running on your shop PC. It monitors your physical printers, connects via TLS 1.3 to your cloud queue, and silently dispatches print jobs through the native Win32 Print Spooler with DPAPI vault protection.'
-  },
-  {
-    question: 'Which printers are supported?',
-    answer:
-      'EasyToPrint supports all major desktop and commercial printers with Windows drivers—including HP, Canon, Epson, Brother, Ricoh, Konica Minolta, Kyocera, and Xerox. Both USB and local network printers are supported without requiring special hardware.'
-  },
-  {
-    question: 'Can I connect multiple printers?',
-    answer:
-      'Yes. You can connect and manage multiple physical printers simultaneously (such as a dedicated black-and-white high-speed laser printer and a high-resolution color photo inkjet). The platform automatically detects capabilities and routes customer orders to the correct device.'
-  },
-  {
-    question: 'Do customers need to install an application?',
-    answer:
-      'No. Customers do not need to download or install any app. The entire upload, customization, and payment process runs seamlessly in their mobile browser (Chrome, Safari, Firefox) within seconds of scanning your counter QR code.'
-  },
-  {
-    question: 'How do customer payments work?',
-    answer:
-      'Customers pay directly online using instant UPI (Google Pay, PhonePe, Paytm, BHIM) or cards powered by secure payment gateways like Razorpay. Print jobs are only dispatched to the printer queue after successful payment confirmation, eliminating unpaid prints and change calculation.'
-  }
-];
 
 export function buildJsonLdGraph(seo: RouteSeoMetadata): Record<string, unknown> {
   const graph: Array<Record<string, unknown>> = [
@@ -466,7 +547,7 @@ export function buildJsonLdGraph(seo: RouteSeoMetadata): Record<string, unknown>
         }
       ],
       description:
-        'Print Shop Automation SaaS for Xerox and Printing Businesses in India. Manage QR-based print ordering, customer file uploads, UPI payments, and automated Windows printing.'
+        'Digital printing and print shop management platform for local printing shops, Xerox shops, and photocopy businesses in India.'
     },
     {
       '@type': 'WebSite',
@@ -487,16 +568,15 @@ export function buildJsonLdGraph(seo: RouteSeoMetadata): Record<string, unknown>
       name: 'EasyToPrint',
       applicationCategory: 'BusinessApplication',
       operatingSystem: 'Web Browser, Windows 10, Windows 11',
-      description:
-        'Print shop management and automation software for Xerox businesses, printing shops, and reprography centres in India.',
+      description: 'Print shop management and print order automation software.',
       url: `${CANONICAL_DOMAIN}/`,
       publisher: {
         '@id': `${CANONICAL_DOMAIN}/#organization`
       },
       featureList: [
         'QR-Based Online Print Ordering',
-        'Customer PDF Upload & Automatic Page Counting',
-        'Instant UPI Payment Integration',
+        'Customer PDF Upload, Live Preview & Automatic Page Counting',
+        'Instant UPI Payment Integration via Razorpay',
         'Centralized Print Shop Management Dashboard',
         'Automated Windows Desktop Print Agent (Win32 Spooler)',
         'Multi-Printer Capability Detection & Smart Queue Routing'
@@ -551,9 +631,10 @@ export function buildJsonLdGraph(seo: RouteSeoMetadata): Record<string, unknown>
   }
 
   if (seo.includeFaqSchema) {
+    const faqList = seo.faqItems && seo.faqItems.length > 0 ? seo.faqItems : STRUCTURED_DATA_FAQ_ITEMS;
     graph.push({
       '@type': 'FAQPage',
-      mainEntity: STRUCTURED_DATA_FAQ_ITEMS.map((item) => ({
+      mainEntity: faqList.map((item) => ({
         '@type': 'Question',
         name: item.question,
         acceptedAnswer: {
@@ -569,7 +650,7 @@ export function buildJsonLdGraph(seo: RouteSeoMetadata): Record<string, unknown>
       '@type': 'Article',
       headline: seo.articleMeta.headline,
       description: seo.description,
-      image: [OG_IMAGE_URL],
+      image: [seo.ogImage || OG_IMAGE_URL],
       datePublished: seo.articleMeta.datePublished,
       dateModified: seo.articleMeta.dateModified,
       articleSection: seo.articleMeta.section,
@@ -609,20 +690,22 @@ export function buildSitemapXml(todayDate?: string): string {
 }
 
 export function buildRobotsTxt(): string {
+  const featureAllows = FEATURE_LANDING_PAGES.map((p) => `Allow: ${p.path}`);
   return [
     'User-agent: *',
     'Allow: /',
     'Allow: /features',
     'Allow: /how-it-works',
-    'Allow: /qr-print-ordering',
-    'Allow: /print-shop-management',
-    'Allow: /print-agent',
+    ...featureAllows,
     'Allow: /pricing',
     'Allow: /about',
     'Allow: /contact',
     'Allow: /faq',
     'Allow: /blog',
     'Allow: /blog/',
+    'Allow: /privacy',
+    'Allow: /terms',
+    'Allow: /refund-policy',
     'Allow: /assets/',
     '',
     'Disallow: /admin',
